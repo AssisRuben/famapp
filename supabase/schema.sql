@@ -108,6 +108,72 @@ create index idx_itens_vendedor on venda_itens (codigo_vendedor);
 create index idx_itens_produto on venda_itens (codigo_produto);
 
 -- ============================================================
+-- PRODUTOS — NÃO vem da API SGF (a Trier não expõe catálogo de
+-- produtos no escopo integrado). Curadoria manual da farmácia:
+-- só entram aqui os produtos que a farmácia quer rastrear pra
+-- promoção e/ou controle de receita — não é o catálogo inteiro.
+-- `codigo` é o mesmo codigoProduto que aparece em venda_itens,
+-- mas SEM foreign key formal: a imensa maioria dos produtos
+-- vendidos nunca vai ter linha aqui, e venda_itens é alimentada
+-- pelo coletor (API), que não sabe nada sobre essa curadoria.
+-- ============================================================
+create table produtos (
+  codigo integer primary key,
+  nome text not null,
+  preco_atual numeric(12,2) not null,
+  preco_anterior numeric(12,2),
+  em_promocao boolean not null default false,
+  percentual_desconto numeric(5,2),
+  exige_receita boolean not null default false,
+  tipo_receita text check (tipo_receita in ('comum', 'controle_especial', 'antimicrobiano')),
+  updated_at timestamptz default now(),
+  constraint produtos_tipo_receita_coerente check (
+    (exige_receita = false and tipo_receita is null) or
+    (exige_receita = true and tipo_receita is not null)
+  )
+);
+
+create index idx_produtos_em_promocao on produtos (em_promocao) where em_promocao = true;
+create index idx_produtos_exige_receita on produtos (exige_receita) where exige_receita = true;
+
+-- ============================================================
+-- RECEITAS DE PRODUTOS CONTROLADOS — registro de que o
+-- vendedor fotografou/anexou a receita de um item vendido que
+-- exige. Preenchida pelo próprio app (não pelo coletor). A foto
+-- em si fica num bucket do Supabase Storage (ex.: "receitas");
+-- aqui guardamos só a referência (path/URL).
+-- ============================================================
+create table venda_item_receitas (
+  id bigserial primary key,
+  venda_item_id bigint not null unique references venda_itens(id) on delete cascade,
+  tipo_receita text not null check (tipo_receita in ('comum', 'controle_especial', 'antimicrobiano')),
+  foto_url text,
+  anexado_por uuid references auth.users(id),
+  data_anexo timestamptz not null default now()
+);
+
+-- ============================================================
+-- METAS — mensal + 4 buckets semanais fixos (1–7, 8–14, 15–21,
+-- 22–fim do mês), por vendedor. Cadastrada manualmente pelo
+-- gestor (aba "Metas" do app) — não vem da API SGF.
+-- `semana` null representa a meta do mês inteiro; 1–4 são os
+-- buckets semanais. Dois índices únicos parciais porque NULL não
+-- é bloqueado por unique constraint comum (cada NULL é distinto).
+-- ============================================================
+create table metas (
+  id bigserial primary key,
+  codigo_vendedor integer not null references vendedores(codigo),
+  ano integer not null,
+  mes integer not null check (mes between 1 and 12),
+  semana integer check (semana between 1 and 4),
+  valor_meta numeric(12,2) not null check (valor_meta >= 0),
+  updated_at timestamptz default now()
+);
+
+create unique index metas_mensal_unique on metas (codigo_vendedor, ano, mes) where semana is null;
+create unique index metas_semanal_unique on metas (codigo_vendedor, ano, mes, semana) where semana is not null;
+
+-- ============================================================
 -- ATENDIMENTOS DIÁRIOS POR VENDEDOR (VendasVendedorIntegracaoDto)
 -- ============================================================
 create table vendas_vendedor_diario (
@@ -178,9 +244,94 @@ create view vw_clientes_inatividade as
 select
   c.codigo,
   c.nome,
+  c.fone as telefone,
   max(v.data_emissao) as ultima_compra,
   (current_date - max(v.data_emissao)) as dias_sem_comprar,
   case when max(v.data_emissao) < current_date - interval '60 days' then true else false end as inativo
 from clientes c
 left join vendas v on v.codigo_cliente = c.codigo
-group by c.codigo, c.nome;
+group by c.codigo, c.nome, c.fone;
+
+-- Status de receita dos produtos controlados vendidos (tela "Receitas"
+-- do app). security_invoker=true (ver rls_policies.sql): respeita a
+-- RLS de vendas/venda_itens, então vendedor só vê os próprios itens.
+create view vw_vendas_receita_status as
+select
+  vi.id as venda_item_id,
+  v.data_emissao as data_venda,
+  p.codigo as codigo_produto,
+  p.nome as nome_produto,
+  p.tipo_receita,
+  v.codigo_cliente,
+  c.nome as nome_cliente,
+  v.codigo_vendedor,
+  vd.nome as nome_vendedor,
+  (r.id is not null) as receita_anexada,
+  r.data_anexo,
+  r.foto_url
+from venda_itens vi
+join vendas v on v.id = vi.venda_id
+join produtos p on p.codigo = vi.codigo_produto and p.exige_receita = true
+left join clientes c on c.codigo = v.codigo_cliente
+left join vendedores vd on vd.codigo = v.codigo_vendedor
+left join venda_item_receitas r on r.venda_item_id = vi.id;
+
+-- Alertas de promoção (tela "Alertas" do app): produtos em promoção e,
+-- pra cada um, os clientes que já compraram antes. Propositalmente SEM
+-- security_invoker — roda com o privilégio do dono (bypassa a RLS de
+-- vendas/venda_itens/clientes), porque aqui a regra de negócio é "todo
+-- vendedor pode ver oportunidades de contato de qualquer cliente", ao
+-- contrário das outras views que restringem vendedor aos próprios dados.
+create view vw_produtos_promocao_clientes as
+select
+  p.codigo as codigo_produto,
+  p.nome as nome_produto,
+  p.preco_atual,
+  p.preco_anterior,
+  p.percentual_desconto,
+  c.codigo as codigo_cliente,
+  c.nome as nome_cliente,
+  c.fone as telefone_cliente,
+  max(v.data_emissao) as ultima_compra_produto,
+  sum(vi.quantidade_produtos) as quantidade_total
+from produtos p
+join venda_itens vi on vi.codigo_produto = p.codigo
+join vendas v on v.id = vi.venda_id
+join clientes c on c.codigo = v.codigo_cliente
+where p.em_promocao = true
+group by p.codigo, p.nome, p.preco_atual, p.preco_anterior, p.percentual_desconto, c.codigo, c.nome, c.fone;
+
+-- Progresso de metas (mensal e semanal) — tela "Metas" (gestor) e o
+-- bloco de metas no Dashboard (todos). O "realizado" é calculado na
+-- hora, a partir de vendas/venda_itens reais — diferente do mock do
+-- app, aqui não precisa de dado ilustrativo. security_invoker=true:
+-- respeita a RLS de `metas` (vendedor só as próprias) e, por tabela,
+-- de vendas/venda_itens também.
+create view vw_metas_progresso as
+select
+  m.id as meta_id,
+  m.codigo_vendedor,
+  vd.nome as nome_vendedor,
+  m.ano,
+  m.mes,
+  m.semana,
+  m.valor_meta,
+  coalesce(realizado.valor, 0) as valor_realizado
+from metas m
+join vendedores vd on vd.codigo = m.codigo_vendedor
+left join lateral (
+  select sum(vi.valor_total_liquido) as valor
+  from vendas v
+  join venda_itens vi on vi.venda_id = v.id
+  where v.codigo_vendedor = m.codigo_vendedor
+    and v.tipo_cancelamento is null
+    and extract(year from v.data_emissao) = m.ano
+    and extract(month from v.data_emissao) = m.mes
+    and (
+      m.semana is null
+      or (m.semana = 1 and extract(day from v.data_emissao) between 1 and 7)
+      or (m.semana = 2 and extract(day from v.data_emissao) between 8 and 14)
+      or (m.semana = 3 and extract(day from v.data_emissao) between 15 and 21)
+      or (m.semana = 4 and extract(day from v.data_emissao) >= 22)
+    )
+) realizado on true;

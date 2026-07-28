@@ -98,10 +98,130 @@ using (exists (
   where p.id = auth.uid() and p.role = 'vendedor' and p.codigo_vendedor = vendas_vendedor_diario.codigo_vendedor
 ));
 
--- sync_control: uso interno do coletor. RLS habilitado sem
--- nenhuma policy = bloqueado por padrão para anon/authenticated;
--- só o service_role (que ignora RLS) acessa.
+-- produtos: curadoria manual (promoção / exige receita). Qualquer
+-- autenticado lê; só gestor escreve (curadoria é responsabilidade
+-- da farmácia, não do vendedor nem do coletor).
+alter table produtos enable row level security;
+
+create policy "produtos: usuarios autenticados leem"
+on produtos for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "produtos: gestor insere"
+on produtos for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "produtos: gestor atualiza"
+on produtos for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "produtos: gestor deleta"
+on produtos for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+-- venda_item_receitas: escrita pelo próprio app (diferente das outras
+-- tabelas de negócio, que só o coletor/service_role escreve). Vendedor
+-- só mexe nas receitas dos itens que ele mesmo vendeu; gestor, tudo.
+alter table venda_item_receitas enable row level security;
+
+create policy "receitas: select proprio ou gestor"
+on venda_item_receitas for select
+using (exists (
+  select 1
+  from profiles pr
+  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
+  join vendas v on v.id = vi.venda_id
+  where pr.id = auth.uid()
+    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+));
+
+create policy "receitas: insert proprio ou gestor"
+on venda_item_receitas for insert
+with check (exists (
+  select 1
+  from profiles pr
+  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
+  join vendas v on v.id = vi.venda_id
+  where pr.id = auth.uid()
+    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+));
+
+create policy "receitas: update proprio ou gestor"
+on venda_item_receitas for update
+using (exists (
+  select 1
+  from profiles pr
+  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
+  join vendas v on v.id = vi.venda_id
+  where pr.id = auth.uid()
+    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+))
+with check (exists (
+  select 1
+  from profiles pr
+  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
+  join vendas v on v.id = vi.venda_id
+  where pr.id = auth.uid()
+    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+));
+
+-- metas: cadastrada pelo gestor na tela "Metas". Vendedor só lê as
+-- próprias (pra ver o progresso no Dashboard); só gestor escreve.
+alter table metas enable row level security;
+
+create policy "metas: select proprio ou gestor"
+on metas for select
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = metas.codigo_vendedor)
+));
+
+create policy "metas: gestor insere"
+on metas for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "metas: gestor atualiza"
+on metas for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "metas: gestor deleta"
+on metas for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+-- sync_control: escrita continua exclusiva do coletor via service_role
+-- (nenhuma policy de insert/update/delete para authenticated). Leitura
+-- liberada pra qualquer autenticado — usada pelo app pra mostrar "dados
+-- sincronizados pela última vez em..." no Dashboard. Não é dado sensível
+-- (só nome da entidade + timestamp), então não precisa de filtro por
+-- vendedor/gestor.
 alter table sync_control enable row level security;
+
+create policy "sync_control: usuarios autenticados leem"
+on sync_control for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
 
 -- ============================================================
 -- VIEWS: por padrão, views no Postgres rodam com o privilégio do
@@ -114,3 +234,7 @@ alter view vw_metricas_vendedor_diario set (security_invoker = true);
 alter view vw_ranking_vendedores_dia set (security_invoker = true);
 alter view vw_vendas_por_canal set (security_invoker = true);
 alter view vw_clientes_inatividade set (security_invoker = true);
+alter view vw_vendas_receita_status set (security_invoker = true);
+alter view vw_metas_progresso set (security_invoker = true);
+-- vw_produtos_promocao_clientes fica de propósito SEM security_invoker
+-- (ver comentário dela em schema.sql) — não é esquecimento.

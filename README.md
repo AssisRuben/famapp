@@ -74,7 +74,15 @@ Componentes:
       [`supabase/rls_policies.sql`](supabase/rls_policies.sql).
 - [ ] Criar os usuários reais no Supabase Auth e preencher a tabela
       `profiles` (vínculo `auth.users` ↔ `codigo_vendedor` ↔ `role`) para
-      cada vendedor/gestor da farmácia.
+      cada vendedor/gestor da farmácia — ver
+      [`supabase/seed_profiles.sql`](supabase/seed_profiles.sql).
+- [x] Popular dados de teste (2 vendedores, ~150 clientes, ~350 vendas,
+      produtos com promoção/receita, metas do mês) — ver
+      [`supabase/seed_data.sql`](supabase/seed_data.sql).
+- [ ] Configurar bucket do Supabase Storage para as fotos de receita
+      (`venda_item_receitas.foto_url` só guarda a referência).
+- [ ] Criar tabela real pro checklist diário de atividades (hoje só existe
+      como mock local no app — ver seção "Schema do Supabase" acima).
 
 O desenvolvimento do app PODE COMEÇAR JÁ, em paralelo à liberação da API,
 usando mocks no formato exato dos DTOs reais abaixo.
@@ -115,20 +123,51 @@ detalhado em profundidade nesta primeira rodada de análise).
 
 Definido em [`supabase/schema.sql`](supabase/schema.sql). Estrutura:
 
-- **Tabelas cruas** (espelham os DTOs da API SGF): `vendedores`, `clientes`,
-  `vendas`, `venda_itens`, `vendas_vendedor_diario`.
+- **Tabelas cruas** (espelham os DTOs da API SGF, escritas só pelo coletor):
+  `vendedores`, `clientes`, `vendas`, `venda_itens`, `vendas_vendedor_diario`.
+- **`produtos`**: curadoria MANUAL da farmácia (promoção / exige receita) —
+  a API SGF não expõe catálogo de produtos no escopo integrado, então isso
+  não vem do coletor. `codigo` é o mesmo `codigoProduto` de `venda_itens`,
+  mas sem foreign key formal (só uma fração pequena e curada dos produtos
+  vendidos entra aqui).
+- **`venda_item_receitas`**: única tabela de negócio escrita pelo próprio
+  app (não pelo coletor) — registra que o vendedor fotografou/anexou a
+  receita de um item vendido que exige. A foto em si vai para um bucket do
+  Supabase Storage (ainda não configurado); aqui só fica a referência.
+- **`metas`**: cadastrada pelo gestor na aba "Metas" do app (não vem da
+  API). Mensal + 4 buckets semanais fixos (1–7, 8–14, 15–21, 22–fim do
+  mês) por vendedor — `semana` null é a meta do mês inteiro, 1–4 são os
+  buckets. Dois índices únicos parciais (um só pra `semana is null`, outro
+  só pra `semana is not null`) porque unique constraint comum não bloqueia
+  NULLs duplicados.
 - **`sync_control`**: controle de última sincronização por entidade, usado
   pelo coletor para saber o `dataInicial` da próxima chamada
   `obter-alterados`.
 - **Views analíticas** (o app consome estas, nunca as tabelas cruas):
   `vw_desempenho_vendedor_diario`, `vw_metricas_vendedor_diario` (ticket
   médio, desconto, comissão), `vw_ranking_vendedores_dia`,
-  `vw_vendas_por_canal`, `vw_clientes_inatividade`.
+  `vw_vendas_por_canal`, `vw_clientes_inatividade` (agora com `telefone`,
+  usado pelo botão de WhatsApp no app), `vw_vendas_receita_status` (fila de
+  receita pendente/anexada), `vw_produtos_promocao_clientes` (produtos em
+  promoção + clientes que já compraram, para a tela de Alertas) e
+  `vw_metas_progresso` (meta x realizado, com o realizado calculado na
+  hora a partir de `vendas`/`venda_itens` reais — testado e confere:
+  soma dos 4 buckets semanais bate exatamente com o total mensal).
+
+Nota sobre o checklist diário de atividades (aba "Checklist" do vendedor,
+configurada pelo gestor dentro da própria aba "Metas"): por enquanto só
+existe no app (mock local via AsyncStorage), sem tabela real no Supabase
+ainda — é o próximo passo natural se quiser o histórico de conclusão
+disponível no backend.
 
 Schema aplicado no projeto Supabase em uso (`ggzuchqfepjbsyadfcnk`). Esse
 projeto já hospedava outra aplicação (CRM/mensageria WhatsApp); as tabelas
 antigas foram removidas pelo usuário, preservando apenas `conteúdo`
 (sem relação com o farmapp, não mexer).
+
+Testado de ponta a ponta (schema + RLS + seed, incluindo enforcement de RLS
+simulando sessões `vendedor`/`gestor`) num Postgres 16 descartável antes de
+aplicar no projeto real.
 
 Políticas de RLS aplicadas — ver [`supabase/rls_policies.sql`](supabase/rls_policies.sql):
 
@@ -139,11 +178,33 @@ Políticas de RLS aplicadas — ver [`supabase/rls_policies.sql`](supabase/rls_p
 - Gestor lê tudo; vendedor só lê os próprios dados (`vendedores`, `vendas`,
   `venda_itens`, `vendas_vendedor_diario`); `clientes` é lida por qualquer
   usuário autenticado.
-- Só policies de `select` — escrita nas tabelas de negócio continua restrita
-  ao coletor via `service_role`.
-- `sync_control` fica sem nenhuma policy (bloqueado para anon/authenticated).
+- Nas tabelas de negócio vindas da API, só policies de `select` — escrita
+  continua restrita ao coletor via `service_role`.
+- `produtos`: leitura por qualquer autenticado; escrita (insert/update/
+  delete) só por `gestor` (curadoria).
+- `venda_item_receitas`: única tabela com policies de `insert`/`update` para
+  `authenticated` — vendedor só mexe nos itens que ele mesmo vendeu, gestor
+  em tudo (testado explicitamente: insert em item de outro vendedor é
+  bloqueado pela RLS).
+- `metas`: vendedor só lê as próprias; só `gestor` insere/atualiza/deleta
+  (testado explicitamente: insert de meta pra outro vendedor é bloqueado).
+- `sync_control`: leitura liberada pra qualquer autenticado (usada pelo
+  Dashboard pra mostrar "dados sincronizados em..."); escrita continua
+  exclusiva do coletor via `service_role` — nenhuma policy de insert/
+  update/delete para `authenticated` (testado: insert é bloqueado).
 - Views recriadas com `security_invoker = true`, senão rodariam com o
-  privilégio do dono e ignorariam a RLS das tabelas base.
+  privilégio do dono e ignorariam a RLS das tabelas base — **exceto**
+  `vw_produtos_promocao_clientes`, que fica de propósito SEM
+  `security_invoker`: a tela de Alertas precisa que qualquer vendedor veja
+  oportunidades de contato de qualquer cliente, não só as próprias vendas.
+
+Gap conhecido (não mexido nesta rodada): `vw_ranking_vendedores_dia` é
+`security_invoker = true`, então no backend real um vendedor só veria a
+própria linha do ranking (sempre em 1º, sozinho) — diferente da tela
+"Ranking" do app, que mostra todo mundo de propósito (gamificação). Pra
+bater com o app de verdade, essa view vai precisar do mesmo tratamento
+dado a `vw_produtos_promocao_clientes` (rodar sem RLS) quando a Frente 2
+for implementada.
 
 ## Métricas/insights já definidos como prioridade (para as telas do app)
 
