@@ -174,6 +174,58 @@ create unique index metas_mensal_unique on metas (codigo_vendedor, ano, mes) whe
 create unique index metas_semanal_unique on metas (codigo_vendedor, ano, mes, semana) where semana is not null;
 
 -- ============================================================
+-- PRODUTO_CATALOGO — futuramente sincronizado do ProdutoIntegracaoDto
+-- real (Trier: /integracao/produto/obter-*), quando o token for
+-- liberado. Diferente de `produtos` (curadoria manual pequena, só
+-- promoção/receita): este é o catálogo cheio (nome, custo, estoque,
+-- categoria, marca), usado pelo módulo de Campanhas/Cartazetes pra
+-- calcular margem e decidir o que promover.
+-- ============================================================
+create table produto_catalogo (
+  codigo integer primary key,
+  codigo_barras text,
+  nome text not null,
+  categoria text,
+  marca text,
+  preco_venda numeric(12,2) not null,
+  custo_medio numeric(12,2) not null,
+  estoque_atual integer not null default 0,
+  updated_at timestamptz default now()
+);
+
+create index idx_produto_catalogo_categoria on produto_catalogo (categoria);
+
+-- ============================================================
+-- CAMPANHAS — promoção avulsa decidida pela farmácia (margem +
+-- estoque + venda recente), FORA do encarte oficial. O Trier NÃO tem
+-- endpoint de escrita pra desconto/campanha (só leitura, igual
+-- venda/cliente) — por isso "campanha" é uma entidade NOSSA, sem
+-- espelho no sistema deles. O preço só vale no caixa depois que o
+-- .txt gerado pela tela de Cartazetes é importado manualmente no
+-- Trier (ver docs/txt.txt — layout inferido, não documentado
+-- oficialmente pela Trier).
+-- ============================================================
+create table campanhas (
+  id bigserial primary key,
+  nome text not null,
+  data_inicio date not null,
+  data_fim date not null,
+  criado_por uuid references auth.users(id),
+  created_at timestamptz default now(),
+  constraint campanhas_datas_coerentes check (data_fim >= data_inicio)
+);
+
+create table campanha_produtos (
+  id bigserial primary key,
+  campanha_id bigint not null references campanhas(id) on delete cascade,
+  codigo_produto integer not null references produto_catalogo(codigo),
+  preco_promocional numeric(12,2) not null check (preco_promocional > 0),
+  percentual_desconto numeric(5,2) not null default 0,
+  quantidade_cartazes integer not null default 1 check (quantidade_cartazes > 0),
+  unique (campanha_id, codigo_produto)
+);
+
+-- ============================================================
 -- ATENDIMENTOS DIÁRIOS POR VENDEDOR (VendasVendedorIntegracaoDto)
 -- ============================================================
 create table vendas_vendedor_diario (
@@ -239,18 +291,11 @@ select
 from vendas
 group by data_emissao, canal;
 
--- Clientes ativos vs inativos (sem compra nos últimos 60 dias)
-create view vw_clientes_inatividade as
-select
-  c.codigo,
-  c.nome,
-  c.fone as telefone,
-  max(v.data_emissao) as ultima_compra,
-  (current_date - max(v.data_emissao)) as dias_sem_comprar,
-  case when max(v.data_emissao) < current_date - interval '60 days' then true else false end as inativo
-from clientes c
-left join vendas v on v.codigo_cliente = c.codigo
-group by c.codigo, c.nome, c.fone;
+-- vw_clientes_inatividade fica definida em rls_policies.sql, não aqui
+-- — ela depende da tabela `profiles` (criada lá) pro próprio controle
+-- de acesso embutido (vendedor só vê os clientes dele, gestor vê
+-- todos). Rodar esse script sozinho, sem o rls_policies.sql em
+-- seguida, deixa essa view faltando.
 
 -- Status de receita dos produtos controlados vendidos (tela "Receitas"
 -- do app). security_invoker=true (ver rls_policies.sql): respeita a

@@ -6,6 +6,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatDateBR, todayISO } from '../lib/format';
+import { sincronizarNotificacoesChecklist } from '../lib/notifications';
 import { ChecklistItemStatus } from '../types/domain';
 
 export function ChecklistScreen() {
@@ -16,7 +17,11 @@ export function ChecklistScreen() {
 
   const load = useCallback(async () => {
     if (!profile) return;
-    setItens(await repository.getChecklistHoje(profile));
+    const dados = await repository.getChecklistHoje(profile);
+    setItens(dados);
+    // agenda (ou reagenda) os lembretes push de seg a sáb com base nas
+    // atividades ativas de hoje — não bloqueia a tela se demorar/falhar.
+    sincronizarNotificacoesChecklist(dados.map((d) => d.atividade));
   }, [profile]);
 
   useEffect(() => {
@@ -55,7 +60,7 @@ export function ChecklistScreen() {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <Text style={styles.title}>✅ Checklist do dia</Text>
+      <Text style={styles.title}>✅ Tarefas do dia</Text>
       <Text style={styles.subtitle}>{formatDateBR(todayISO())}</Text>
 
       <Card>
@@ -84,6 +89,12 @@ export function ChecklistScreen() {
               <Text style={[styles.itemTexto, item.concluida && styles.itemTextoConcluido]}>
                 {item.atividade.titulo}
               </Text>
+              {item.atividade.horario && (
+                <View style={styles.horarioBadge}>
+                  <Ionicons name="notifications-outline" size={12} color={colors.navy} />
+                  <Text style={styles.horarioBadgeTexto}>{item.atividade.horario}</Text>
+                </View>
+              )}
             </Card>
           </Pressable>
         ))
@@ -116,4 +127,14 @@ const styles = StyleSheet.create({
   checkboxMarcado: { backgroundColor: colors.success, borderColor: colors.success },
   itemTexto: { flex: 1, fontSize: 14, color: colors.textPrimary },
   itemTextoConcluido: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  horarioBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.background,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  horarioBadgeTexto: { fontSize: 12, fontWeight: '700', color: colors.navy },
 });

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DataRepository } from '../repository';
 import {
   AtividadeChecklist,
+  Campanha,
   ChecklistItemStatus,
   ClienteCompradorPromocao,
   ClienteInatividade,
@@ -10,10 +11,14 @@ import {
   MetaVendedor,
   MetricasVendedorDiario,
   Profile,
+  ProdutoCatalogo,
+  ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
   RankingVendedorDia,
+  SalvarCampanhaInput,
   SalvarMetaInput,
   StatusSincronizacao,
+  SugestaoCampanhaParams,
   TipoReceita,
   VendaReceitaPendente,
 } from '../../types/domain';
@@ -21,6 +26,7 @@ import {
   GESTOR_EMAIL,
   MOCK_PASSWORD,
   atividadesChecklistSeed,
+  catalogoProdutosSeed,
   clientesSeed,
   desempenhoSeedHoje,
   metasSeedPadrao,
@@ -29,15 +35,18 @@ import {
   realizadoSeedPadrao,
   syncControlSeed,
   vendaItensDetalheSeed,
+  vendaRecenteSeed,
   vendedoresSeed,
 } from './seed';
 import { rotuloSemana, semanaDoDia } from '../../lib/metas';
+import { sugerirCandidatos } from '../../lib/campanhas';
 
 const SESSION_KEY = '@farmapp/session';
 const RECEITAS_OVERRIDES_KEY = '@farmapp/receitas_overrides';
 const METAS_OVERRIDES_KEY = '@farmapp/metas_overrides';
 const CHECKLIST_ATIVIDADES_KEY = '@farmapp/checklist_atividades';
 const CHECKLIST_RESPOSTAS_KEY = '@farmapp/checklist_respostas';
+const CAMPANHAS_KEY = '@farmapp/campanhas';
 const SIMULATED_LATENCY_MS = 350;
 
 interface ReceitaOverride {
@@ -91,7 +100,22 @@ async function getMetasOverrides(): Promise<Record<string, MetaOverride>> {
 
 async function getAtividadesStore(): Promise<AtividadeChecklist[]> {
   const raw = await AsyncStorage.getItem(CHECKLIST_ATIVIDADES_KEY);
-  if (raw) return JSON.parse(raw) as AtividadeChecklist[];
+  if (raw) {
+    const armazenadas = JSON.parse(raw) as AtividadeChecklist[];
+    // migra registros salvos numa versão anterior a existir o campo
+    // horario (senão fica "preso" sem horário até apagar o app).
+    let precisaMigrar = false;
+    const migradas = armazenadas.map((a) => {
+      if (a.horario !== undefined) return a;
+      precisaMigrar = true;
+      const doSeed = atividadesChecklistSeed.find((s) => s.id === a.id);
+      return { ...a, horario: doSeed?.horario ?? null };
+    });
+    if (precisaMigrar) {
+      await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(migradas));
+    }
+    return migradas;
+  }
   const inicial = atividadesChecklistSeed.map((a) => ({ ...a }));
   await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(inicial));
   return inicial;
@@ -100,6 +124,15 @@ async function getAtividadesStore(): Promise<AtividadeChecklist[]> {
 async function getRespostasStore(): Promise<Record<string, boolean>> {
   const raw = await AsyncStorage.getItem(CHECKLIST_RESPOSTAS_KEY);
   return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+}
+
+async function getCampanhasStore(): Promise<Campanha[]> {
+  const raw = await AsyncStorage.getItem(CAMPANHAS_KEY);
+  return raw ? (JSON.parse(raw) as Campanha[]) : [];
+}
+
+async function salvarCampanhasStore(campanhas: Campanha[]): Promise<void> {
+  await AsyncStorage.setItem(CAMPANHAS_KEY, JSON.stringify(campanhas));
 }
 
 class MockRepository implements DataRepository {
@@ -176,7 +209,7 @@ class MockRepository implements DataRepository {
     return delay(ranking);
   }
 
-  async getClientesInatividade(_profile: Profile): Promise<ClienteInatividade[]> {
+  async getClientesInatividade(profile: Profile): Promise<ClienteInatividade[]> {
     const hoje = new Date();
     const linhas = clientesSeed.map((c) => {
       const ultimaCompra =
@@ -190,9 +223,17 @@ class MockRepository implements DataRepository {
         ultimaCompra,
         diasSemComprar: c.diasSemComprar,
         inativo: c.diasSemComprar != null && c.diasSemComprar > 60,
+        codigoVendedor: c.codigoVendedor,
+        nomeVendedor: c.codigoVendedor != null ? nomeVendedor(c.codigoVendedor) : null,
       };
     });
-    return delay(linhas);
+
+    // gestor vê todos; vendedor só os clientes cuja última compra foi
+    // com ele mesmo (cliente sem histórico nenhum não aparece pra
+    // nenhum vendedor específico, só pro gestor).
+    const visivel = profile.role === 'gestor' ? linhas : linhas.filter((l) => l.codigoVendedor === profile.codigoVendedor);
+
+    return delay(visivel);
   }
 
   async getProdutosEmPromocao(_profile: Profile): Promise<ProdutoPromocaoAlerta[]> {
@@ -334,13 +375,16 @@ class MockRepository implements DataRepository {
     return delay(atividades.filter((a) => a.ativo));
   }
 
-  async salvarAtividadeChecklist(input: { id?: string; titulo: string }): Promise<void> {
+  async salvarAtividadeChecklist(input: { id?: string; titulo: string; horario: string | null }): Promise<void> {
     const atividades = await getAtividadesStore();
     if (input.id) {
       const existente = atividades.find((a) => a.id === input.id);
-      if (existente) existente.titulo = input.titulo;
+      if (existente) {
+        existente.titulo = input.titulo;
+        existente.horario = input.horario;
+      }
     } else {
-      atividades.push({ id: `chk-${Date.now()}`, titulo: input.titulo, ativo: true });
+      atividades.push({ id: `chk-${Date.now()}`, titulo: input.titulo, horario: input.horario, ativo: true });
     }
     await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(atividades));
   }
@@ -379,6 +423,65 @@ class MockRepository implements DataRepository {
       ultimaSincronizacao: new Date(agora - s.minutosAtras * 60_000).toISOString(),
     }));
     return delay(linhas);
+  }
+
+  async getCatalogoProdutos(_profile: Profile): Promise<ProdutoCatalogo[]> {
+    return delay(catalogoProdutosSeed);
+  }
+
+  async sugerirProdutosCampanha(_profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]> {
+    const vendaRecentePorProduto = new Map(
+      vendaRecenteSeed.map((v) => [v.codigoProduto, { quantidadeVendida30d: v.quantidadeVendida30d, diasSemVenda: v.diasSemVenda }])
+    );
+
+    // evita sugerir de novo produto que já está em campanha nossa
+    // ativa/futura — não faz sentido empilhar desconto no mesmo item.
+    const campanhas = await getCampanhasStore();
+    const hojeIso = new Date().toISOString().slice(0, 10);
+    const codigosEmCampanhaAtiva = new Set(
+      campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
+    );
+
+    const sugestoes = sugerirCandidatos(catalogoProdutosSeed, vendaRecentePorProduto, params, codigosEmCampanhaAtiva);
+    return delay(sugestoes);
+  }
+
+  async getCampanhas(_profile: Profile): Promise<Campanha[]> {
+    const campanhas = await getCampanhasStore();
+    return delay([...campanhas].sort((a, b) => b.criadaEm.localeCompare(a.criadaEm)));
+  }
+
+  async salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha> {
+    const campanhas = await getCampanhasStore();
+    let salva: Campanha;
+
+    if (input.id) {
+      const existente = campanhas.find((c) => c.id === input.id);
+      if (!existente) throw new Error('Campanha não encontrada.');
+      existente.nome = input.nome;
+      existente.dataInicio = input.dataInicio;
+      existente.dataFim = input.dataFim;
+      existente.produtos = input.produtos;
+      salva = existente;
+    } else {
+      salva = {
+        id: `camp-${Date.now()}`,
+        nome: input.nome,
+        dataInicio: input.dataInicio,
+        dataFim: input.dataFim,
+        criadaEm: new Date().toISOString(),
+        produtos: input.produtos,
+      };
+      campanhas.push(salva);
+    }
+
+    await salvarCampanhasStore(campanhas);
+    return delay(salva);
+  }
+
+  async excluirCampanha(id: string): Promise<void> {
+    const campanhas = await getCampanhasStore();
+    await salvarCampanhasStore(campanhas.filter((c) => c.id !== id));
   }
 }
 

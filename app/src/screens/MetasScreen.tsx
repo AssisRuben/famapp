@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,7 @@ import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { colors } from '../theme/colors';
 import { mesAnoLabel, rotuloSemana } from '../lib/metas';
+import { alertar } from '../lib/alert';
 import { vendedoresSeed } from '../data/mock/seed';
 import { AtividadeChecklist, MetaVendedor } from '../types/domain';
 
@@ -43,6 +43,7 @@ export function MetasScreen() {
   const [atividades, setAtividades] = useState<AtividadeChecklist[]>([]);
   const [loadingAtividades, setLoadingAtividades] = useState(true);
   const [novaAtividade, setNovaAtividade] = useState('');
+  const [novoHorario, setNovoHorario] = useState('');
 
   const carregarMetas = useCallback(async () => {
     if (!profile) return;
@@ -95,7 +96,7 @@ export function MetasScreen() {
     const semanas = valoresSemana.map((v) => Number(v.replace(',', '.'))) as [number, number, number, number];
 
     if (Number.isNaN(mensal) || semanas.some((s) => Number.isNaN(s))) {
-      Alert.alert('Valores inválidos', 'Preencha todos os campos com números válidos.');
+      alertar('Valores inválidos', 'Preencha todos os campos com números válidos.');
       return;
     }
 
@@ -109,7 +110,7 @@ export function MetasScreen() {
         valoresMetaSemanal: semanas,
       });
       await carregarMetas();
-      Alert.alert('Meta salva', 'A meta foi atualizada com sucesso.');
+      alertar('Meta salva', 'A meta foi atualizada com sucesso.');
     } finally {
       setSalvando(false);
     }
@@ -118,8 +119,16 @@ export function MetasScreen() {
   const adicionarAtividade = async () => {
     const titulo = novaAtividade.trim();
     if (!titulo) return;
-    await repository.salvarAtividadeChecklist({ titulo });
+
+    const horario = novoHorario.trim();
+    if (horario && !/^([01]\d|2[0-3]):[0-5]\d$/.test(horario)) {
+      alertar('Horário inválido', 'Use o formato HH:mm, por exemplo 08:30.');
+      return;
+    }
+
+    await repository.salvarAtividadeChecklist({ titulo, horario: horario || null });
     setNovaAtividade('');
+    setNovoHorario('');
     await carregarAtividades();
   };
 
@@ -238,10 +247,21 @@ export function MetasScreen() {
                 onChangeText={setNovaAtividade}
                 placeholder="Ex.: Conferir vitrine da entrada"
               />
+              <TextInput
+                style={[styles.input, styles.inputHorario]}
+                value={novoHorario}
+                onChangeText={setNovoHorario}
+                placeholder="HH:mm"
+                keyboardType="numbers-and-punctuation"
+                maxLength={5}
+              />
               <Pressable style={styles.addButton} onPress={adicionarAtividade}>
                 <Ionicons name="add" size={20} color={colors.white} />
               </Pressable>
             </View>
+            <Text style={styles.hint}>
+              O horário (opcional) dispara um lembrete push de segunda a sábado.
+            </Text>
           </Card>
 
           <Text style={styles.sectionTitulo}>Atividades cadastradas</Text>
@@ -251,12 +271,19 @@ export function MetasScreen() {
             atividades.map((atividade) => (
               <Card key={atividade.id}>
                 <View style={styles.atividadeRow}>
-                  <Text
-                    style={[styles.atividadeTexto, !atividade.ativo && styles.atividadeTextoInativo]}
-                    numberOfLines={2}
-                  >
-                    {atividade.titulo}
-                  </Text>
+                  <View style={styles.atividadeInfo}>
+                    <Text
+                      style={[styles.atividadeTexto, !atividade.ativo && styles.atividadeTextoInativo]}
+                      numberOfLines={2}
+                    >
+                      {atividade.titulo}
+                    </Text>
+                    {atividade.horario && (
+                      <Text style={styles.atividadeHorario}>
+                        🔔 {atividade.horario} · seg a sáb
+                      </Text>
+                    )}
+                  </View>
                   <Switch
                     value={atividade.ativo}
                     onValueChange={() => alternarAtividade(atividade)}
@@ -337,6 +364,7 @@ const styles = StyleSheet.create({
   sectionTitulo: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 4, marginBottom: 8 },
   novaAtividadeRow: { flexDirection: 'row', gap: 8 },
   inputAtividade: { flex: 1 },
+  inputHorario: { width: 72, textAlign: 'center' },
   addButton: {
     backgroundColor: colors.navy,
     borderRadius: 8,
@@ -345,7 +373,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   atividadeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  atividadeTexto: { flex: 1, fontSize: 14, color: colors.textPrimary },
+  atividadeInfo: { flex: 1 },
+  atividadeTexto: { fontSize: 14, color: colors.textPrimary },
   atividadeTextoInativo: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  atividadeHorario: { fontSize: 11, color: colors.textMuted, marginTop: 3 },
   hint: { fontSize: 11, color: colors.textMuted, marginTop: 4, marginBottom: 20, lineHeight: 16 },
 });

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   Pressable,
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
+import { alertar } from '../lib/alert';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
@@ -49,7 +49,7 @@ export function ReceitasScreen() {
   const capturarFoto = async (item: VendaReceitaPendente) => {
     const permissao = await ImagePicker.requestCameraPermissionsAsync();
     if (!permissao.granted) {
-      Alert.alert('Permissão necessária', 'Precisamos de acesso à câmera para fotografar a receita.');
+      alertar('Permissão necessária', 'Precisamos de acesso à câmera para fotografar a receita.');
       return;
     }
 

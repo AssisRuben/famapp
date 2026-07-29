@@ -49,7 +49,10 @@ export interface RankingVendedorDia {
   posicao: number;
 }
 
-// Espelha vw_clientes_inatividade
+// Espelha vw_clientes_inatividade. codigoVendedor/nomeVendedor são do
+// vendedor da ÚLTIMA compra do cliente — é o que define "cliente do
+// vendedor" pra filtro da aba Clientes (vendedor só vê os seus,
+// gestor vê todos).
 export interface ClienteInatividade {
   codigo: number;
   nome: string;
@@ -57,6 +60,8 @@ export interface ClienteInatividade {
   ultimaCompra: string | null;
   diasSemComprar: number | null;
   inativo: boolean;
+  codigoVendedor: number | null;
+  nomeVendedor: string | null;
 }
 
 export type TipoReceita = 'comum' | 'controle_especial' | 'antimicrobiano';
@@ -131,15 +136,108 @@ export interface SalvarMetaInput {
 
 // ============================================================
 // CHECKLIST DIÁRIO — atividades cadastradas pelo gestor, marcadas
-// pelo vendedor todo dia.
+// pelo vendedor todo dia. `horario` (HH:mm) dispara um lembrete
+// push de segunda a sábado nesse horário.
 // ============================================================
 export interface AtividadeChecklist {
   id: string;
   titulo: string;
+  horario: string | null;
   ativo: boolean;
 }
 
 export interface ChecklistItemStatus {
   atividade: AtividadeChecklist;
   concluida: boolean;
+}
+
+// ============================================================
+// CAMPANHAS / CARTAZETES
+//
+// O Trier NÃO tem endpoint de escrita pra desconto/campanha — só
+// leitura (obter-todos/obter-alterados/obter-movimentados, igual
+// venda/cliente). Quem decide preço de encarte é a rede, digitado
+// direto no Trier. O que este módulo resolve é a decisão que a
+// farmácia NÃO faz em lugar nenhum hoje: promoção avulsa baseada em
+// margem/estoque/venda. Por isso "campanha" aqui é uma entidade
+// NOSSA (Supabase), não um espelho de algo do Trier — e o preço só
+// vale de verdade no caixa depois que o .txt gerado é importado
+// manualmente no Trier (não existe API pra isso).
+// ============================================================
+
+// Espelha produto_catalogo — futuramente sincronizado do
+// ProdutoIntegracaoDto real (Trier); por ora, mock.
+export interface ProdutoCatalogo {
+  codigo: number;
+  codigoBarras: string;
+  nome: string;
+  categoria: string;
+  marca: string;
+  precoVenda: number;
+  custoMedio: number;
+  estoqueAtual: number;
+}
+
+export interface ProdutoElegibilidade {
+  produto: ProdutoCatalogo;
+  margemAtualPct: number;
+  quantidadeVendida30d: number;
+  diasSemVenda: number | null;
+  percentualDescontoSugerido: number;
+  precoSugerido: number;
+  margemResultantePct: number;
+}
+
+export interface SugestaoCampanhaParams {
+  margemMinimaPct: number;
+  descontoAlvoPct: number;
+  quantidadeMaxima: number;
+}
+
+export interface CampanhaProduto {
+  codigoProduto: number;
+  codigoBarras: string;
+  nomeProduto: string;
+  precoRegular: number;
+  precoPromocional: number;
+  percentualDesconto: number;
+  quantidadeCartazes: number;
+  // Validade por item — começa igual à da campanha, mas é editável
+  // por produto na tela de Cartazetes (ex.: estender a validade de um
+  // item específico). É só pra impressão/txt desse momento — não é
+  // persistido de volta em `campanha_produtos` no Supabase real.
+  dataInicio: string;
+  dataFim: string;
+}
+
+export interface Campanha {
+  id: string;
+  nome: string;
+  dataInicio: string;
+  dataFim: string;
+  criadaEm: string;
+  produtos: CampanhaProduto[];
+}
+
+export interface SalvarCampanhaInput {
+  id?: string;
+  nome: string;
+  dataInicio: string;
+  dataFim: string;
+  produtos: CampanhaProduto[];
+}
+
+// Um cartaz por grupo (mesmo nome-base + preço + validade) — o
+// mesmo produto em tamanhos/variações diferentes vira UM cartaz
+// listando as variantes, não um cartaz por código de barras.
+export interface GrupoCartazete {
+  chave: string;
+  nomeBase: string;
+  variantes: string[];
+  precoPromocional: number;
+  percentualDesconto: number;
+  dataInicio: string;
+  dataFim: string;
+  quantidadeCartazes: number;
+  produtos: CampanhaProduto[];
 }

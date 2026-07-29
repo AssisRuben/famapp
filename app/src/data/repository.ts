@@ -1,15 +1,20 @@
 import {
   AtividadeChecklist,
+  Campanha,
   ChecklistItemStatus,
   ClienteInatividade,
   DesempenhoVendedorDiario,
   MetaVendedor,
   MetricasVendedorDiario,
   Profile,
+  ProdutoCatalogo,
+  ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
   RankingVendedorDia,
+  SalvarCampanhaInput,
   SalvarMetaInput,
   StatusSincronizacao,
+  SugestaoCampanhaParams,
   TipoReceita,
   VendaReceitaPendente,
 } from '../types/domain';
@@ -52,7 +57,7 @@ export interface DataRepository {
   // Checklist diário: `getAtividadesChecklist` traz só as ativas para
   // vendedor, e todas (incl. inativas) para gestor gerenciar.
   getAtividadesChecklist(profile: Profile): Promise<AtividadeChecklist[]>;
-  salvarAtividadeChecklist(input: { id?: string; titulo: string }): Promise<void>;
+  salvarAtividadeChecklist(input: { id?: string; titulo: string; horario: string | null }): Promise<void>;
   alternarAtividadeChecklist(id: string, ativo: boolean): Promise<void>;
   getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]>;
   marcarChecklistItem(profile: Profile, atividadeId: string, concluida: boolean): Promise<void>;
@@ -61,4 +66,14 @@ export interface DataRepository {
   // sync (ver supabase/schema.sql, tabela sync_control). Sem filtro por
   // papel: não é dado sensível, qualquer autenticado pode ler.
   getStatusSincronizacao(): Promise<StatusSincronizacao[]>;
+
+  // Campanhas/Cartazetes — gestor-only na UI. `produto_catalogo` no
+  // real seria sincronizado do ProdutoIntegracaoDto (Trier); não tem
+  // API de escrita pra desconto/campanha, então "campanha" é uma
+  // entidade nossa (não existe no Trier).
+  getCatalogoProdutos(profile: Profile): Promise<ProdutoCatalogo[]>;
+  sugerirProdutosCampanha(profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]>;
+  getCampanhas(profile: Profile): Promise<Campanha[]>;
+  salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha>;
+  excluirCampanha(id: string): Promise<void>;
 }

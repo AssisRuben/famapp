@@ -1,7 +1,22 @@
 import React from 'react';
-import { StyleSheet, View, ViewProps } from 'react-native';
+import { Pressable, StyleSheet, View, ViewProps } from 'react-native';
 
-export function Card({ style, children, ...rest }: ViewProps) {
+interface CardProps extends ViewProps {
+  onPress?: () => void;
+}
+
+// Com onPress, o próprio card vira a área clicável (mesmo elemento que
+// desenha o fundo/sombra) — evita o card visual "vazar" pra fora da
+// área que realmente responde ao toque, que é o que acontecia
+// envolvendo um Card num Pressable separado.
+export function Card({ style, children, onPress, ...rest }: CardProps) {
+  if (onPress) {
+    return (
+      <Pressable style={[styles.card, style]} onPress={onPress} {...rest}>
+        {children}
+      </Pressable>
+    );
+  }
   return (
     <View style={[styles.card, style]} {...rest}>
       {children}

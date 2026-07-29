@@ -38,7 +38,15 @@
         {
           "cameraPermission": "O app usa a câmera para fotografar a receita médica do cliente."
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#003068"
+        }
+      ],
+      "expo-sharing"
     ]
   }
 }

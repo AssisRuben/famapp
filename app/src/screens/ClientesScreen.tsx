@@ -49,7 +49,7 @@ export function ClientesScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Clientes</Text>
+      <Text style={styles.title}>{profile?.role === 'gestor' ? 'Clientes em potencial' : 'Meus clientes em potencial'}</Text>
       <Text style={styles.subtitle}>
         {clientes.length} clientes · {inativos} inativos (sem compra há mais de 60 dias)
       </Text>
@@ -63,11 +63,17 @@ export function ClientesScreen() {
           <View style={styles.row}>
             <View style={styles.info}>
               <Text style={styles.nome}>{item.nome}</Text>
+              {profile?.role === 'gestor' && item.nomeVendedor && (
+                <View style={styles.vendedorTag}>
+                  <Text style={styles.vendedorTagTexto}>{item.nomeVendedor}</Text>
+                </View>
+              )}
               <Text style={styles.detalhe}>
-                {item.diasSemComprar == null
-                  ? 'Sem histórico de compra'
-                  : `${item.diasSemComprar} dia(s) sem comprar`}
+                {item.ultimaCompra ? `Última compra: ${formatDateBR(item.ultimaCompra)}` : 'Sem histórico de compra'}
               </Text>
+              {item.diasSemComprar != null && (
+                <Text style={styles.detalhe}>{item.diasSemComprar} dia(s) sem comprar</Text>
+              )}
               <View style={[styles.badge, item.inativo ? styles.badgeInativo : styles.badgeAtivo]}>
                 <Text style={[styles.badgeText, item.inativo ? styles.badgeTextInativo : styles.badgeTextAtivo]}>
                   {item.inativo ? 'Inativo' : 'Ativo'}
@@ -110,4 +116,13 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: '600' },
   badgeTextAtivo: { color: colors.success },
   badgeTextInativo: { color: colors.red },
+  vendedorTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.navy,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 4,
+  },
+  vendedorTagTexto: { color: colors.white, fontSize: 11, fontWeight: '700' },
 });

@@ -52,7 +52,7 @@ export function AlertasScreen() {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <Text style={styles.title}>🔔 Alertas de promoção</Text>
+      <Text style={styles.title}>🔔 Alerta de promoção</Text>
       <Text style={styles.subtitle}>
         Produtos que entraram em promoção e clientes que já compraram antes — ótima chance de reativação.
       </Text>

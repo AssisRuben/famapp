@@ -347,6 +347,67 @@ begin
 end $$;
 
 -- ============================================================
+-- 8) PRODUTO_CATALOGO — mesmo catálogo usado no mock do app
+-- (app/src/data/mock/seed.ts), pra Campanhas/Cartazetes terem dado
+-- de verdade também no Supabase. Os 5 últimos (Fralda Pampers Pants
+-- Giga) usam os códigos de barra reais do docs/txt.txt de propósito.
+-- ============================================================
+insert into produto_catalogo (codigo, codigo_barras, nome, categoria, marca, preco_venda, custo_medio, estoque_atual) values
+  (2001, '7891058109254', 'Dipirona Gotas 10ml', 'Medicamentos', 'EMS', 9.90, 5.20, 120),
+  (2002, '7896004704507', 'Vitamina D3 2000UI 60cáps', 'Suplementos', 'Sundown', 42.90, 22.00, 35),
+  (2003, '7891350037773', 'Protetor Solar FPS70 120ml', 'Dermocosméticos', 'Sundown', 68.90, 38.00, 18),
+  (2004, '7500435123456', 'Escova Dental Macia', 'Higiene Bucal', 'Oral-B', 12.50, 6.00, 200),
+  (2005, '7891024131253', 'Fio Dental 50m', 'Higiene Bucal', 'Colgate', 8.90, 4.10, 150),
+  (2006, '7896098900014', 'Álcool Gel 500ml', 'Higiene', 'Asfar', 14.90, 7.50, 90),
+  (2007, '7891010511016', 'Curativo Band-Aid 20un', 'Primeiros Socorros', 'J&J', 15.90, 8.00, 60),
+  (2008, '7898950627148', 'Termômetro Digital', 'Equipamentos', 'G-Tech', 29.90, 16.00, 25),
+  (2009, '7898930910019', 'Colágeno Hidrolisado 300g', 'Suplementos', 'Nutrated', 79.90, 45.00, 12),
+  (2010, '7891350900718', 'Sabonete Líquido Íntimo 200ml', 'Higiene', 'Nívea', 24.90, 13.00, 40),
+  (2011, '7896183301024', 'Repelente Spray 100ml', 'Dermocosméticos', 'Exposis', 34.90, 19.00, 22),
+  (2012, '7891350031733', 'Creme Hidratante Corporal 400ml', 'Dermocosméticos', 'Nívea', 32.90, 17.50, 55),
+  (2013, '7891010131207', 'Absorvente Noturno 8un', 'Higiene', 'Sempre Livre', 11.90, 6.00, 130),
+  (2014, '7500435228756', 'Shampoo Anticaspa 200ml', 'Cabelos', 'Head & Shoulders', 27.90, 15.00, 44),
+  (2015, '7500435228763', 'Condicionador Reparador 200ml', 'Cabelos', 'Pantene', 26.90, 14.50, 38),
+  (2016, '3700010123456', 'Multivitamínico Infantil 30un', 'Suplementos', 'Centrum', 45.90, 27.00, 8),
+  (2017, '7896422500019', 'Ibuprofeno 400mg 20cp', 'Medicamentos', 'Medley', 18.90, 10.50, 70),
+  (2018, '7896004700141', 'Omeprazol 20mg 28cp', 'Medicamentos', 'EMS', 16.90, 9.00, 90),
+  (2019, '7891106902013', 'Colírio Lubrificante 15ml', 'Medicamentos', 'Allergan', 22.90, 12.00, 30),
+  (2020, '7891150017525', 'Sabonete Barra Dermatológico 90g', 'Dermocosméticos', 'Dove', 6.90, 3.20, 180),
+  (2021, '7891350029210', 'Protetor Labial FPS15', 'Dermocosméticos', 'Nívea', 9.90, 4.50, 65),
+  (2022, '7896183401021', 'Fralda Geriátrica G 8un', 'Higiene', 'Bigfral', 38.90, 24.00, 15),
+  (2023, '3401390232017', 'Água Micelar 200ml', 'Dermocosméticos', 'Bioderma', 89.90, 55.00, 6),
+  (2024, '7896336090011', 'Whey Protein 900g', 'Suplementos', 'Growth', 129.90, 78.00, 10),
+  (2025, '7500435146470', 'Fralda Pampers Pants Giga M84', 'Bebês', 'Pampers', 94.90, 62.00, 20),
+  (2026, '7500435146487', 'Fralda Pampers Pants Giga G72', 'Bebês', 'Pampers', 94.90, 62.00, 18),
+  (2027, '7500435146494', 'Fralda Pampers Pants Giga XG66', 'Bebês', 'Pampers', 94.90, 62.00, 14),
+  (2028, '7500435146500', 'Fralda Pampers Pants Giga XXG60', 'Bebês', 'Pampers', 94.90, 62.00, 9),
+  (2029, '7500435246637', 'Fralda Pampers Pants Giga XXXG54', 'Bebês', 'Pampers', 94.90, 62.00, 5)
+on conflict (codigo) do nothing;
+
+-- ============================================================
+-- 9) CAMPANHA DE EXEMPLO — replica o cartaz/txt de referência
+-- (docs/txt.txt): as 5 fraldas Pampers Pants Giga a R$83,99, válida
+-- por 2 dias. Idempotente via "on conflict do nothing" na campanha
+-- (pelo nome) e nos itens (pela unique campanha_id+codigo_produto).
+-- ============================================================
+do $$
+declare
+  v_campanha_id bigint;
+begin
+  insert into campanhas (nome, data_inicio, data_fim)
+  select 'Fralda Pampers Pants Giga', date '2026-07-30', date '2026-07-31'
+  where not exists (select 1 from campanhas where nome = 'Fralda Pampers Pants Giga')
+  returning id into v_campanha_id;
+
+  if v_campanha_id is not null then
+    insert into campanha_produtos (campanha_id, codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes)
+    select v_campanha_id, codigo, 83.99, round((1 - 83.99 / preco_venda) * 100, 2), 1
+    from produto_catalogo
+    where codigo between 2025 and 2029;
+  end if;
+end $$;
+
+-- ============================================================
 -- Para recomeçar do zero (CUIDADO — apaga os dados de negócio):
 -- ============================================================
--- truncate table metas, venda_item_receitas, vendas_vendedor_diario, venda_itens, vendas, produtos, clientes, vendedores restart identity cascade;
+-- truncate table campanha_produtos, campanhas, produto_catalogo, metas, venda_item_receitas, vendas_vendedor_diario, venda_itens, vendas, produtos, clientes, vendedores restart identity cascade;

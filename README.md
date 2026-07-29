@@ -140,16 +140,41 @@ Definido em [`supabase/schema.sql`](supabase/schema.sql). Estrutura:
   buckets. Dois índices únicos parciais (um só pra `semana is null`, outro
   só pra `semana is not null`) porque unique constraint comum não bloqueia
   NULLs duplicados.
+- **`produto_catalogo`**: catálogo completo (nome, custo, estoque,
+  categoria, marca), futuramente sincronizado do `ProdutoIntegracaoDto`
+  real da Trier (`/integracao/produto/obter-*`) — diferente de `produtos`
+  (curadoria manual pequena, só promoção/receita). Usado pelo módulo de
+  Campanhas/Cartazetes pra calcular margem.
+- **`campanhas`** / **`campanha_produtos`**: promoção avulsa decidida pela
+  farmácia (margem + estoque + venda recente), fora do encarte oficial.
+  **Não é sincronizado do Trier** — a API SGF não tem NENHUM endpoint de
+  escrita pra desconto/campanha/encarte (confirmado: dos 100 endpoints do
+  OpenAPI, só 3 são de escrita, nenhum nessa área — tudo é
+  `obter-todos`/`obter-alterados`/`obter-movimentados`, só leitura). Quem
+  decide o encarte oficial é a rede, digitado direto no Trier; o que esse
+  módulo resolve é a decisão que a farmácia não faz em lugar nenhum hoje.
+  O preço só vale no caixa depois que o `.txt` gerado na tela "Cartazetes"
+  é importado manualmente no Trier — ver
+  [`docs/txt.txt`](docs/txt.txt) (arquivo de referência real) e
+  `src/lib/trierTxt.ts` no app. **Atenção**: o layout desse `.txt` foi
+  inferido por engenharia reversa do arquivo de exemplo (batendo campo a
+  campo com o `.txt` original — testado e idêntico), não por documentação
+  oficial da Trier; os campos 3 e 4 (sempre `"0","0"` no exemplo) têm
+  significado incerto. Valide com um import de teste em homologação antes
+  de usar em produção.
 - **`sync_control`**: controle de última sincronização por entidade, usado
   pelo coletor para saber o `dataInicial` da próxima chamada
   `obter-alterados`.
 - **Views analíticas** (o app consome estas, nunca as tabelas cruas):
   `vw_desempenho_vendedor_diario`, `vw_metricas_vendedor_diario` (ticket
   médio, desconto, comissão), `vw_ranking_vendedores_dia`,
-  `vw_vendas_por_canal`, `vw_clientes_inatividade` (agora com `telefone`,
-  usado pelo botão de WhatsApp no app), `vw_vendas_receita_status` (fila de
-  receita pendente/anexada), `vw_produtos_promocao_clientes` (produtos em
-  promoção + clientes que já compraram, para a tela de Alertas) e
+  `vw_vendas_por_canal`, `vw_clientes_inatividade` (com `telefone` e o
+  vendedor da última compra — vendedor só vê os próprios clientes,
+  gestor vê todos; **definida em `rls_policies.sql`, não em
+  `schema.sql`**, porque depende da tabela `profiles`), `vw_vendas_receita_status`
+  (fila de receita pendente/anexada), `vw_produtos_promocao_clientes`
+  (produtos em promoção + clientes que já compraram, para a tela de
+  Alertas) e
   `vw_metas_progresso` (meta x realizado, com o realizado calculado na
   hora a partir de `vendas`/`venda_itens` reais — testado e confere:
   soma dos 4 buckets semanais bate exatamente com o total mensal).
@@ -192,11 +217,22 @@ Políticas de RLS aplicadas — ver [`supabase/rls_policies.sql`](supabase/rls_p
   Dashboard pra mostrar "dados sincronizados em..."); escrita continua
   exclusiva do coletor via `service_role` — nenhuma policy de insert/
   update/delete para `authenticated` (testado: insert é bloqueado).
+- `produto_catalogo`: leitura por qualquer autenticado, mesmo padrão
+  synced-pelo-coletor de `vendedores`/`clientes`/`vendas` (sem policy de
+  escrita pra `authenticated`).
+- `campanhas`/`campanha_produtos`: só `gestor` (leitura e escrita) —
+  vendedor não vê nem edita (testado: vendedor lê 0 campanhas mesmo
+  havendo 1 no banco, e um insert como vendedor é bloqueado).
 - Views recriadas com `security_invoker = true`, senão rodariam com o
   privilégio do dono e ignorariam a RLS das tabelas base — **exceto**
-  `vw_produtos_promocao_clientes`, que fica de propósito SEM
-  `security_invoker`: a tela de Alertas precisa que qualquer vendedor veja
-  oportunidades de contato de qualquer cliente, não só as próprias vendas.
+  `vw_produtos_promocao_clientes` (tela de Alertas precisa que qualquer
+  vendedor veja oportunidades de contato de qualquer cliente) e
+  `vw_clientes_inatividade` (senão a RLS de `vendas` restringiria a
+  subquery da última compra ANTES do filtro de papel rodar, fazendo um
+  vendedor "roubar" a última compra de um cliente atendido por outro —
+  testado: vendedor vê só os clientes cuja última compra foi com ele,
+  com a data certa; cliente sem vendedor associado não aparece pra
+  nenhum vendedor, só pro gestor).
 
 Gap conhecido (não mexido nesta rodada): `vw_ranking_vendedores_dia` é
 `security_invoker = true`, então no backend real um vendedor só veria a
