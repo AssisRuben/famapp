@@ -370,7 +370,11 @@ join vendedores v on v.codigo = vvd.codigo_vendedor;
 -- já com desconto) menos custo de aquisição — usa vlr_custo_produto
 -- (confirmado com a farmácia; venda_itens tem outros dois campos de
 -- custo — valor_total_custo e vlr_custo_aquisicao — que NÃO são esse).
-create view vw_metricas_vendedor_diario as
+-- nome_vendedor entra por último (não no meio) porque essa view usa
+-- `create or replace` — Postgres só deixa ACRESCENTAR coluna no fim,
+-- não realocar; ver supabase/migracao_frente2.sql pra aplicar isso no
+-- projeto já existente sem precisar recriar a view do zero.
+create or replace view vw_metricas_vendedor_diario as
 select
   vd.data_emissao,
   vi.codigo_vendedor,
@@ -382,10 +386,12 @@ select
   sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
   round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
   sum(vi.vlr_custo_produto) as total_custo,
-  round((sum(vi.valor_total_liquido) - sum(vi.vlr_custo_produto)) / nullif(sum(vi.valor_total_liquido),0) * 100, 2) as margem_bruta_pct
+  round((sum(vi.valor_total_liquido) - sum(vi.vlr_custo_produto)) / nullif(sum(vi.valor_total_liquido),0) * 100, 2) as margem_bruta_pct,
+  vend.nome as nome_vendedor
 from venda_itens vi
 join vendas vd on vd.id = vi.venda_id
-group by vd.data_emissao, vi.codigo_vendedor;
+join vendedores vend on vend.codigo = vi.codigo_vendedor
+group by vd.data_emissao, vi.codigo_vendedor, vend.nome;
 
 -- Ranking diário de vendedores (por faturamento líquido). Propositalmente
 -- SEM security_invoker (ver rls_policies.sql) — mesma família de
@@ -393,12 +399,13 @@ group by vd.data_emissao, vi.codigo_vendedor;
 -- todo vendedor precisa ver a linha de todo mundo, não só a própria.
 -- Rodando como dono, bypassa a RLS de vendas/venda_itens de propósito;
 -- só expõe faturamento_liquido/posicao (não margem, desconto, custo).
-create view vw_ranking_vendedores_dia as
+create or replace view vw_ranking_vendedores_dia as
 select
   data_emissao,
   codigo_vendedor,
   faturamento_liquido,
-  rank() over (partition by data_emissao order by faturamento_liquido desc) as posicao
+  rank() over (partition by data_emissao order by faturamento_liquido desc) as posicao,
+  nome_vendedor
 from vw_metricas_vendedor_diario;
 
 -- Vendas por canal (presencial vs ecommerce vs ifood)
@@ -431,6 +438,21 @@ from compras_itens ci
 join compras c on c.id = ci.compra_id
 join fornecedores f on f.codigo = c.codigo_fornecedor
 order by ci.codigo_produto, c.data_entrada desc;
+
+-- Venda recente por produto (30 dias) — dá o giro e "dias sem venda"
+-- usados por Campanhas/Compras/Precificação (lib/campanhas.ts,
+-- lib/doseCerta.ts, lib/precificacao.ts). Só telas gestor-only
+-- consomem isso, e a RLS de venda_itens já garante que gestor vê
+-- tudo — não precisa bypassar RLS aqui (diferente de Ranking/Alertas,
+-- que precisam que QUALQUER vendedor veja dado cross-vendedor).
+create view vw_venda_recente_produto as
+select
+  vi.codigo_produto,
+  coalesce(sum(vi.quantidade_produtos) filter (where v.data_emissao >= current_date - interval '30 days'), 0) as quantidade_vendida_30d,
+  (current_date - max(v.data_emissao))::int as dias_sem_venda
+from venda_itens vi
+join vendas v on v.id = vi.venda_id
+group by vi.codigo_produto;
 
 -- vw_clientes_inatividade fica definida em rls_policies.sql, não aqui
 -- — ela depende da tabela `profiles` (criada lá) pro próprio controle
@@ -468,7 +490,9 @@ left join venda_item_receitas r on r.venda_item_id = vi.id;
 -- vendas/venda_itens/clientes), porque aqui a regra de negócio é "todo
 -- vendedor pode ver oportunidades de contato de qualquer cliente", ao
 -- contrário das outras views que restringem vendedor aos próprios dados.
-create view vw_produtos_promocao_clientes as
+-- exige_receita/tipo_receita entram no fim (não junto de preco_atual)
+-- pra manter create-or-replace válido — ver migracao_frente2.sql.
+create or replace view vw_produtos_promocao_clientes as
 select
   p.codigo as codigo_produto,
   p.nome as nome_produto,
@@ -479,13 +503,16 @@ select
   c.nome as nome_cliente,
   c.fone as telefone_cliente,
   max(v.data_emissao) as ultima_compra_produto,
-  sum(vi.quantidade_produtos) as quantidade_total
+  sum(vi.quantidade_produtos) as quantidade_total,
+  p.exige_receita,
+  p.tipo_receita
 from produtos p
 join venda_itens vi on vi.codigo_produto = p.codigo
 join vendas v on v.id = vi.venda_id
 join clientes c on c.codigo = v.codigo_cliente
 where p.em_promocao = true
-group by p.codigo, p.nome, p.preco_atual, p.preco_anterior, p.percentual_desconto, c.codigo, c.nome, c.fone;
+group by p.codigo, p.nome, p.preco_atual, p.preco_anterior, p.percentual_desconto, c.codigo, c.nome, c.fone,
+  p.exige_receita, p.tipo_receita;
 
 -- Progresso de metas (mensal e semanal) — tela "Metas" (gestor) e o
 -- bloco de metas no Dashboard (todos). O "realizado" é calculado na

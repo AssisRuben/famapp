@@ -115,6 +115,24 @@ Componentes:
       (`faixas_comissao`, `vw_metas_comissao`) e o fix de RLS do ranking
       (ver "Comissão sobre margem bruta" abaixo) — SQL já está em
       `schema.sql`/`rls_policies.sql`, falta rodar.
+- [x] **Frente 2 (app consumindo Supabase de verdade) implementada** —
+      `src/data/supabase/supabaseRepository.ts` substitui o mock em
+      `src/data/index.ts` (ver seção "Frente 2" abaixo).
+- [ ] Rodar [`supabase/migracao_frente2.sql`](supabase/migracao_frente2.sql)
+      no projeto real — corrige views que faltavam `nome_vendedor`,
+      adiciona `vw_venda_recente_produto` e estende
+      `vw_produtos_promocao_clientes`. Sem isso, Dashboard/Ranking mostram
+      código em vez de nome, e Campanhas/Compras/Precificação não têm giro.
+- [ ] Criar `app/.env.local` (git-ignorado, cada máquina de dev precisa
+      do próprio) com `EXPO_PUBLIC_SUPABASE_URL` e
+      `EXPO_PUBLIC_SUPABASE_ANON_KEY` (Supabase → Settings → API → "anon
+      public" — **nunca** a `service_role`, essa ignora RLS por completo
+      e só pode ficar do lado do coletor).
+- [ ] **Bloqueia login de verdade**: criar pelo menos 1 usuário no
+      Supabase Auth + linha correspondente em `profiles` (ver
+      `supabase/seed_profiles.sql`) — sem isso, `login()` falha com
+      "Usuário sem perfil cadastrado" mesmo com e-mail/senha corretos no
+      Supabase Auth.
 
 O desenvolvimento do app PODE COMEÇAR JÁ, em paralelo à liberação da API,
 usando mocks no formato exato dos DTOs reais abaixo.
@@ -223,9 +241,13 @@ Definido em [`supabase/schema.sql`](supabase/schema.sql). Estrutura:
   Alertas) e
   `vw_metas_progresso` (meta x realizado, com o realizado calculado na
   hora a partir de `vendas`/`venda_itens` reais — testado e confere:
-  soma dos 4 buckets semanais bate exatamente com o total mensal) e
+  soma dos 4 buckets semanais bate exatamente com o total mensal),
   `vw_produto_fornecedor_recente` (fornecedor + fator de compra da compra
-  mais recente de cada produto, usada pela lista de compras).
+  mais recente de cada produto, usada pela lista de compras) e
+  `vw_venda_recente_produto` (giro de 30 dias + dias sem venda por
+  produto, usada por Campanhas/Compras/Precificação —
+  `security_invoker=true`; como só tela gestor-only consome, a RLS de
+  `venda_itens` já garante visão completa pra quem chama).
 
 Nota sobre o checklist diário de atividades (aba "Checklist" do vendedor,
 configurada pelo gestor dentro da própria aba "Metas"): por enquanto só
@@ -347,10 +369,50 @@ No app (lado gestor): `MetasScreen` (aba "Metas" → segmento "Metas") já
 mostra, por vendedor, a faixa de comissão atual e o valor previsto no
 fechamento do mês, logo abaixo da barra de progresso mensal. Tipos novos
 em `src/types/domain.ts` (`FaixaComissao`, `ComissaoMensal`) e método
-`getComissoesMensal` no `DataRepository` — implementado no mock
-(`mockRepository.ts`) usando a margem bruta % do dia como proxy (mock não
-tem livro-razão do mês inteiro), fica exato quando a Frente 2 (Supabase
-real) substituir o mock por `vw_metas_comissao`.
+`getComissoesMensal` no `DataRepository` — no mock (`mockRepository.ts`)
+usa a margem bruta % do dia como proxy (mock não tem livro-razão do mês
+inteiro); na Frente 2 (`supabaseRepository.ts`, ver seção abaixo) já é
+exato, direto de `vw_metas_comissao`.
+
+## Frente 2 — SupabaseRepository (app consumindo dado real)
+
+`src/data/index.ts` exporta `supabaseRepository`
+([`src/data/supabase/supabaseRepository.ts`](app/src/data/supabase/supabaseRepository.ts))
+em vez do mock — implementa o mesmo `DataRepository`, nenhuma tela mudou.
+Pontos que não são óbvios olhando só o código:
+
+- **RLS faz o trabalho de filtro**: ao contrário do mock (que simula
+  "vendedor só vê o próprio" em JS via `visivelParaPerfil`), a maioria dos
+  métodos aqui faz `select('*')` puro — a RLS já filtra a resposta pelo
+  usuário autenticado. O parâmetro `profile` continua na assinatura (pra
+  bater com a interface) mas fica sem uso em vários métodos.
+- **`profiles` não guarda nome** — só `id`/`role`/`codigo_vendedor`. Pro
+  vendedor o nome vem de `vendedores.nome` (uma query extra no login);
+  pro gestor (sem linha em `vendedores`) cai num rótulo fixo
+  `"Gestor(a) da Farmácia"`. Se quiser o nome de verdade do gestor,
+  daria pra adicionar uma coluna `nome` em `profiles` — não fiz isso
+  agora pra não empilhar mais uma migração em cima do que já tinha.
+- **`metas_mensal_unique`/`metas_semanal_unique` são índices únicos
+  PARCIAIS** (`where semana is [not] null`) — o `on_conflict` do
+  PostgREST não consegue inferir índice parcial (não dá pra mandar o
+  `WHERE` junto), então `salvarMeta` faz delete+insert em vez de upsert.
+  `checklist_respostas` tem unique CONSTRAINT de verdade (não parcial),
+  então `marcarChecklistItem` usa upsert normalmente.
+- **`CampanhaProduto.precoRegular`** não existe em `campanha_produtos`
+  (só guarda `preco_promocional`/`percentual_desconto`) — é recalculado
+  na leitura (`precoPromocional / (1 - percentualDesconto/100)`) em vez
+  de puxado do preço atual de `produto_catalogo`, pra uma campanha antiga
+  não ficar inconsistente se o preço de tabela mudar depois.
+- **Upload de receita** segue a convenção obrigatória de
+  `storage_setup.sql`: path `<codigo_vendedor>/<venda_item_id>.jpg` no
+  bucket `receitas` — `anexarReceita` busca o `codigo_vendedor` do item
+  antes de subir a foto, porque a assinatura do método (igual no mock)
+  não recebe isso diretamente.
+- **`react-native-url-polyfill/auto`** precisa ser o primeiro import de
+  `App.tsx` — o `supabase-js` usa `URL`/`fetch` que o Hermes (motor JS
+  do React Native) não implementa nativamente.
+- Troca de volta pro mock (ex.: demo sem depender de rede): editar as
+  duas linhas comentadas em `src/data/index.ts`.
 
 ## Métricas/insights já definidos como prioridade (para as telas do app)
 

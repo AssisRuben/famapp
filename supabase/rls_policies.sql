@@ -447,6 +447,7 @@ alter view vw_vendas_receita_status set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
 alter view vw_metas_comissao set (security_invoker = true);
 alter view vw_produto_fornecedor_recente set (security_invoker = true);
+alter view vw_venda_recente_produto set (security_invoker = true);
 -- vw_produtos_promocao_clientes, vw_clientes_inatividade e
 -- vw_ranking_vendedores_dia ficam de propósito SEM security_invoker (ver
 -- comentário de cada uma em schema.sql) — não é esquecimento. Gap

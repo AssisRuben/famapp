@@ -15,8 +15,8 @@ import { colors } from '../theme/colors';
 
 export function LoginScreen() {
   const { signIn, signingIn, error } = useAuth();
-  const [email, setEmail] = useState('gestor@farmacia.com');
-  const [senha, setSenha] = useState('123456');
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
 
   return (
     <KeyboardAvoidingView
