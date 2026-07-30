@@ -14,6 +14,8 @@ import { AlertasScreen } from '../screens/AlertasScreen';
 import { ReceitasScreen } from '../screens/ReceitasScreen';
 import { CampanhasScreen } from '../screens/CampanhasScreen';
 import { CartazetesScreen } from '../screens/CartazetesScreen';
+import { ComprasScreen } from '../screens/ComprasScreen';
+import { PrecificacaoScreen } from '../screens/PrecificacaoScreen';
 import { SideDrawer } from '../components/SideDrawer';
 import { colors } from '../theme/colors';
 
@@ -58,6 +60,8 @@ function AppTabs() {
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
           { label: 'Campanhas', emoji: '📢', onPress: () => irPara('Campanhas') },
           { label: 'Cartazetes', emoji: '🖨️', onPress: () => irPara('Cartazetes') },
+          { label: 'Compras', emoji: '🛒', onPress: () => irPara('Compras') },
+          { label: 'Precificação', emoji: '📊', onPress: () => irPara('Precificacao') },
         ]
       : [
           { label: 'Clientes', emoji: '👥', onPress: () => irPara('Clientes') },
@@ -146,6 +150,24 @@ function AppTabs() {
           options={{
             title: 'Cartazetes',
             tabBarIcon: ({ focused }) => <TabIcon emoji="🖨️" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="Compras"
+          component={ComprasScreen}
+          options={{
+            title: 'Compras',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🛒" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="Precificacao"
+          component={PrecificacaoScreen}
+          options={{
+            title: 'Precificação',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="📊" focused={focused} />,
             ...abaOculta(true),
           }}
         />

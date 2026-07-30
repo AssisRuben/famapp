@@ -196,6 +196,58 @@ create table produto_catalogo (
 create index idx_produto_catalogo_categoria on produto_catalogo (categoria);
 
 -- ============================================================
+-- FORNECEDORES / COMPRAS — espelha FornecedorIntegracaoDto e
+-- CompraIntegracaoDto/ComprasItemIntegracaoDto (só leitura, igual
+-- venda/cliente). Alimenta a "Lista de compras" (Compras/Dose Certa):
+-- fornecedor sugerido e fator de compra (conversão de embalagem) de
+-- cada produto são INFERIDOS da compra mais recente, não cadastrados
+-- à mão — a API não expõe um cadastro "fornecedor preferido por
+-- produto" separado. Prazo de entrega e data de última cotação (que
+-- aparecem na tela do Dose Certa dentro do Trier) NÃO têm endpoint de
+-- leitura na integração — não dá pra trazer isso sem inventar dado.
+-- ============================================================
+create table fornecedores (
+  codigo integer primary key,
+  nome_fantasia text not null,
+  razao_social text,
+  numero_cnpj text,
+  nome_cidade text,
+  email text,
+  ativo boolean default true,
+  updated_at timestamptz default now()
+);
+
+create table compras (
+  id bigserial primary key,
+  data_entrada timestamptz not null,
+  numero_nota_fiscal integer,
+  codigo_fornecedor integer references fornecedores(codigo),
+  valor_total_nota numeric(12,2),
+  valor_total_produtos numeric(12,2),
+  quantidade_itens integer,
+  chave_acesso_nfe text,
+  updated_at timestamptz default now()
+);
+
+create index idx_compras_data_entrada on compras (data_entrada);
+create index idx_compras_fornecedor on compras (codigo_fornecedor);
+
+create table compras_itens (
+  id bigserial primary key,
+  compra_id bigint not null references compras(id) on delete cascade,
+  codigo_produto integer not null,
+  quantidade_produtos integer,
+  fator_compra integer default 1,      -- unidades por caixa/pacote do fornecedor
+  valor_unitario numeric(12,2),
+  valor_unitario_liquido numeric(12,2),
+  valor_custo numeric(12,2),
+  valor_st numeric(12,2)
+);
+
+create index idx_compras_itens_compra on compras_itens (compra_id);
+create index idx_compras_itens_produto on compras_itens (codigo_produto);
+
+-- ============================================================
 -- CAMPANHAS — promoção avulsa decidida pela farmácia (margem +
 -- estoque + venda recente), FORA do encarte oficial. O Trier NÃO tem
 -- endpoint de escrita pra desconto/campanha (só leitura, igual
@@ -252,7 +304,11 @@ select
 from vendas_vendedor_diario vvd
 join vendedores v on v.codigo = vvd.codigo_vendedor;
 
--- Ticket médio, desconto e comissão calculados a partir dos itens de venda
+-- Ticket médio, desconto, comissão e margem calculados a partir dos
+-- itens de venda. Margem bruta = valor de venda (faturamento líquido,
+-- já com desconto) menos custo de aquisição — usa vlr_custo_produto
+-- (confirmado com a farmácia; venda_itens tem outros dois campos de
+-- custo — valor_total_custo e vlr_custo_aquisicao — que NÃO são esse).
 create view vw_metricas_vendedor_diario as
 select
   vd.data_emissao,
@@ -263,7 +319,9 @@ select
   sum(vi.vlr_desconto) as total_desconto,
   round(sum(vi.vlr_desconto) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
   sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
-  round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio
+  round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
+  sum(vi.vlr_custo_produto) as total_custo,
+  round((sum(vi.valor_total_liquido) - sum(vi.vlr_custo_produto)) / nullif(sum(vi.valor_total_liquido),0) * 100, 2) as margem_bruta_pct
 from venda_itens vi
 join vendas vd on vd.id = vi.venda_id
 group by vd.data_emissao, vi.codigo_vendedor;
@@ -290,6 +348,23 @@ select
   sum(vlr_troco) as vlr_troco_total
 from vendas
 group by data_emissao, canal;
+
+-- Fornecedor e fator de compra (conversão de embalagem) mais recentes
+-- de cada produto — usado pela Lista de compras pra sugerir "de quem
+-- comprar" e arredondar a quantidade pra caixa fechada, sem precisar
+-- de um cadastro manual de "fornecedor preferido por produto" (a API
+-- não expõe isso; a compra mais recente é a melhor aproximação).
+create view vw_produto_fornecedor_recente as
+select distinct on (ci.codigo_produto)
+  ci.codigo_produto,
+  c.codigo_fornecedor,
+  f.nome_fantasia as nome_fornecedor,
+  ci.fator_compra,
+  c.data_entrada
+from compras_itens ci
+join compras c on c.id = ci.compra_id
+join fornecedores f on f.codigo = c.codigo_fornecedor
+order by ci.codigo_produto, c.data_entrada desc;
 
 -- vw_clientes_inatividade fica definida em rls_policies.sql, não aqui
 -- — ela depende da tabela `profiles` (criada lá) pro próprio controle

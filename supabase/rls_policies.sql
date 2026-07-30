@@ -263,6 +263,31 @@ using (exists (
   select 1 from profiles p where p.id = auth.uid()
 ));
 
+-- fornecedores/compras/compras_itens: mesmo padrão de produto_catalogo
+-- — synced pelo coletor via service_role, leitura liberada (não é dado
+-- mais sensível que custo_medio, que já é público pra autenticado).
+alter table fornecedores enable row level security;
+alter table compras enable row level security;
+alter table compras_itens enable row level security;
+
+create policy "fornecedores: usuarios autenticados leem"
+on fornecedores for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "compras: usuarios autenticados leem"
+on compras for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "compras_itens: usuarios autenticados leem"
+on compras_itens for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
 -- campanhas/campanha_produtos: só gestor mexe — é decisão de negócio
 -- (margem/estoque/venda), vendedor não precisa ver rascunho de
 -- campanha nem tem ação nenhuma aqui.
@@ -313,6 +338,7 @@ alter view vw_ranking_vendedores_dia set (security_invoker = true);
 alter view vw_vendas_por_canal set (security_invoker = true);
 alter view vw_vendas_receita_status set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
+alter view vw_produto_fornecedor_recente set (security_invoker = true);
 -- vw_produtos_promocao_clientes e vw_clientes_inatividade ficam de
 -- propósito SEM security_invoker (ver comentário de cada uma em
 -- schema.sql) — não é esquecimento. As duas fazem o próprio controle

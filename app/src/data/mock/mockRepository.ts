@@ -7,9 +7,11 @@ import {
   ClienteCompradorPromocao,
   ClienteInatividade,
   DesempenhoVendedorDiario,
+  ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
   MetricasVendedorDiario,
+  ParametrosCompra,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
@@ -19,6 +21,7 @@ import {
   SalvarMetaInput,
   StatusSincronizacao,
   SugestaoCampanhaParams,
+  SugestaoCompra,
   TipoReceita,
   VendaReceitaPendente,
 } from '../../types/domain';
@@ -28,7 +31,9 @@ import {
   atividadesChecklistSeed,
   catalogoProdutosSeed,
   clientesSeed,
+  compraInfoSeed,
   desempenhoSeedHoje,
+  fornecedoresSeed,
   metasSeedPadrao,
   metricasSeedHoje,
   produtosSeed,
@@ -40,6 +45,8 @@ import {
 } from './seed';
 import { rotuloSemana, semanaDoDia } from '../../lib/metas';
 import { sugerirCandidatos } from '../../lib/campanhas';
+import { calcularSugestaoCompras } from '../../lib/doseCerta';
+import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
 
 const SESSION_KEY = '@farmapp/session';
 const RECEITAS_OVERRIDES_KEY = '@farmapp/receitas_overrides';
@@ -189,6 +196,8 @@ class MockRepository implements DataRepository {
       taxaDescontoPct: round2((m.totalDesconto / m.faturamentoBruto) * 100),
       comissaoEstimada: m.comissaoEstimada,
       ticketMedio: round2(m.faturamentoLiquido / m.qtdNotas),
+      totalCusto: m.totalCusto,
+      margemBrutaPct: round2(((m.faturamentoLiquido - m.totalCusto) / m.faturamentoLiquido) * 100),
     }));
     return delay(visivelParaPerfil(profile, linhas));
   }
@@ -477,6 +486,39 @@ class MockRepository implements DataRepository {
 
     await salvarCampanhasStore(campanhas);
     return delay(salva);
+  }
+
+  async gerarSugestaoCompras(_profile: Profile, params: ParametrosCompra): Promise<SugestaoCompra[]> {
+    const demandaPorProduto = new Map(
+      vendaRecenteSeed.map((v) => [v.codigoProduto, { quantidadeVendidaPeriodo: v.quantidadeVendida30d }])
+    );
+    const fornecedoresPorCodigo = new Map(fornecedoresSeed.map((f) => [f.codigo, f.nomeFantasia]));
+    const fornecedorPorProduto = new Map(
+      compraInfoSeed.map((c) => [
+        c.codigoProduto,
+        { fatorCompra: c.fatorCompra, nomeFornecedor: fornecedoresPorCodigo.get(c.codigoFornecedor) ?? null },
+      ])
+    );
+
+    const sugestoes = calcularSugestaoCompras(catalogoProdutosSeed, demandaPorProduto, fornecedorPorProduto, params);
+    return delay(sugestoes);
+  }
+
+  async getRelatorioPrecificacao(_profile: Profile): Promise<ItemPrecificacao[]> {
+    const vendaPorProduto = new Map(
+      vendaRecenteSeed.map((v) => [v.codigoProduto, { quantidadeVendida30d: v.quantidadeVendida30d, diasSemVenda: v.diasSemVenda }])
+    );
+
+    // mesmo critério de "desconto ativo" usado em sugerirProdutosCampanha
+    // — produto já em campanha ativa/futura não é candidato a reajuste.
+    const campanhas = await getCampanhasStore();
+    const hojeIso = new Date().toISOString().slice(0, 10);
+    const codigosComDescontoAtivo = new Set(
+      campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
+    );
+
+    const relatorio = calcularRelatorioPrecificacao(catalogoProdutosSeed, vendaPorProduto, codigosComDescontoAtivo);
+    return delay(relatorio);
   }
 
   async excluirCampanha(id: string): Promise<void> {

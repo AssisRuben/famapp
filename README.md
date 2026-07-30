@@ -162,12 +162,26 @@ Definido em [`supabase/schema.sql`](supabase/schema.sql). Estrutura:
   oficial da Trier; os campos 3 e 4 (sempre `"0","0"` no exemplo) têm
   significado incerto. Valide com um import de teste em homologação antes
   de usar em produção.
+- **`fornecedores`** / **`compras`** / **`compras_itens`**: espelham
+  `FornecedorIntegracaoDto` e `CompraIntegracaoDto`/`ComprasItemIntegracaoDto`
+  da Trier (só leitura, igual venda/cliente). Alimentam a aba "Compras"
+  (lista de compras / "Dose Certa" no Trier): fornecedor sugerido e fator
+  de compra (conversão de embalagem) de cada produto são **inferidos** da
+  compra mais recente via `vw_produto_fornecedor_recente`, não cadastrados
+  à parte — a API não expõe um "fornecedor preferido por produto".
+  **Prazo de entrega e data da última cotação (que existem na tela do Dose
+  Certa dentro do Trier) não têm endpoint de leitura na integração** —
+  não aparecem no app porque não dá pra trazer isso sem inventar dado.
 - **`sync_control`**: controle de última sincronização por entidade, usado
   pelo coletor para saber o `dataInicial` da próxima chamada
   `obter-alterados`.
 - **Views analíticas** (o app consome estas, nunca as tabelas cruas):
   `vw_desempenho_vendedor_diario`, `vw_metricas_vendedor_diario` (ticket
-  médio, desconto, comissão), `vw_ranking_vendedores_dia`,
+  médio, desconto, comissão, custo total e margem bruta = faturamento
+  líquido − custo de aquisição, usando `venda_itens.vlr_custo_produto`
+  — confirmado com a farmácia; os outros dois campos de custo da tabela,
+  `valor_total_custo` e `vlr_custo_aquisicao`, NÃO são esse),
+  `vw_ranking_vendedores_dia`,
   `vw_vendas_por_canal`, `vw_clientes_inatividade` (com `telefone` e o
   vendedor da última compra — vendedor só vê os próprios clientes,
   gestor vê todos; **definida em `rls_policies.sql`, não em
@@ -177,7 +191,9 @@ Definido em [`supabase/schema.sql`](supabase/schema.sql). Estrutura:
   Alertas) e
   `vw_metas_progresso` (meta x realizado, com o realizado calculado na
   hora a partir de `vendas`/`venda_itens` reais — testado e confere:
-  soma dos 4 buckets semanais bate exatamente com o total mensal).
+  soma dos 4 buckets semanais bate exatamente com o total mensal) e
+  `vw_produto_fornecedor_recente` (fornecedor + fator de compra da compra
+  mais recente de cada produto, usada pela lista de compras).
 
 Nota sobre o checklist diário de atividades (aba "Checklist" do vendedor,
 configurada pelo gestor dentro da própria aba "Metas"): por enquanto só
@@ -220,6 +236,9 @@ Políticas de RLS aplicadas — ver [`supabase/rls_policies.sql`](supabase/rls_p
 - `produto_catalogo`: leitura por qualquer autenticado, mesmo padrão
   synced-pelo-coletor de `vendedores`/`clientes`/`vendas` (sem policy de
   escrita pra `authenticated`).
+- `fornecedores`/`compras`/`compras_itens`: mesmo padrão de
+  `produto_catalogo` — leitura por qualquer autenticado, escrita exclusiva
+  do coletor via `service_role`.
 - `campanhas`/`campanha_produtos`: só `gestor` (leitura e escrita) —
   vendedor não vê nem edita (testado: vendedor lê 0 campanhas mesmo
   havendo 1 no banco, e um insert como vendedor é bloqueado).

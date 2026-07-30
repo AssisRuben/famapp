@@ -38,6 +38,10 @@ export interface MetricasVendedorDiario {
   taxaDescontoPct: number;
   comissaoEstimada: number;
   ticketMedio: number;
+  // Custo de aquisição total (venda_itens.vlr_custo_produto) — margem
+  // bruta = faturamentoLiquido - totalCusto.
+  totalCusto: number;
+  margemBrutaPct: number;
 }
 
 // Espelha vw_ranking_vendedores_dia
@@ -240,4 +244,58 @@ export interface GrupoCartazete {
   dataFim: string;
   quantidadeCartazes: number;
   produtos: CampanhaProduto[];
+}
+
+// ============================================================
+// COMPRAS (Dose Certa) — lista de compras sugerida por
+// demanda/estoque. Estratégia "estoque de segurança": calcula a
+// demanda média diária a partir da venda recente (mesma janela usada
+// em Campanhas) e sugere repor até um alvo de dias de cobertura.
+// Fornecedor sugerido e fator de compra (conversão de embalagem) vêm
+// da compra mais recente do produto (vw_produto_fornecedor_recente) —
+// a API da Trier não expõe um cadastro de "fornecedor preferido por
+// produto" à parte. Prazo de entrega e última cotação (que existem na
+// tela do Dose Certa dentro do Trier) NÃO têm endpoint de leitura —
+// por isso não aparecem aqui.
+// ============================================================
+export interface ParametrosCompra {
+  diasSeguranca: number;
+  diasCobertura: number;
+  categoria?: string;
+}
+
+// ============================================================
+// PRECIFICAÇÃO — sinais que ajudam decisão de preço, calculados a
+// partir do que já existe (giro, margem, categoria, campanha ativa).
+// "Parado" e "elasticidade" são heurísticas de v1 (ver
+// src/lib/precificacao.ts pros limites usados) — margem por categoria
+// ao longo do tempo fica de fora por enquanto: precisaria de série
+// histórica que hoje não existe (só temos o "hoje").
+// ============================================================
+export type TagPrecificacao = 'candidato_reajuste' | 'parado_avaliar_preco' | 'baixa_elasticidade' | 'alta_elasticidade';
+
+export interface ItemPrecificacao {
+  produto: ProdutoCatalogo;
+  quantidadeVendida30d: number;
+  diasSemVenda: number | null;
+  margemAtualPct: number;
+  temDescontoAtivo: boolean;
+  tags: TagPrecificacao[];
+}
+
+export interface SugestaoCompra {
+  codigoProduto: number;
+  nomeProduto: string;
+  codigoBarras: string;
+  categoria: string;
+  estoqueAtual: number;
+  demandaMediaDiaria: number;
+  estoqueMinimo: number;
+  estoqueAlvo: number;
+  fatorCompra: number;
+  custoMedio: number;
+  precoVenda: number;
+  margemAtualPct: number;
+  fornecedorSugerido: string | null;
+  quantidadeSugerida: number;
 }

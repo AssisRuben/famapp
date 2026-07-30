@@ -4,8 +4,10 @@ import {
   ChecklistItemStatus,
   ClienteInatividade,
   DesempenhoVendedorDiario,
+  ItemPrecificacao,
   MetaVendedor,
   MetricasVendedorDiario,
+  ParametrosCompra,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
@@ -15,6 +17,7 @@ import {
   SalvarMetaInput,
   StatusSincronizacao,
   SugestaoCampanhaParams,
+  SugestaoCompra,
   TipoReceita,
   VendaReceitaPendente,
 } from '../types/domain';
@@ -76,4 +79,13 @@ export interface DataRepository {
   getCampanhas(profile: Profile): Promise<Campanha[]>;
   salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha>;
   excluirCampanha(id: string): Promise<void>;
+
+  // Compras (Dose Certa) — gestor-only na UI. Fornecedor sugerido e
+  // fator de compra vêm da compra mais recente de cada produto
+  // (vw_produto_fornecedor_recente no real), não de cadastro manual.
+  gerarSugestaoCompras(profile: Profile, params: ParametrosCompra): Promise<SugestaoCompra[]>;
+
+  // Precificação — gestor-only na UI. Diagnóstico (quem merece atenção
+  // e por quê), diferente de Campanhas (decide quanto descontar).
+  getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]>;
 }

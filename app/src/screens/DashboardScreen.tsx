@@ -8,7 +8,13 @@ import { MetaProgressBar } from '../components/MetaProgressBar';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
 import { formatBRL, formatDateHoraBR, todayISO } from '../lib/format';
 import { metaDiaria, semanaDoDia } from '../lib/metas';
-import { DesempenhoVendedorDiario, MetaVendedor, MetricasVendedorDiario, StatusSincronizacao } from '../types/domain';
+import {
+  ClienteInatividade,
+  DesempenhoVendedorDiario,
+  MetaVendedor,
+  MetricasVendedorDiario,
+  StatusSincronizacao,
+} from '../types/domain';
 import { colors } from '../theme/colors';
 
 function valoresDaMeta(
@@ -41,6 +47,7 @@ export function DashboardScreen() {
   const [desempenho, setDesempenho] = useState<DesempenhoVendedorDiario[]>([]);
   const [metas, setMetas] = useState<MetaVendedor[]>([]);
   const [statusSync, setStatusSync] = useState<StatusSincronizacao[]>([]);
+  const [clientesInatividade, setClientesInatividade] = useState<ClienteInatividade[]>([]);
   const [periodoMeta, setPeriodoMeta] = useState<PeriodoMeta>('mes');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -49,16 +56,21 @@ export function DashboardScreen() {
 
   const load = useCallback(async () => {
     if (!profile) return;
-    const [m, d, mt, ss] = await Promise.all([
+    const ehGestor = profile.role === 'gestor';
+    const [m, d, mt, ss, ci] = await Promise.all([
       repository.getMetricasVendedorDiario(profile, data),
       repository.getDesempenhoVendedorDiario(profile, data),
       repository.getMetas(profile, hoje.getFullYear(), hoje.getMonth() + 1),
       repository.getStatusSincronizacao(),
+      // só o gestor vê o card de clientes inativos — evita a chamada à
+      // toa pro vendedor, que não usa esse dado no Dashboard.
+      ehGestor ? repository.getClientesInatividade(profile) : Promise.resolve([]),
     ]);
     setMetricas(m);
     setDesempenho(d);
     setMetas(mt);
     setStatusSync(ss);
+    setClientesInatividade(ci);
   }, [profile, data]);
 
   useEffect(() => {
@@ -84,13 +96,16 @@ export function DashboardScreen() {
   const totalBruto = sum(metricas, (m) => m.faturamentoBruto);
   const totalDesconto = sum(metricas, (m) => m.totalDesconto);
   const totalComissao = sum(metricas, (m) => m.comissaoEstimada);
+  const totalCusto = sum(metricas, (m) => m.totalCusto);
   const totalNotas = sum(metricas, (m) => m.qtdNotas);
   const totalItens = sum(desempenho, (d) => d.quantidadeItens);
   const totalAtendimentos = sum(desempenho, (d) => d.quantidadeAtendimentos);
 
   const ticketMedio = totalNotas ? totalFaturamento / totalNotas : 0;
   const taxaDesconto = totalBruto ? (totalDesconto / totalBruto) * 100 : 0;
+  const margemBruta = totalFaturamento ? ((totalFaturamento - totalCusto) / totalFaturamento) * 100 : 0;
   const itensPorAtendimento = totalAtendimentos ? totalItens / totalAtendimentos : 0;
+  const clientesInativos = clientesInatividade.filter((c) => c.inativo).length;
   const semanaAtual = semanaDoDia(hoje.getDate());
   const realizadoHojePorVendedor = new Map(metricas.map((m) => [m.codigoVendedor, m.faturamentoLiquido]));
 
@@ -136,12 +151,34 @@ export function DashboardScreen() {
                 .map((m) => (
                   <View key={m.codigoVendedor} style={styles.vendedorRow}>
                     <Text style={styles.vendedorNome}>{m.nomeVendedor}</Text>
-                    <Text style={styles.vendedorValor}>{formatBRL(m.faturamentoLiquido)}</Text>
+                    <View style={styles.vendedorValores}>
+                      <Text style={styles.vendedorValor}>{formatBRL(m.faturamentoLiquido)}</Text>
+                      <Text style={styles.vendedorMargem}>margem {m.margemBrutaPct.toFixed(1)}%</Text>
+                    </View>
                   </View>
                 ))}
             </Card>
           )}
         </>
+      )}
+
+      {profile?.role === 'gestor' && (
+        <Card>
+          <Text style={styles.sectionTitle}>📈 Indicadores de gestão</Text>
+          <View style={styles.tileRow}>
+            <MetricTile label="Valor de vendas (bruto)" value={formatBRL(totalBruto)} accentColor={colors.navy} />
+            <MetricTile
+              label="Margem bruta"
+              value={`${margemBruta.toFixed(2)}%`}
+              accentColor={margemBruta < 30 ? colors.red : colors.success}
+            />
+            <MetricTile
+              label="Clientes inativos"
+              value={`${clientesInativos} de ${clientesInatividade.length}`}
+              accentColor={colors.red}
+            />
+          </View>
+        </Card>
       )}
 
       {metas.length > 0 && (
@@ -205,5 +242,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   vendedorNome: { color: colors.textSecondary },
+  vendedorValores: { alignItems: 'flex-end' },
   vendedorValor: { color: colors.textPrimary, fontWeight: '600' },
+  vendedorMargem: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
 });

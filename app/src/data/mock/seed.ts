@@ -37,15 +37,19 @@ export interface MetricasSeed {
   faturamentoBruto: number;
   totalDesconto: number;
   comissaoEstimada: number;
+  // Custo de aquisição total dos itens vendidos (vem de venda_itens.vlr_custo_produto
+  // na API real) — é o que dá a margem bruta. Vendedor 103 tem margem mais
+  // apertada de propósito (desconta mais, ~30%) pra ilustrar o comparativo.
+  totalCusto: number;
 }
 
 // Valores fictícios de faturamento/desconto/comissão do dia, por vendedor.
 export const metricasSeedHoje: MetricasSeed[] = [
-  { codigoVendedor: 101, qtdNotas: 24, faturamentoLiquido: 3180.5, faturamentoBruto: 3420.0, totalDesconto: 239.5, comissaoEstimada: 127.22 },
-  { codigoVendedor: 102, qtdNotas: 31, faturamentoLiquido: 4102.9, faturamentoBruto: 4390.0, totalDesconto: 287.1, comissaoEstimada: 164.12 },
-  { codigoVendedor: 103, qtdNotas: 18, faturamentoLiquido: 2210.0, faturamentoBruto: 2450.0, totalDesconto: 240.0, comissaoEstimada: 88.4 },
-  { codigoVendedor: 104, qtdNotas: 27, faturamentoLiquido: 3675.3, faturamentoBruto: 3800.0, totalDesconto: 124.7, comissaoEstimada: 147.01 },
-  { codigoVendedor: 105, qtdNotas: 12, faturamentoLiquido: 1420.0, faturamentoBruto: 1600.0, totalDesconto: 180.0, comissaoEstimada: 56.8 },
+  { codigoVendedor: 101, qtdNotas: 24, faturamentoLiquido: 3180.5, faturamentoBruto: 3420.0, totalDesconto: 239.5, comissaoEstimada: 127.22, totalCusto: 1971.91 },
+  { codigoVendedor: 102, qtdNotas: 31, faturamentoLiquido: 4102.9, faturamentoBruto: 4390.0, totalDesconto: 287.1, comissaoEstimada: 164.12, totalCusto: 2666.89 },
+  { codigoVendedor: 103, qtdNotas: 18, faturamentoLiquido: 2210.0, faturamentoBruto: 2450.0, totalDesconto: 240.0, comissaoEstimada: 88.4, totalCusto: 1547.0 },
+  { codigoVendedor: 104, qtdNotas: 27, faturamentoLiquido: 3675.3, faturamentoBruto: 3800.0, totalDesconto: 124.7, comissaoEstimada: 147.01, totalCusto: 2168.43 },
+  { codigoVendedor: 105, qtdNotas: 12, faturamentoLiquido: 1420.0, faturamentoBruto: 1600.0, totalDesconto: 180.0, comissaoEstimada: 56.8, totalCusto: 951.4 },
 ];
 
 export interface DesempenhoSeed {
@@ -319,6 +323,58 @@ export const vendaRecenteSeed: VendaRecenteSeedEntry[] = [
   { codigoProduto: 2027, quantidadeVendida30d: 14, diasSemVenda: 1 },
   { codigoProduto: 2028, quantidadeVendida30d: 9, diasSemVenda: 2 },
   { codigoProduto: 2029, quantidadeVendida30d: 5, diasSemVenda: 3 },
+];
+
+export interface FornecedorSeed {
+  codigo: number;
+  nomeFantasia: string;
+}
+
+export const fornecedoresSeed: FornecedorSeed[] = [
+  { codigo: 501, nomeFantasia: 'Distribuidora Central' },
+  { codigo: 502, nomeFantasia: 'Farma União Distribuição' },
+  { codigo: 503, nomeFantasia: 'MedSupply Brasil' },
+];
+
+export interface CompraInfoSeedEntry {
+  codigoProduto: number;
+  codigoFornecedor: number;
+  fatorCompra: number; // unidades por caixa/pacote de compra do fornecedor
+}
+
+// Simula o que vw_produto_fornecedor_recente calcularia no real: o
+// fornecedor e o fator de compra usados na compra mais recente de cada
+// produto — não é um cadastro à parte (a API não expõe isso).
+export const compraInfoSeed: CompraInfoSeedEntry[] = [
+  { codigoProduto: 2001, codigoFornecedor: 501, fatorCompra: 20 },
+  { codigoProduto: 2002, codigoFornecedor: 502, fatorCompra: 6 },
+  { codigoProduto: 2003, codigoFornecedor: 503, fatorCompra: 6 },
+  { codigoProduto: 2004, codigoFornecedor: 501, fatorCompra: 24 },
+  { codigoProduto: 2005, codigoFornecedor: 501, fatorCompra: 24 },
+  { codigoProduto: 2006, codigoFornecedor: 502, fatorCompra: 12 },
+  { codigoProduto: 2007, codigoFornecedor: 501, fatorCompra: 12 },
+  { codigoProduto: 2008, codigoFornecedor: 503, fatorCompra: 5 },
+  { codigoProduto: 2009, codigoFornecedor: 502, fatorCompra: 6 },
+  { codigoProduto: 2010, codigoFornecedor: 503, fatorCompra: 12 },
+  { codigoProduto: 2011, codigoFornecedor: 502, fatorCompra: 6 },
+  { codigoProduto: 2012, codigoFornecedor: 503, fatorCompra: 6 },
+  { codigoProduto: 2013, codigoFornecedor: 501, fatorCompra: 12 },
+  { codigoProduto: 2014, codigoFornecedor: 503, fatorCompra: 6 },
+  { codigoProduto: 2015, codigoFornecedor: 503, fatorCompra: 6 },
+  { codigoProduto: 2016, codigoFornecedor: 502, fatorCompra: 6 },
+  { codigoProduto: 2017, codigoFornecedor: 501, fatorCompra: 20 },
+  { codigoProduto: 2018, codigoFornecedor: 501, fatorCompra: 20 },
+  { codigoProduto: 2019, codigoFornecedor: 502, fatorCompra: 10 },
+  { codigoProduto: 2020, codigoFornecedor: 503, fatorCompra: 24 },
+  { codigoProduto: 2021, codigoFornecedor: 503, fatorCompra: 12 },
+  { codigoProduto: 2022, codigoFornecedor: 502, fatorCompra: 8 },
+  { codigoProduto: 2023, codigoFornecedor: 503, fatorCompra: 6 },
+  { codigoProduto: 2024, codigoFornecedor: 502, fatorCompra: 3 },
+  { codigoProduto: 2025, codigoFornecedor: 502, fatorCompra: 8 },
+  { codigoProduto: 2026, codigoFornecedor: 502, fatorCompra: 8 },
+  { codigoProduto: 2027, codigoFornecedor: 502, fatorCompra: 8 },
+  { codigoProduto: 2028, codigoFornecedor: 502, fatorCompra: 8 },
+  { codigoProduto: 2029, codigoFornecedor: 502, fatorCompra: 8 },
 ];
 
 // credenciais de demonstração (login mock) — todas com a senha abaixo.
