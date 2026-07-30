@@ -1,0 +1,337 @@
+{
+  "name": "Coletor SGF -> Supabase (incremental)",
+  "nodes": [
+    {
+      "id": "nota-geral",
+      "name": "Leia antes de importar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-320, -80],
+      "parameters": {
+        "width": 560,
+        "height": 460,
+        "content": "## Coletor SGF -> Supabase\n\nRoda a cada 15 min (Schedule Trigger). Para cada entidade (vendedor, cliente, venda+itens, atendimentos diarios):\n1. Le o cursor em `sync_control` (autoinicializa se nao existir linha ainda)\n2. HTTP Request node chama `obter-alterados-v1` na API SGF com esse cursor como `dataInicial` (autenticacao via credencial Header Auth, nunca no workflow)\n3. Code node monta um INSERT...ON CONFLICT (upsert) em SQL puro a partir da resposta\n4. Executa no Postgres (Supabase) e atualiza o cursor\n\n**Antes de importar, crie 2 credenciais no n8n:**\n- Header Auth chamada **SGF Trier - Bearer**: header `Authorization`, valor `Bearer <token>` (o token que a Trier liberou -- NUNCA cole no workflow, so no cofre de credenciais)\n- Postgres chamada **Supabase Postgres**: use o host do Session Pooler (nao o de conexao direta -- direto e IPv6-only e pode nao ser alcancavel da sua VPS), porta 5432, user `postgres.<project-ref>`\n\n**Antes de rodar pela 1a vez**, aplique `coletor/migracao_coletor.sql` no Supabase (adiciona constraint que falta em `venda_itens`).\n\n**Limitacao conhecida**: sem paginacao real. Cada chamada pede ate 999 registros (limite da propria API -- valores acima disso retornam 400 'nao pode ser superior a 999'); se um ciclo de 15 min tiver mais alteracoes que isso (deveria ser raro), sobra pro proximo ciclo (o cursor so avanca pra 'agora' mesmo tendo cortado, entao registros no meio do corte NAO se perdem, so atrasam pro fim da fila incremental seguinte -- mas revise se aparecer o aviso 'pagina cheia' no log com frequencia)."
+      }
+    },
+    {
+      "id": "trigger",
+      "name": "A cada 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-320, 460],
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 15 }
+          ]
+        }
+      }
+    },
+
+    { "id": "vend-nota", "name": "Nota - Vendedor", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [0, 20], "parameters": { "width": 1520, "height": 160, "content": "### Vendedor\nsync_control.entity_name = 'vendedor' | tabela: vendedores (PK codigo)" } },
+    {
+      "id": "vend-cursor",
+      "name": "Ler cursor - Vendedor",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [0, 200],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH boot AS (\n  INSERT INTO sync_control (entity_name, last_cursor)\n  VALUES ('vendedor', '2000-01-01T00:00:00-03:00')\n  ON CONFLICT (entity_name) DO NOTHING\n  RETURNING last_cursor\n),\ncursor_atual AS (\n  SELECT COALESCE(\n    (SELECT last_cursor FROM boot),\n    (SELECT last_cursor FROM sync_control WHERE entity_name = 'vendedor')\n  ) AS last_cursor\n)\nSELECT\n  to_char(last_cursor AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_inicial,\n  to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_final\nFROM cursor_atual;",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+    {
+      "id": "vend-http",
+      "name": "Buscar vendedores (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 200],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao/vendedor/obter-alterados-v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "primeiroRegistro", "value": "0" },
+            { "name": "quantidadeRegistros", "value": "999" },
+            { "name": "dataInicial", "value": "={{ $json.data_inicial }}" },
+            { "name": "dataFinal", "value": "={{ $json.data_final }}" }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": { "httpHeaderAuth": { "name": "SGF Trier - Bearer" } }
+    },
+    {
+      "id": "vend-buscar",
+      "name": "Mapear vendedores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 200],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// resposta da API pode chegar como 1 item cujo json E o array, ou ja\n// separada em N items (depende da versao do n8n) -- cobre os dois casos.\nconst brutos = $input.all().map((i) => i.json);\nconst linhas = brutos.length === 1 && Array.isArray(brutos[0]) ? brutos[0] : brutos;\nconst dataFinal = new Date().toISOString();\nconst QUANTIDADE = 999; // tem que bater com o 'quantidadeRegistros' do node HTTP Request\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, \"''\")}'::jsonb`;\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\nif (linhas.length >= QUANTIDADE) {\n  console.warn(`[vendedor] pagina cheia (${QUANTIDADE}) neste ciclo -- pode ter cortado registros.`);\n}\n\nlet sql = 'SELECT 1';\nif (linhas.length > 0) {\n  const valores = linhas.map((v) =>\n    `(${pgVal(v.codigo)}, ${pgVal(v.nome)}, ${pgVal(v.numeroCpf)}, ${pgVal(v.cep)}, ${pgVal(v.email)}, ${pgVal(v.ativo)}, now())`\n  ).join(',\\n');\n  sql = `INSERT INTO vendedores (codigo, nome, numero_cpf, cep, email, ativo, updated_at)\nVALUES ${valores}\nON CONFLICT (codigo) DO UPDATE SET\n  nome = EXCLUDED.nome,\n  numero_cpf = EXCLUDED.numero_cpf,\n  cep = EXCLUDED.cep,\n  email = EXCLUDED.email,\n  ativo = EXCLUDED.ativo,\n  updated_at = now();`;\n}\nsql += `\\nUPDATE sync_control SET last_cursor = '${dataFinal}', last_synced_at = now() WHERE entity_name = 'vendedor';`;\n\nreturn [{ json: { sql, quantidade: linhas.length } }];"
+      }
+    },
+    {
+      "id": "vend-executar",
+      "name": "Executar - Vendedor",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, 200],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+
+    { "id": "cli-nota", "name": "Nota - Cliente", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [0, 320], "parameters": { "width": 1520, "height": 160, "content": "### Cliente\nsync_control.entity_name = 'cliente' | tabela: clientes (PK codigo) | grupo/empresaConvenio vao direto pra jsonb" } },
+    {
+      "id": "cli-cursor",
+      "name": "Ler cursor - Cliente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [0, 500],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH boot AS (\n  INSERT INTO sync_control (entity_name, last_cursor)\n  VALUES ('cliente', '2000-01-01T00:00:00-03:00')\n  ON CONFLICT (entity_name) DO NOTHING\n  RETURNING last_cursor\n),\ncursor_atual AS (\n  SELECT COALESCE(\n    (SELECT last_cursor FROM boot),\n    (SELECT last_cursor FROM sync_control WHERE entity_name = 'cliente')\n  ) AS last_cursor\n)\nSELECT\n  to_char(last_cursor AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_inicial,\n  to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_final\nFROM cursor_atual;",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+    {
+      "id": "cli-http",
+      "name": "Buscar clientes (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 500],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao/cliente/obter-alterados-v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "primeiroRegistro", "value": "0" },
+            { "name": "quantidadeRegistros", "value": "999" },
+            { "name": "dataInicial", "value": "={{ $json.data_inicial }}" },
+            { "name": "dataFinal", "value": "={{ $json.data_final }}" }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": { "httpHeaderAuth": { "name": "SGF Trier - Bearer" } }
+    },
+    {
+      "id": "cli-buscar",
+      "name": "Mapear clientes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 500],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const brutos = $input.all().map((i) => i.json);\nconst linhas = brutos.length === 1 && Array.isArray(brutos[0]) ? brutos[0] : brutos;\nconst dataFinal = new Date().toISOString();\nconst QUANTIDADE = 999;\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, \"''\")}'::jsonb`;\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\nif (linhas.length >= QUANTIDADE) {\n  console.warn(`[cliente] pagina cheia (${QUANTIDADE}) neste ciclo -- pode ter cortado registros.`);\n}\n\nlet sql = 'SELECT 1';\nif (linhas.length > 0) {\n  const valores = linhas.map((c) =>\n    `(${pgVal(c.codigo)}, ${pgVal(c.nome)}, ${pgVal(c.numeroCpfCnpj)}, ${pgVal(c.codigoCidade)}, ${pgVal(c.email)}, ${pgVal(c.cep)}, ${pgVal(c.estado)}, ${pgVal(c.fone)}, ${pgVal(c.bairro)}, ${pgVal(c.logradouro)}, ${pgVal(c.numeroEndereco)}, ${pgVal(c.ativo)}, ${pgVal(c.grupo ?? null)}, ${pgVal(c.empresaConvenio ?? null)}, now())`\n  ).join(',\\n');\n  sql = `INSERT INTO clientes (codigo, nome, numero_cpf_cnpj, codigo_cidade, email, cep, estado, fone, bairro, logradouro, numero_endereco, ativo, grupo, empresa_convenio, updated_at)\nVALUES ${valores}\nON CONFLICT (codigo) DO UPDATE SET\n  nome = EXCLUDED.nome,\n  numero_cpf_cnpj = EXCLUDED.numero_cpf_cnpj,\n  codigo_cidade = EXCLUDED.codigo_cidade,\n  email = EXCLUDED.email,\n  cep = EXCLUDED.cep,\n  estado = EXCLUDED.estado,\n  fone = EXCLUDED.fone,\n  bairro = EXCLUDED.bairro,\n  logradouro = EXCLUDED.logradouro,\n  numero_endereco = EXCLUDED.numero_endereco,\n  ativo = EXCLUDED.ativo,\n  grupo = EXCLUDED.grupo,\n  empresa_convenio = EXCLUDED.empresa_convenio,\n  updated_at = now();`;\n}\nsql += `\\nUPDATE sync_control SET last_cursor = '${dataFinal}', last_synced_at = now() WHERE entity_name = 'cliente';`;\n\nreturn [{ json: { sql, quantidade: linhas.length } }];"
+      }
+    },
+    {
+      "id": "cli-executar",
+      "name": "Executar - Cliente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, 500],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+
+    { "id": "atd-nota", "name": "Nota - Atendimentos", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [0, 620], "parameters": { "width": 1520, "height": 160, "content": "### Atendimentos diarios por vendedor\nsync_control.entity_name = 'atendimentos_vendedor' | tabela: vendas_vendedor_diario (PK data_emissao+codigo_vendedor)" } },
+    {
+      "id": "atd-cursor",
+      "name": "Ler cursor - Atendimentos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [0, 800],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH boot AS (\n  INSERT INTO sync_control (entity_name, last_cursor)\n  VALUES ('atendimentos_vendedor', '2000-01-01T00:00:00-03:00')\n  ON CONFLICT (entity_name) DO NOTHING\n  RETURNING last_cursor\n),\ncursor_atual AS (\n  SELECT COALESCE(\n    (SELECT last_cursor FROM boot),\n    (SELECT last_cursor FROM sync_control WHERE entity_name = 'atendimentos_vendedor')\n  ) AS last_cursor\n)\nSELECT\n  to_char(last_cursor AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_inicial,\n  to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_final\nFROM cursor_atual;",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+    {
+      "id": "atd-http",
+      "name": "Buscar atendimentos (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 800],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao/venda/obter-atendimentos-diario-vendedor-v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "primeiroRegistro", "value": "0" },
+            { "name": "quantidadeRegistros", "value": "999" },
+            { "name": "dataInicial", "value": "={{ $json.data_inicial }}" },
+            { "name": "dataFinal", "value": "={{ $json.data_final }}" }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": { "httpHeaderAuth": { "name": "SGF Trier - Bearer" } }
+    },
+    {
+      "id": "atd-buscar",
+      "name": "Mapear atendimentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 800],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const brutos = $input.all().map((i) => i.json);\nconst linhas = brutos.length === 1 && Array.isArray(brutos[0]) ? brutos[0] : brutos;\nconst dataFinal = new Date().toISOString();\nconst QUANTIDADE = 999;\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, \"''\")}'::jsonb`;\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\nif (linhas.length >= QUANTIDADE) {\n  console.warn(`[atendimentos] pagina cheia (${QUANTIDADE}) neste ciclo -- pode ter cortado registros.`);\n}\n\nlet sql = 'SELECT 1';\nif (linhas.length > 0) {\n  const valores = linhas.map((a) =>\n    `(${pgVal(String(a.dataEmissao).slice(0, 10))}, ${pgVal(a.codigoVendedor)}, ${pgVal(a.quantidadeItens)}, ${pgVal(a.quantidadeAtendimentos)})`\n  ).join(',\\n');\n  sql = `INSERT INTO vendas_vendedor_diario (data_emissao, codigo_vendedor, quantidade_itens, quantidade_atendimentos)\nVALUES ${valores}\nON CONFLICT (data_emissao, codigo_vendedor) DO UPDATE SET\n  quantidade_itens = EXCLUDED.quantidade_itens,\n  quantidade_atendimentos = EXCLUDED.quantidade_atendimentos;`;\n}\nsql += `\\nUPDATE sync_control SET last_cursor = '${dataFinal}', last_synced_at = now() WHERE entity_name = 'atendimentos_vendedor';`;\n\nreturn [{ json: { sql, quantidade: linhas.length } }];"
+      }
+    },
+    {
+      "id": "atd-executar",
+      "name": "Executar - Atendimentos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, 800],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+
+    { "id": "ven-nota", "name": "Nota - Venda", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [0, 940], "parameters": { "width": 1800, "height": 200, "content": "### Venda + itens (a mais complexa)\nsync_control.entity_name = 'venda' | tabelas: vendas (upsert por numero_nota+cod_filial+ser_nota_fiscal, RETURNING id) e venda_itens (upsert por venda_id+num_sequencial -- precisa da migracao_coletor.sql).\n\nvendaComDesconto vem NUMBER da API mas a coluna e BOOLEAN -- mapeamento provisorio no Code node 'Preparar itens', ver nota no topo do workflow e migracao_coletor.sql." } },
+    {
+      "id": "ven-cursor",
+      "name": "Ler cursor - Venda",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [0, 1160],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH boot AS (\n  INSERT INTO sync_control (entity_name, last_cursor)\n  VALUES ('venda', '2000-01-01T00:00:00-03:00')\n  ON CONFLICT (entity_name) DO NOTHING\n  RETURNING last_cursor\n),\ncursor_atual AS (\n  SELECT COALESCE(\n    (SELECT last_cursor FROM boot),\n    (SELECT last_cursor FROM sync_control WHERE entity_name = 'venda')\n  ) AS last_cursor\n)\nSELECT\n  to_char(last_cursor AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_inicial,\n  to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_final\nFROM cursor_atual;",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+    {
+      "id": "ven-http",
+      "name": "Buscar vendas (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 1160],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao/venda/obter-alterados-v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "primeiroRegistro", "value": "0" },
+            { "name": "quantidadeRegistros", "value": "999" },
+            { "name": "dataInicial", "value": "={{ $json.data_inicial }}" },
+            { "name": "dataFinal", "value": "={{ $json.data_final }}" }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": { "httpHeaderAuth": { "name": "SGF Trier - Bearer" } }
+    },
+    {
+      "id": "ven-buscar",
+      "name": "Mapear vendas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 1160],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const brutos = $input.all().map((i) => i.json);\nconst vendas = brutos.length === 1 && Array.isArray(brutos[0]) ? brutos[0] : brutos;\nconst dataFinal = new Date().toISOString();\nconst QUANTIDADE = 999;\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, \"''\")}'::jsonb`;\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\n// horaEmissao nao vem sempre como ISO completo -- vendas antigas (ex.\n// historico de 2016) mandam so a hora, tipo \"00\" ou \"14\". Formato\n// desconhecido vira NULL em vez de quebrar o INSERT inteiro do lote.\nfunction horaParaPg(bruto) {\n  if (bruto === null || bruto === undefined || bruto === '') return null;\n  const s = String(bruto);\n  const idxT = s.indexOf('T');\n  if (idxT >= 0 && s.length >= idxT + 9) return s.slice(idxT + 1, idxT + 9);\n  if (/^\\d{2}:\\d{2}(:\\d{2})?$/.test(s)) return s.length === 5 ? s + ':00' : s;\n  if (/^\\d{1,2}$/.test(s)) return s.padStart(2, '0') + ':00:00';\n  return null;\n}\n\nif (vendas.length >= QUANTIDADE) {\n  console.warn(`[venda] pagina cheia (${QUANTIDADE}) neste ciclo -- pode ter cortado registros.`);\n}\n\n// sem vendas: WHERE FALSE garante RETURNING vazio (0 items pro proximo node),\n// em vez de dar erro de sintaxe com VALUES vazio.\nlet sql = 'SELECT NULL::bigint AS id, NULL::int AS numero_nota, NULL::int AS cod_filial, NULL::text AS ser_nota_fiscal WHERE FALSE';\n\nif (vendas.length > 0) {\n  const valores = vendas.map((v) => {\n    const dataEmissao = v.dataEmissao ? String(v.dataEmissao).slice(0, 10) : null;\n    const horaEmissao = horaParaPg(v.horaEmissao);\n    // API manda \"S\"/null pra venda de ecommerce; a coluna e boolean.\n    const vendaEcommerce = v.vendaEcommerce === 'S';\n    return `(${pgVal(v.numeroNota)}, ${pgVal(v.numeroNotaOrigem)}, ${pgVal(v.tipoCancelamento)}, ${pgVal(dataEmissao)}, ${pgVal(horaEmissao)}, ${pgVal(v.codigoVendedor)}, ${pgVal(v.codigoCliente)}, ${pgVal(v.entrega)}, ${pgVal(v.pagamentoNaEntrega)}, ${pgVal(v.condicaoPagamento ?? null)}, ${pgVal(v.vlrTroco)}, ${pgVal(v.numeroCupomFiscal)}, ${pgVal(v.numeroNotaFiscal)}, ${pgVal(v.xmlNfe)}, ${pgVal(v.codParceiro)}, ${pgVal(v.codFilial)}, ${pgVal(v.vendaIfood)}, ${pgVal(vendaEcommerce)}, ${pgVal(v.codEcommerce)}, ${pgVal(v.serNotaFiscal)}, ${pgVal(v.modeloVenda)}, ${pgVal(v.dadosEntrega ?? null)}, now())`;\n  }).join(',\\n');\n\n  // codigo_vendedor/codigo_cliente da venda tem FK pra vendedores/clientes.\n  // Como os 4 fluxos rodam em paralelo, pode a venda chegar antes do\n  // cliente/vendedor dono dela ter sido sincronizado (ou nunca ter mudado,\n  // logo nunca aparece no obter-alterados). Insere um registro-esqueleto\n  // (so o codigo, ON CONFLICT DO NOTHING) pra nao violar a FK -- quando o\n  // sync real desse cliente/vendedor rodar, o upsert dele preenche os\n  // dados de verdade por cima.\n  const codigosClientes = [...new Set(vendas.map((v) => v.codigoCliente).filter((c) => c != null))];\n  const codigosVendedores = [...new Set(vendas.map((v) => v.codigoVendedor).filter((c) => c != null))];\n  let stubsSql = '';\n  if (codigosClientes.length > 0) {\n    stubsSql += `INSERT INTO clientes (codigo) VALUES ${codigosClientes.map((c) => `(${pgVal(c)})`).join(',\\n')} ON CONFLICT (codigo) DO NOTHING;\\n`;\n  }\n  if (codigosVendedores.length > 0) {\n    stubsSql += `INSERT INTO vendedores (codigo, nome) VALUES ${codigosVendedores.map((c) => `(${pgVal(c)}, '(pendente sincronizacao)')`).join(',\\n')} ON CONFLICT (codigo) DO NOTHING;\\n`;\n  }\n\n  sql = stubsSql + `INSERT INTO vendas (numero_nota, numero_nota_origem, tipo_cancelamento, data_emissao, hora_emissao, codigo_vendedor, codigo_cliente, entrega, pagamento_na_entrega, condicao_pagamento, vlr_troco, numero_cupom_fiscal, numero_nota_fiscal, xml_nfe, cod_parceiro, cod_filial, venda_ifood, venda_ecommerce, cod_ecommerce, ser_nota_fiscal, modelo_venda, dados_entrega, updated_at)\nVALUES ${valores}\nON CONFLICT (numero_nota, cod_filial, ser_nota_fiscal) DO UPDATE SET\n  numero_nota_origem = EXCLUDED.numero_nota_origem,\n  tipo_cancelamento = EXCLUDED.tipo_cancelamento,\n  data_emissao = EXCLUDED.data_emissao,\n  hora_emissao = EXCLUDED.hora_emissao,\n  codigo_vendedor = EXCLUDED.codigo_vendedor,\n  codigo_cliente = EXCLUDED.codigo_cliente,\n  entrega = EXCLUDED.entrega,\n  pagamento_na_entrega = EXCLUDED.pagamento_na_entrega,\n  condicao_pagamento = EXCLUDED.condicao_pagamento,\n  vlr_troco = EXCLUDED.vlr_troco,\n  numero_cupom_fiscal = EXCLUDED.numero_cupom_fiscal,\n  numero_nota_fiscal = EXCLUDED.numero_nota_fiscal,\n  xml_nfe = EXCLUDED.xml_nfe,\n  cod_parceiro = EXCLUDED.cod_parceiro,\n  venda_ifood = EXCLUDED.venda_ifood,\n  venda_ecommerce = EXCLUDED.venda_ecommerce,\n  cod_ecommerce = EXCLUDED.cod_ecommerce,\n  modelo_venda = EXCLUDED.modelo_venda,\n  dados_entrega = EXCLUDED.dados_entrega,\n  updated_at = now()\nRETURNING id, numero_nota, cod_filial, ser_nota_fiscal;`;\n}\n\nconst vendasComItens = vendas.map((v) => ({\n  numeroNota: v.numeroNota,\n  codFilial: v.codFilial,\n  serNotaFiscal: v.serNotaFiscal,\n  itens: v.itens || [],\n}));\n\nreturn [{ json: { sql, vendasComItens, cursorNovo: dataFinal } }];"
+      }
+    },
+    {
+      "id": "ven-executar-vendas",
+      "name": "Executar upsert vendas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, 1160],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    },
+    {
+      "id": "ven-itens",
+      "name": "Preparar itens e cursor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 1160],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// input direto: linhas RETURNING (id, numero_nota, cod_filial, ser_nota_fiscal) do node anterior.\n// pode vir vazio se nenhuma venda foi upsertada neste ciclo.\nconst retornados = $input.all().map((item) => item.json);\n\n// .first() em vez de .item: 'Mapear vendas' sempre emite exatamente 1 item\n// (mesmo com 0 vendas), mas quando o RETURNING deste ciclo vem vazio o node\n// Postgres anterior nao emite nenhum item de saida -- sem item 'atual', o\n// pareamento automatico do .item quebra ('Paired item data ... unavailable').\n// .first() busca o item direto no node de origem, sem depender desse\n// pareamento.\nconst origem = $('Mapear vendas').first().json;\nconst vendasComItens = origem.vendasComItens || [];\nconst cursorNovo = origem.cursorNovo;\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, \"''\")}'::jsonb`;\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\n// chave natural pra casar RETURNING <-> venda original (nota+filial+serie)\nfunction chave(numeroNota, codFilial, serNotaFiscal) {\n  return `${numeroNota}|${codFilial ?? ''}|${serNotaFiscal ?? ''}`;\n}\n\nconst idPorChave = new Map(\n  retornados\n    .filter((r) => r.id != null)\n    .map((r) => [chave(r.numero_nota, r.cod_filial, r.ser_nota_fiscal), r.id])\n);\n\nconst linhasItens = [];\nconst codigosVendedoresItens = new Set();\nlet vendasSemId = 0;\nfor (const venda of vendasComItens) {\n  const vendaId = idPorChave.get(chave(venda.numeroNota, venda.codFilial, venda.serNotaFiscal));\n  if (!vendaId) { vendasSemId += 1; continue; } // nao deveria acontecer -- pula em vez de quebrar o lote inteiro\n  for (const item of venda.itens || []) {\n    // vendaComDesconto na API real e NUMBER (valor com desconto), mas\n    // venda_itens.venda_com_desconto no schema atual e BOOLEAN.\n    // Mapeamento provisorio -- ver coletor/migracao_coletor.sql.\n    const vendaComDescontoBool = item.vendaComDesconto != null && item.vendaComDesconto !== item.valorTotalLiquido;\n    if (item.codigoVendedor != null) codigosVendedoresItens.add(item.codigoVendedor);\n    linhasItens.push(\n      `(${pgVal(vendaId)}, ${pgVal(item.codigoProduto)}, ${pgVal(item.codigoVendedor)}, ${pgVal(item.quantidadeProdutos)}, ${pgVal(item.valorTotalBruto)}, ${pgVal(item.valorTotalLiquido)}, ${pgVal(item.valorTotalCusto)}, ${pgVal(item.parceiro)}, ${pgVal(item.codigoMedico)}, ${pgVal(item.codBarras)}, ${pgVal(item.numSequencial)}, ${pgVal(item.prcComissao)}, ${pgVal(item.vlrDesconto)}, ${pgVal(item.vlrUnitario)}, ${pgVal(item.vlrCustoAquisicao)}, ${pgVal(item.vlrCustoProduto)}, ${pgVal(item.tabelaDesconto)}, ${pgVal(item.prcDesconto)}, ${pgVal(item.prcDescontoMax)}, ${pgVal(vendaComDescontoBool)})`\n    );\n  }\n}\nif (vendasSemId > 0) {\n  console.warn(`[venda] ${vendasSemId} venda(s) sem id retornado -- itens dela(s) nao foram gravados neste ciclo.`);\n}\n\nlet sql = 'SELECT 1';\nif (linhasItens.length > 0) {\n  // mesmo motivo do stub em 'Mapear vendas': item pode ter um vendedor\n  // diferente do vendedor da nota, e a FK de venda_itens.codigo_vendedor\n  // pode nao ter sido satisfeita ainda por esse outro codigo.\n  let stubsSqlItens = '';\n  if (codigosVendedoresItens.size > 0) {\n    stubsSqlItens = `INSERT INTO vendedores (codigo, nome) VALUES ${[...codigosVendedoresItens].map((c) => `(${pgVal(c)}, '(pendente sincronizacao)')`).join(',\\n')} ON CONFLICT (codigo) DO NOTHING;\\n`;\n  }\n  sql = stubsSqlItens + `INSERT INTO venda_itens (venda_id, codigo_produto, codigo_vendedor, quantidade_produtos, valor_total_bruto, valor_total_liquido, valor_total_custo, parceiro, codigo_medico, cod_barras, num_sequencial, prc_comissao, vlr_desconto, vlr_unitario, vlr_custo_aquisicao, vlr_custo_produto, tabela_desconto, prc_desconto, prc_desconto_max, venda_com_desconto)\nVALUES ${linhasItens.join(',\\n')}\nON CONFLICT (venda_id, num_sequencial) DO UPDATE SET\n  codigo_produto = EXCLUDED.codigo_produto,\n  codigo_vendedor = EXCLUDED.codigo_vendedor,\n  quantidade_produtos = EXCLUDED.quantidade_produtos,\n  valor_total_bruto = EXCLUDED.valor_total_bruto,\n  valor_total_liquido = EXCLUDED.valor_total_liquido,\n  valor_total_custo = EXCLUDED.valor_total_custo,\n  parceiro = EXCLUDED.parceiro,\n  codigo_medico = EXCLUDED.codigo_medico,\n  cod_barras = EXCLUDED.cod_barras,\n  prc_comissao = EXCLUDED.prc_comissao,\n  vlr_desconto = EXCLUDED.vlr_desconto,\n  vlr_unitario = EXCLUDED.vlr_unitario,\n  vlr_custo_aquisicao = EXCLUDED.vlr_custo_aquisicao,\n  vlr_custo_produto = EXCLUDED.vlr_custo_produto,\n  tabela_desconto = EXCLUDED.tabela_desconto,\n  prc_desconto = EXCLUDED.prc_desconto,\n  prc_desconto_max = EXCLUDED.prc_desconto_max,\n  venda_com_desconto = EXCLUDED.venda_com_desconto;`;\n}\n\nsql += `\\nUPDATE sync_control SET last_cursor = '${cursorNovo}', last_synced_at = now() WHERE entity_name = 'venda';`;\n\nreturn [{ json: { sql, quantidadeItens: linhasItens.length } }];"
+      }
+    },
+    {
+      "id": "ven-executar-itens",
+      "name": "Executar itens + cursor",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1400, 1160],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": { "postgres": { "name": "Supabase Postgres" } }
+    }
+  ],
+  "connections": {
+    "A cada 15 min": {
+      "main": [[
+        { "node": "Ler cursor - Vendedor", "type": "main", "index": 0 },
+        { "node": "Ler cursor - Cliente", "type": "main", "index": 0 },
+        { "node": "Ler cursor - Atendimentos", "type": "main", "index": 0 },
+        { "node": "Ler cursor - Venda", "type": "main", "index": 0 }
+      ]]
+    },
+    "Ler cursor - Vendedor": { "main": [[{ "node": "Buscar vendedores (API)", "type": "main", "index": 0 }]] },
+    "Buscar vendedores (API)": { "main": [[{ "node": "Mapear vendedores", "type": "main", "index": 0 }]] },
+    "Mapear vendedores": { "main": [[{ "node": "Executar - Vendedor", "type": "main", "index": 0 }]] },
+
+    "Ler cursor - Cliente": { "main": [[{ "node": "Buscar clientes (API)", "type": "main", "index": 0 }]] },
+    "Buscar clientes (API)": { "main": [[{ "node": "Mapear clientes", "type": "main", "index": 0 }]] },
+    "Mapear clientes": { "main": [[{ "node": "Executar - Cliente", "type": "main", "index": 0 }]] },
+
+    "Ler cursor - Atendimentos": { "main": [[{ "node": "Buscar atendimentos (API)", "type": "main", "index": 0 }]] },
+    "Buscar atendimentos (API)": { "main": [[{ "node": "Mapear atendimentos", "type": "main", "index": 0 }]] },
+    "Mapear atendimentos": { "main": [[{ "node": "Executar - Atendimentos", "type": "main", "index": 0 }]] },
+
+    "Ler cursor - Venda": { "main": [[{ "node": "Buscar vendas (API)", "type": "main", "index": 0 }]] },
+    "Buscar vendas (API)": { "main": [[{ "node": "Mapear vendas", "type": "main", "index": 0 }]] },
+    "Mapear vendas": { "main": [[{ "node": "Executar upsert vendas", "type": "main", "index": 0 }]] },
+    "Executar upsert vendas": { "main": [[{ "node": "Preparar itens e cursor", "type": "main", "index": 0 }]] },
+    "Preparar itens e cursor": { "main": [[{ "node": "Executar itens + cursor", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

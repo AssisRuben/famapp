@@ -59,14 +59,38 @@ Componentes:
 
 ## Status atual / pendências
 
-- [ ] Acesso à API SGF (token Bearer) ainda não liberado pela Trier —
-      processo de solicitação em andamento.
+- [x] Acesso à API SGF (token Bearer) liberado pela Trier — validado com
+      chamada real em 30/07/2026 (`GET /rest/integracao/vendedor/obter-todos-v1`
+      → HTTP 200, dados reais). CNPJ homologado: 63396709000178
+      (`cod_farmacia` 13040, `cod_filial` 1). Token não expira na prática
+      (`exp` em 2100) — tratar como segredo permanente, nunca commitar,
+      nunca colocar no app mobile (ver seção "Segurança" abaixo).
+- [ ] **Descoberta a confirmar com a Trier**: o host fornecido foi
+      `https://api-sgf-gateway.triersistemas.com.br/sgfpod1` — um gateway
+      na nuvem da própria Trier (roteia pelo `cod_farmacia`/`cod_filial`
+      embutido no JWT), não o `http://<IP-da-farmácia>:4647/sgfpod1` com
+      porta redirecionada que a documentação oficial (`docs/api-sgf-openapi.json`)
+      descreve como método padrão. Se esse gateway for coisa que a Trier já
+      opera de verdade (não só liberado nesse ambiente de testes), **pode
+      eliminar a necessidade do túnel próprio** (item abaixo) — confirmar
+      com parcerias@grupotrier.com.br antes de descartar o túnel de vez.
 - [ ] Confirmar com a Trier: rate limits, limite de paginação, volume
       histórico disponível, canal oficial de suporte.
-- [ ] Confirmar com a farmácia (não com a Trier): autorização para instalar
-      o agente de túnel num computador da rede local.
-- [ ] Escolher entre Cloudflare Tunnel vs Tailscale para o túnel (ainda em
-      aberto).
+- [ ] Se o gateway acima NÃO for suficiente sozinho (ex.: só serve esse
+      ambiente de homologação): confirmar com a farmácia autorização para
+      instalar o agente de túnel num computador da rede local, e escolher
+      entre Cloudflare Tunnel vs Tailscale.
+- [ ] Produto `24766 - PRODUTO TAXA ENTREGA`: a taxa de entrega aparece
+      como um "produto" dentro de `venda_itens`, não como campo próprio da
+      venda — o coletor/as views analíticas precisam tratar esse código
+      como especial (não é item de prateleira; hoje `vw_metricas_vendedor_diario`
+      e afins tratariam ele como qualquer outro produto, inflando
+      itens-por-atendimento e possivelmente o cálculo de margem).
+- [ ] Coletor escrito (n8n) — vendedor/cliente/venda+itens/atendimentos
+      diários, cursor incremental via `sync_control`, ver
+      [`coletor/README.md`](coletor/README.md). Falta: rodar
+      `coletor/migracao_coletor.sql` no Supabase real, criar as
+      credenciais no n8n, importar e testar uma primeira execução.
 - [x] Criar conta Supabase.
 - [x] Definir schema inicial das tabelas no Supabase — ver
       [`supabase/schema.sql`](supabase/schema.sql).
@@ -345,8 +369,15 @@ real) substituir o mock por `vw_metas_comissao`.
 
 - App: React Native + Expo (Android/iOS a partir do mesmo código).
 - Backend/dados: Supabase (Postgres + Auth + API).
-- Coletor: automação agendada (a definir: n8n/Pipedream/função serverless).
-- Conectividade com a farmácia: Cloudflare Tunnel ou Tailscale (a decidir).
+- Coletor: **n8n**, rodando na VPS/EasyPanel que a farmácia já opera pra
+  outras automações — decisão tomada em 30/07/2026 (reaproveitar infra
+  existente em vez de criar uma nova; Edge Function/Cloudflare Worker
+  descartados por esse motivo). Workflow + guia de setup em
+  [`coletor/`](coletor/README.md).
+- Conectividade com a farmácia: **dispensada** — o coletor fala com o
+  gateway `api-sgf-gateway.triersistemas.com.br` da própria Trier, não
+  com um IP da farmácia. Ver descoberta em "Status atual / pendências"
+  acima (ainda não confirmada oficialmente com a Trier).
 - Ambiente de dev: Cursor + Claude Code.
 
 ## O que NÃO fazer (decisões já tomadas, não reabrir sem motivo)

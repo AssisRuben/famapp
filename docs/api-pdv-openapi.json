@@ -1,0 +1,2277 @@
+{
+  "openapi" : "3.0.1",
+  "info" : {
+    "title" : "API para integração de pedidos e-commerce no PDV",
+    "description" : "API para geração e manutenção de vendas e notas fiscais do e-commerce no PDV",
+    "version" : "1.0"
+  },
+  "servers" : [ {
+    "url" : "./",
+    "description" : "Servidor atual"
+  } ],
+  "tags" : [ {
+    "name" : "Nota Fiscal",
+    "description" : "Operações relacionadas à nota fiscal"
+  }, {
+    "name" : "Descontos",
+    "description" : "Métodos para obter informações de desconto dos produtos"
+  }, {
+    "name" : "Venda E-commerce",
+    "description" : "Métodos para integração de vendas do e-commerce"
+  } ],
+  "paths" : {
+    "/nfe/devolucao-rs" : {
+      "get" : {
+        "operationId" : "testeRest",
+        "responses" : {
+          "default" : {
+            "description" : "default response",
+            "content" : {
+              "text/plain" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "operationId" : "geraDevolucao",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DevolucaoFornecedorDTO"
+              }
+            },
+            "text/plain" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DevolucaoFornecedorDTO"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "default" : {
+            "description" : "default response",
+            "content" : {
+              "application/json" : { }
+            }
+          }
+        }
+      }
+    },
+    "/api/nota-fiscal/download-xml-nota-v1" : {
+      "get" : {
+        "tags" : [ "Nota Fiscal" ],
+        "summary" : "Download do XML da nota fiscal",
+        "description" : "Faz o download do XML da nota fiscal emitida.",
+        "operationId" : "downloadXmlNotaV1",
+        "parameters" : [ {
+          "name" : "numeroNota",
+          "in" : "query",
+          "description" : "Número da venda gerada no PDV",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "numeroPedido",
+          "in" : "query",
+          "description" : "Número do pedido no e-commerce vinculado à venda",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "XML da nota fiscal",
+            "content" : {
+              "application/xml" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "404" : {
+            "description" : "Nota fiscal não localizada"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/nota-fiscal/emitir-nota-v1" : {
+      "post" : {
+        "tags" : [ "Nota Fiscal" ],
+        "summary" : "Emitir nota fiscal",
+        "description" : "Emite uma nota fiscal para um pedido de e-commerce.",
+        "operationId" : "emitirNotaV1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/EmissaoNotaFiscalIntegracaoDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Nota(s) emitida(s) com sucesso",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EmissaoNotaFiscalIntegracaoRetDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Erro na emissão da nota"
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "500" : {
+            "description" : "Erro na emissão da nota"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/desconto/melhor/obter-v1" : {
+      "post" : {
+        "tags" : [ "Descontos" ],
+        "summary" : "Consultar melhor desconto por produto",
+        "description" : "Consulta melhor desconto do produto consultando no próprio sistema e no PEC.",
+        "operationId" : "obterV1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DescontoMelhorIntegracaoReqDto"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Consulta realizada com sucesso",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DescontoMelhorIntegracaoDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Requisição inválida"
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "500" : {
+            "description" : "Erro interno na consulta"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/venda/atualizar-status-venda-v1" : {
+      "post" : {
+        "tags" : [ "Venda E-commerce" ],
+        "summary" : "Atualizar status da venda e-commerce",
+        "description" : "Atualiza o status de uma venda e-commerce.",
+        "operationId" : "atualizarStatusPedidoV1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AtualizaStatusPedidoEcommerceDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Status atualizado com sucesso",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VendaEcommerceIntegracaoRetDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Requisição inválida"
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "500" : {
+            "description" : "Erro na atualização do status da venda"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/venda/consultar-venda-numero-nota-v1" : {
+      "get" : {
+        "tags" : [ "Venda E-commerce" ],
+        "summary" : "Consultar venda pelo número da venda",
+        "description" : "Consulta vendas pelo número da venda gerada no PDV.",
+        "operationId" : "consultarVendaCodigoBarrasV1",
+        "parameters" : [ {
+          "name" : "numeroNota",
+          "in" : "query",
+          "description" : "Número da venda gerada no PDV",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64",
+            "example" : 93149
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "Consulta realizada com sucesso",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VendaEcommerceIntegracaoDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Requisição inválida"
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "500" : {
+            "description" : "Erro interno na consulta"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/venda/consultar-venda-v1" : {
+      "get" : {
+        "tags" : [ "Venda E-commerce" ],
+        "summary" : "Consultar venda e-commerce",
+        "description" : "Consulta vendas do e-commerce por parâmetros.",
+        "operationId" : "consultarVendaV1",
+        "parameters" : [ {
+          "name" : "numeroNota",
+          "in" : "query",
+          "description" : "Número da venda gerada no PDV",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "numeroPedido",
+          "in" : "query",
+          "description" : "Número do pedido no e-commerce vinculado à venda",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limiteMensal",
+          "in" : "query",
+          "description" : "Se true, limita a consulta às vendas dos últimos 30 dias",
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "Consulta realizada com sucesso",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatusVendaEcommerceIntegracaoRetDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Requisição inválida"
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "500" : {
+            "description" : "Erro na consulta de vendas"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/venda/efetuar-venda-v1" : {
+      "post" : {
+        "tags" : [ "Venda E-commerce" ],
+        "summary" : "Efetuar venda e-commerce",
+        "description" : "Efetua uma venda no e-commerce.",
+        "operationId" : "efetuarVendaV1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VendaEcommerceIntegracaoDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Venda efetuada com sucesso",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VendaEcommerceIntegracaoRetDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Requisição inválida"
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "500" : {
+            "description" : "Erro na geração da venda"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/venda/finalizar-venda-v1" : {
+      "post" : {
+        "tags" : [ "Venda E-commerce" ],
+        "summary" : "Finalizar venda e-commerce",
+        "description" : "Finaliza uma venda no e-commerce.",
+        "operationId" : "finalizarVendaV1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VendaEcommerceFinalizacaoIntegracaoDto"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Venda finalizada com sucesso",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VendaEcommerceIntegracaoRetDto"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Requisição inválida"
+          },
+          "401" : {
+            "description" : "Não autorizado"
+          },
+          "500" : {
+            "description" : "Erro na finalização da venda"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "DadosDestinatario" : {
+        "type" : "object",
+        "properties" : {
+          "cnpj" : {
+            "type" : "string"
+          },
+          "inscricaoEstadual" : {
+            "type" : "string"
+          },
+          "inscricaoEstadualST" : {
+            "type" : "string"
+          },
+          "inscricaoMunicipal" : {
+            "type" : "string"
+          },
+          "razaoSocial" : {
+            "type" : "string"
+          },
+          "cnae" : {
+            "type" : "string"
+          },
+          "logradouro" : {
+            "type" : "string"
+          },
+          "bairro" : {
+            "type" : "string"
+          },
+          "cep" : {
+            "type" : "string"
+          },
+          "cidade" : {
+            "type" : "string"
+          },
+          "codigoMunicipio" : {
+            "type" : "string"
+          },
+          "complemento" : {
+            "type" : "string"
+          },
+          "telefone" : {
+            "type" : "string"
+          },
+          "numeroEndereco" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "indicadorIE" : {
+            "type" : "string"
+          },
+          "uf" : {
+            "type" : "string"
+          },
+          "inscricaoSuframa" : {
+            "type" : "string"
+          },
+          "codigoPais" : {
+            "type" : "string"
+          },
+          "pais" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DadosEmitente" : {
+        "type" : "object",
+        "properties" : {
+          "cnpj" : {
+            "type" : "string"
+          },
+          "inscricaoEstadual" : {
+            "type" : "string"
+          },
+          "inscricaoEstadualST" : {
+            "type" : "string"
+          },
+          "inscricaoMunicipal" : {
+            "type" : "string"
+          },
+          "razaoSocial" : {
+            "type" : "string"
+          },
+          "cnae" : {
+            "type" : "string"
+          },
+          "logradouro" : {
+            "type" : "string"
+          },
+          "bairro" : {
+            "type" : "string"
+          },
+          "cep" : {
+            "type" : "string"
+          },
+          "cidade" : {
+            "type" : "string"
+          },
+          "codigoMunicipio" : {
+            "type" : "string"
+          },
+          "complemento" : {
+            "type" : "string"
+          },
+          "telefone" : {
+            "type" : "string"
+          },
+          "numeroEndereco" : {
+            "type" : "string"
+          },
+          "codigoPais" : {
+            "type" : "string"
+          },
+          "pais" : {
+            "type" : "string"
+          },
+          "uf" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DadosTransporte" : {
+        "type" : "object",
+        "properties" : {
+          "cpfCnpjTransportador" : {
+            "type" : "string"
+          },
+          "nomeTransportador" : {
+            "type" : "string"
+          },
+          "ieTransportador" : {
+            "type" : "string"
+          },
+          "enderecoTransportador" : {
+            "type" : "string"
+          },
+          "nomeMunicipioTransportador" : {
+            "type" : "string"
+          },
+          "ufTransportador" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DevolucaoFornecedorDTO" : {
+        "type" : "object",
+        "properties" : {
+          "venda" : {
+            "$ref" : "#/components/schemas/Venda"
+          },
+          "notaEmitida" : {
+            "$ref" : "#/components/schemas/NotaFiscalDevolucao"
+          },
+          "numeroSerie" : {
+            "type" : "string"
+          },
+          "numeroUltimaNota" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "numeroNSU" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "ambiente" : {
+            "type" : "string"
+          },
+          "numeroLote" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tipoRegime" : {
+            "type" : "string",
+            "enum" : [ "SIMPLES_NACIONAL", "SIMPLES_NACIONAL_EXEC", "NORMAL", "SIMPLES_NACIONAL_MEI" ]
+          },
+          "tipoRegimeFornec" : {
+            "type" : "string",
+            "enum" : [ "SIMPLES_NACIONAL", "SIMPLES_NACIONAL_EXEC", "NORMAL", "SIMPLES_NACIONAL_MEI" ]
+          },
+          "codAplicacao" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "deveDestacarIcmsStEmCampoProprio" : {
+            "type" : "boolean"
+          },
+          "deveDestacarIpiEmCampoProprio" : {
+            "type" : "boolean"
+          },
+          "nt2025002Vigente" : {
+            "type" : "boolean"
+          },
+          "proximoLote" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "DfeReferenciado" : {
+        "type" : "object",
+        "properties" : {
+          "chave" : {
+            "type" : "string"
+          },
+          "nitem" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "IbsCbs" : {
+        "type" : "object",
+        "properties" : {
+          "aliquota" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualDiferimento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorDiferimento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualReducaoAliquota" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "aliquotaEfetiva" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valor" : {
+            "type" : "number",
+            "format" : "double"
+          }
+        }
+      },
+      "IbsCbsProduto" : {
+        "type" : "object",
+        "properties" : {
+          "cst" : {
+            "type" : "string"
+          },
+          "classificacaoTributaria" : {
+            "type" : "string"
+          },
+          "valorItem" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculo" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "ibsUf" : {
+            "$ref" : "#/components/schemas/IbsCbs"
+          },
+          "ibsMun" : {
+            "$ref" : "#/components/schemas/IbsCbs"
+          },
+          "cbs" : {
+            "$ref" : "#/components/schemas/IbsCbs"
+          },
+          "doacao" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "IntegracaoJsonItemNotaFiscal" : {
+        "type" : "object",
+        "properties" : {
+          "tabela" : {
+            "type" : "string"
+          },
+          "dados" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ItemNotaFiscal"
+            }
+          }
+        }
+      },
+      "ItemNotaFiscal" : {
+        "type" : "object",
+        "properties" : {
+          "ficticio" : {
+            "type" : "boolean"
+          },
+          "deveSubtrairIcmsDesonerado" : {
+            "type" : "boolean"
+          },
+          "deveSubtrairIcmsStDesonerado" : {
+            "type" : "boolean"
+          },
+          "indDeduzDeson" : {
+            "type" : "string"
+          },
+          "cod_rede" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "cod_filial" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "ser_nota" : {
+            "type" : "string"
+          },
+          "num_nota" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "num_sequencial" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "cod_reduzido" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "cod_produto" : {
+            "type" : "string"
+          },
+          "nom_produto" : {
+            "type" : "string"
+          },
+          "qtd_produto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_unitario" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_descto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_descto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_total" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_icms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_icms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_redicms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "bas_substrib" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_substrib" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_icms_substituto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "cod_natureza" : {
+            "type" : "string"
+          },
+          "cod_tribut" : {
+            "type" : "string"
+          },
+          "bas_icms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_icmsst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_racrearred" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_rtdescarred" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "sit_pis" : {
+            "type" : "string"
+          },
+          "sit_cofins" : {
+            "type" : "string"
+          },
+          "sit_ipi" : {
+            "type" : "string"
+          },
+          "vlr_frete" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_seguro" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_despacess" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "bas_pis" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_pis" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_pis" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "bas_cofins" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_cofins" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_cofins" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "cod_barra" : {
+            "type" : "string"
+          },
+          "bas_ipi" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_ipi" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_ipi" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "bas_fcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_fcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_fcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "bas_fcpst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_fcpst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_fcpst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_icmsdeson" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_icms_st_deson" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "cod_modelo" : {
+            "type" : "string"
+          },
+          "cod_origem" : {
+            "type" : "string"
+          },
+          "prc_icmsefet" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_base_icms_efetivo" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_red_base_icms_efetivo" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_icms_efetivo" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_icms_st_retido" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_base_icms_st_retido" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_icms_st_retido" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "medicamento" : {
+            "$ref" : "#/components/schemas/Medicamentos"
+          },
+          "rastro" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Rastros"
+            }
+          },
+          "prc_diferimento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_icms_op" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_diferimento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_redicmsst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prc_margemst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "obs_livre_contribuinte_id" : {
+            "type" : "string"
+          },
+          "obs_livre_contribuinte_conteudo" : {
+            "type" : "string"
+          },
+          "obs_livre_fisco_id" : {
+            "type" : "string"
+          },
+          "obs_livre_fisco_conteudo" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ItemVenda" : {
+        "type" : "object",
+        "properties" : {
+          "codigoRede" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "codigoFilial" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "numeroSequencial" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "codigoProduto" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "quantidade" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorUnitario" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualDesconto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorDesconto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorTotal" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualIcms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorIcms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualReducaoIcms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculoIcmsST" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorIcmsSt" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "codigoNatureza" : {
+            "type" : "string"
+          },
+          "codigoOrigem" : {
+            "type" : "string"
+          },
+          "codigoTributario" : {
+            "type" : "string"
+          },
+          "baseCalculoIcms" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualIcmsST" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculoFcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualFcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorFcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculoFcpST" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualFcpST" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorFcpSt" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorRateioAcrescimoArredondamento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorRateioDescontoArredondamento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "situacaoIpi" : {
+            "type" : "string"
+          },
+          "valorFrete" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorSeguro" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorDespesaAcessoria" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "codigoBarra" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "baseCalculoIpi" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualCalculoIpi" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorIpi" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculoPis" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualPis" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorPis" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculoCofins" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualCofins" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorCofins" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "descricaoProduto" : {
+            "type" : "string"
+          },
+          "ncm" : {
+            "type" : "string"
+          },
+          "unidade" : {
+            "type" : "string"
+          },
+          "codCest" : {
+            "type" : "string"
+          },
+          "valorIcmsDesonerado" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorIcmsStDesonerado" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "deveSubtrairIcmsDesonerado" : {
+            "type" : "boolean"
+          },
+          "deveSubtrairIcmsStDesonerado" : {
+            "type" : "boolean"
+          },
+          "nt2023004Vigente" : {
+            "type" : "boolean"
+          },
+          "percentualIcmsEfetivo" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "prcIcmsStRetido" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlrBaseIcmsStRetido" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlrIcmsStRetido" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlrICMSSubstituto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "codBenef" : {
+            "type" : "string"
+          },
+          "valorIcmsOperacao" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualDiferimento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorDiferimento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualReducaoIcmsSt" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "percentualMargemSt" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "obsLivreContribuinteId" : {
+            "type" : "string"
+          },
+          "obsLivreContribuinteConteudo" : {
+            "type" : "string"
+          },
+          "obsLivreFiscoId" : {
+            "type" : "string"
+          },
+          "obsLivreFiscoConteudo" : {
+            "type" : "string"
+          },
+          "ibsCbsProduto" : {
+            "$ref" : "#/components/schemas/IbsCbsProduto"
+          },
+          "valorItem" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "dfeReferenciado" : {
+            "$ref" : "#/components/schemas/DfeReferenciado"
+          }
+        }
+      },
+      "Medicamentos" : {
+        "type" : "object",
+        "properties" : {
+          "getvPMC" : {
+            "type" : "string"
+          },
+          "numRegms" : {
+            "type" : "string"
+          }
+        }
+      },
+      "NotaFiscalDevolucao" : {
+        "type" : "object",
+        "properties" : {
+          "cod_rede" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "cod_filial" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "ser_nota" : {
+            "type" : "string"
+          },
+          "cod_modelo" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "num_nf" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dat_emissao" : {
+            "type" : "string"
+          },
+          "hor_emissao" : {
+            "type" : "string"
+          },
+          "min_emissao" : {
+            "type" : "string"
+          },
+          "seg_emissao" : {
+            "type" : "string"
+          },
+          "tip_origem" : {
+            "type" : "string"
+          },
+          "num_seqcadinfis" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tot_nota" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "flg_cancelado" : {
+            "type" : "boolean"
+          },
+          "num_notaentra" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dat_notaentra" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "cod_fornec" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tip_condpagto" : {
+            "type" : "string"
+          },
+          "vlr_desconto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "vlr_acrescarred" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "num_seqnfe" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "num_ultlotenfe" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "flg_devol" : {
+            "type" : "boolean"
+          },
+          "tip_frete" : {
+            "type" : "string"
+          },
+          "dat_saient" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "cod_statusnfe" : {
+            "type" : "string"
+          },
+          "nom_chavenfe" : {
+            "type" : "string"
+          },
+          "tip_ambiente" : {
+            "type" : "string"
+          },
+          "num_protocoloenv" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "num_controleent" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "qtd_parcelas" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tip_operacao" : {
+            "type" : "string"
+          },
+          "tip_venda" : {
+            "type" : "string"
+          },
+          "tip_saida" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "cod_transp" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tot_bruto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "num_nfficticia" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "nom_obsnf" : {
+            "type" : "string"
+          },
+          "itens" : {
+            "$ref" : "#/components/schemas/IntegracaoJsonItemNotaFiscal"
+          },
+          "deveDestacarIcmsStEmCampoProprio" : {
+            "type" : "boolean",
+            "writeOnly" : true
+          },
+          "vlr_icmsdeson" : {
+            "type" : "number",
+            "format" : "double"
+          }
+        }
+      },
+      "NotaFiscalOrigem" : {
+        "type" : "object",
+        "properties" : {
+          "tipoNota" : {
+            "type" : "string"
+          },
+          "chaveNfe" : {
+            "type" : "string"
+          },
+          "dataEmissao" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "cnpj" : {
+            "type" : "string"
+          },
+          "estado" : {
+            "type" : "string"
+          },
+          "modelo" : {
+            "type" : "string"
+          },
+          "numero" : {
+            "type" : "string"
+          },
+          "serie" : {
+            "type" : "string"
+          },
+          "inscricaoEstadual" : {
+            "type" : "string"
+          },
+          "cpf" : {
+            "type" : "string"
+          },
+          "devolucaoTotal" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "Rastros" : {
+        "type" : "object",
+        "properties" : {
+          "getnLote" : {
+            "type" : "string"
+          },
+          "getqLote" : {
+            "type" : "string"
+          },
+          "getdFab" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "getdVal" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "getcAgreg" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Venda" : {
+        "type" : "object",
+        "properties" : {
+          "codigoRede" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "codigoFilial" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "valorTotal" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "codigoControle" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "codigoFornecedor" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tipoCondicaoPagamento" : {
+            "type" : "string"
+          },
+          "valorAcrescimoArredondamento" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "tipoFrete" : {
+            "type" : "string"
+          },
+          "dataSaida" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "quantidadeParcelas" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "codigoTransportadora" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "valorBruto" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorMercadoria" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculoFcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorFcp" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "baseCalculoFcpst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "aliquotaFcpst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorFcpst" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "informacoesAdicionais" : {
+            "type" : "string"
+          },
+          "tipoImpressao" : {
+            "type" : "string"
+          },
+          "somarSTOutrasDespesasAcessorias" : {
+            "type" : "boolean"
+          },
+          "dadosEmitente" : {
+            "$ref" : "#/components/schemas/DadosEmitente"
+          },
+          "dadosDestinatarioCreditoProprio" : {
+            "$ref" : "#/components/schemas/DadosDestinatario"
+          },
+          "dadosDestinatario" : {
+            "$ref" : "#/components/schemas/DadosDestinatario"
+          },
+          "dadosTransporte" : {
+            "$ref" : "#/components/schemas/DadosTransporte"
+          },
+          "notaOrigem" : {
+            "$ref" : "#/components/schemas/NotaFiscalOrigem"
+          },
+          "itens" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ItemVenda"
+            }
+          },
+          "valorTotalICMS" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorTotalICMSST" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorTotalICMSDesonerado" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "valorTotalICMSStDesonerado" : {
+            "type" : "number",
+            "format" : "double"
+          }
+        }
+      },
+      "EmissaoNotaFiscalIntegracaoRetDto" : {
+        "type" : "object",
+        "properties" : {
+          "numeroNota" : {
+            "type" : "integer",
+            "description" : "Número da venda gerada no PDV",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "numeroPedido" : {
+            "type" : "string",
+            "description" : "Número do pedido no e-commerce vinculado à venda",
+            "example" : "PED-20240001"
+          },
+          "numeroNotaFiscal" : {
+            "type" : "integer",
+            "description" : "Número da nota fiscal",
+            "format" : "int32",
+            "example" : 67890
+          },
+          "serieNotaFiscal" : {
+            "type" : "string",
+            "description" : "Série da nota fiscal",
+            "example" : "A1"
+          },
+          "modeloNotaFiscal" : {
+            "type" : "string",
+            "description" : "Modelo da nota fiscal",
+            "example" : "55"
+          },
+          "chaveNotaFiscal" : {
+            "type" : "string",
+            "description" : "Chave da nota fiscal eletrônica",
+            "example" : "12345678901234567890123456789012345678901234"
+          },
+          "numeroSequencial" : {
+            "type" : "integer",
+            "description" : "Número sequencial da emissão",
+            "format" : "int32",
+            "example" : 1
+          },
+          "tipoRetorno" : {
+            "type" : "string",
+            "description" : "Tipo do retorno",
+            "example" : "Sucesso"
+          },
+          "codigoRetorno" : {
+            "type" : "string",
+            "description" : "Código do retorno",
+            "example" : "200"
+          },
+          "descricaoRetorno" : {
+            "type" : "string",
+            "description" : "Descrição detalhada do retorno",
+            "example" : "Nota fiscal emitida com sucesso"
+          }
+        },
+        "description" : "Objeto utilizado para retornar dados da emissão de uma nota fiscal de uma venda e-commerce no PDV"
+      },
+      "EmissaoNotaFiscalIntegracaoDto" : {
+        "required" : [ "numeroNota", "numeroPedido" ],
+        "type" : "object",
+        "properties" : {
+          "numeroNota" : {
+            "type" : "integer",
+            "description" : "Número da venda gerada no PDV",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "numeroPedido" : {
+            "type" : "string",
+            "description" : "Número do pedido no e-commerce",
+            "example" : "PED-20240001"
+          }
+        },
+        "description" : "Objeto utilizado para a emitir uma nota fiscal de uma venda e-commerce no PDV"
+      },
+      "DescontoMelhorIntegracaoDto" : {
+        "type" : "object",
+        "properties" : {
+          "codigoProduto" : {
+            "type" : "integer",
+            "description" : "Código identificador do produto",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "nomeProduto" : {
+            "type" : "string",
+            "description" : "Nome do produto",
+            "example" : "Dipirona 500mg"
+          },
+          "codigoBarras" : {
+            "type" : "integer",
+            "description" : "Código de barras do produto",
+            "format" : "int64",
+            "example" : 7891234567890
+          },
+          "quantidade" : {
+            "type" : "integer",
+            "description" : "Quantidade do produto",
+            "format" : "int32",
+            "example" : 150
+          },
+          "quantidadeEstoque" : {
+            "type" : "integer",
+            "description" : "Quantidade disponível em estoque",
+            "format" : "int32",
+            "example" : 150
+          },
+          "codigoLaboratorio" : {
+            "type" : "integer",
+            "description" : "Código identificador do laboratório",
+            "format" : "int32",
+            "example" : 678
+          },
+          "nomeLaboratorio" : {
+            "type" : "string",
+            "description" : "Nome do laboratório fabricante",
+            "example" : "Laboratório Genérico S.A."
+          },
+          "valorVenda" : {
+            "type" : "number",
+            "description" : "Valor de venda do produto",
+            "format" : "double",
+            "example" : 19.9
+          },
+          "percentualDesconto" : {
+            "type" : "number",
+            "description" : "Percentual de desconto aplicado",
+            "format" : "double",
+            "example" : 15.0
+          },
+          "nomeDesconto" : {
+            "type" : "string",
+            "description" : "Nome do desconto aplicado",
+            "example" : "CADPRODU"
+          },
+          "codigoCondicaoPagamento" : {
+            "type" : "string",
+            "description" : "Código da condição de pagamento do desconto aplicado",
+            "example" : "7"
+          },
+          "nomeCondicaoPagamento" : {
+            "type" : "string",
+            "description" : "Nome da condição de pagamento do desconto aplicado",
+            "example" : "CARTAO"
+          }
+        },
+        "description" : "Objeto que representa os dados de melhor desconto para a produto"
+      },
+      "DescontoMelhorIntegracaoReqDto" : {
+        "required" : [ "produtos" ],
+        "type" : "object",
+        "properties" : {
+          "identificadorCliente" : {
+            "maxLength" : 18,
+            "type" : "string",
+            "description" : "Identificador do Cliente (cartão, CPF ou CNPJ)",
+            "example" : "111.111.111-11"
+          },
+          "considerarTodasCondicoesPagamento" : {
+            "maxLength" : 18,
+            "type" : "string",
+            "description" : "Considerar todas as condições de pagamento",
+            "example" : "S"
+          },
+          "produtos" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ProdutoDescontoMelhorIntegracaoDto"
+            }
+          }
+        },
+        "description" : "Objeto utilizado para consultar o melhor desconto."
+      },
+      "ProdutoDescontoMelhorIntegracaoDto" : {
+        "required" : [ "codigoProduto", "quantidade" ],
+        "type" : "object",
+        "properties" : {
+          "codigoProduto" : {
+            "type" : "integer",
+            "description" : "Código do produto",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "quantidade" : {
+            "minimum" : 1,
+            "type" : "integer",
+            "description" : "Quantidade do produto",
+            "format" : "int32",
+            "example" : 1
+          }
+        },
+        "description" : "Item para consultar o melhor desconto"
+      },
+      "StatusPedido" : {
+        "type" : "object",
+        "properties" : {
+          "codigo" : {
+            "type" : "string",
+            "description" : "Código do status do pedido"
+          },
+          "descricao" : {
+            "type" : "string",
+            "description" : "Descrição do status do pedido"
+          }
+        },
+        "description" : "Status do pedido"
+      },
+      "VendaEcommerceIntegracaoRetDto" : {
+        "type" : "object",
+        "properties" : {
+          "numeroNota" : {
+            "type" : "integer",
+            "description" : "Número da venda gerada no PDV",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "numeroPedido" : {
+            "type" : "string",
+            "description" : "Número do pedido no e-commerce vinculado à venda",
+            "example" : "PED-20240001"
+          },
+          "statusPedido" : {
+            "$ref" : "#/components/schemas/StatusPedido"
+          }
+        },
+        "description" : "Objeto utilizado para retornar dados da geração ou finalização de uma venda e-commerce no PDV"
+      },
+      "AtualizaStatusPedidoEcommerceDto" : {
+        "required" : [ "numeroNota", "numeroPedido", "status" ],
+        "type" : "object",
+        "properties" : {
+          "numeroNota" : {
+            "type" : "integer",
+            "description" : "Número da venda gerada no PDV",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "numeroPedido" : {
+            "type" : "string",
+            "description" : "Número do pedido no e-commerce vinculado à venda",
+            "example" : "PED-20240001"
+          },
+          "status" : {
+            "type" : "string",
+            "description" : "Status do pedido no e-commerce",
+            "example" : "4",
+            "enum" : [ "4 - CANCELADO" ]
+          }
+        },
+        "description" : "Objeto utilizado para atualizar o status de uma venda e-commerce no PDV"
+      },
+      "CartaoVendaIntegracaoDTO" : {
+        "required" : [ "codigo", "valor" ],
+        "type" : "object",
+        "properties" : {
+          "codigo" : {
+            "type" : "integer",
+            "description" : "Código do cartão (Trier)",
+            "format" : "int32",
+            "example" : 1
+          },
+          "valor" : {
+            "type" : "number",
+            "description" : "Valor pago no cartão",
+            "format" : "double",
+            "example" : 100.0
+          },
+          "qtdParcela" : {
+            "type" : "integer",
+            "description" : "Número de parcelas no cartão",
+            "format" : "int32",
+            "example" : 3
+          },
+          "numeroAutorizacao" : {
+            "type" : "integer",
+            "description" : "Número de autorização da transação no cartão",
+            "format" : "int32",
+            "example" : 1234567890
+          }
+        },
+        "description" : "Objeto utilizado para informar a forma de pagamento CARTÃO em uma venda e-commerce no PDV"
+      },
+      "ClienteEcommerceIntegracaoDto" : {
+        "required" : [ "nome", "numeroCpfCnpj" ],
+        "type" : "object",
+        "properties" : {
+          "codigo" : {
+            "type" : "integer",
+            "description" : "Código do cliente, se não informado, será gerado automaticamente pelo PDV",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "nome" : {
+            "maxLength" : 40,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Nome do cliente",
+            "example" : "João da Silva"
+          },
+          "numeroCpfCnpj" : {
+            "maxLength" : 18,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Número do CPF ou CNPJ do cliente",
+            "example" : "12345678901"
+          },
+          "email" : {
+            "maxLength" : 80,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "E-mail do cliente",
+            "example" : "email@teste.com"
+          },
+          "fone" : {
+            "maxLength" : 14,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Número de telefone do cliente",
+            "example" : "(48)99999-9999"
+          },
+          "numeroRGIE" : {
+            "maxLength" : 15,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Número do RG ou IE do cliente",
+            "example" : "1234567890"
+          },
+          "sexo" : {
+            "maxLength" : 1,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Sexo do cliente",
+            "example" : "M",
+            "enum" : [ "M,F" ]
+          },
+          "dataNascimento" : {
+            "type" : "string",
+            "description" : "Data de nascimento do cliente",
+            "format" : "date-time"
+          },
+          "celular" : {
+            "maxLength" : 14,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Número de celular do cliente",
+            "format" : "(##)#####-####",
+            "example" : "(48)90000-0000"
+          }
+        },
+        "description" : "Objeto utilizado para informar o cliente de uma venda e-commerce no PDV"
+      },
+      "DinheiroIntegracaoDTO" : {
+        "required" : [ "valor" ],
+        "type" : "object",
+        "properties" : {
+          "valor" : {
+            "type" : "number",
+            "description" : "Valor pago em dinheiro",
+            "format" : "double",
+            "example" : 100.0
+          }
+        },
+        "description" : "Objeto utilizado para informar a forma de pagamento DINHEIRO em uma venda e-commerce no PDV"
+      },
+      "EnderecoEntregaIntegracaoDto" : {
+        "required" : [ "bairro", "cidade", "estado", "logradouro" ],
+        "type" : "object",
+        "properties" : {
+          "logradouro" : {
+            "maxLength" : 40,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Logradouro",
+            "example" : "Rua das Flores"
+          },
+          "numero" : {
+            "maxLength" : 5,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Número",
+            "example" : "123"
+          },
+          "complemento" : {
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Complemento",
+            "example" : "Apto 101"
+          },
+          "referencia" : {
+            "maxLength" : 256,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Referência",
+            "example" : "Ao lado do mercado público"
+          },
+          "bairro" : {
+            "maxLength" : 35,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Bairro",
+            "example" : "Centro"
+          },
+          "cidade" : {
+            "maxLength" : 50,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Cidade",
+            "example" : "São Paulo"
+          },
+          "estado" : {
+            "maxLength" : 2,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Estado",
+            "example" : "SP"
+          },
+          "cep" : {
+            "maxLength" : 8,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "CEP",
+            "example" : "12345678"
+          }
+        },
+        "description" : "Objeto utilizado para informar o endereço de entregra de uma venda e-commerce no PDV"
+      },
+      "PagamentoMultiploIntegracaoDto" : {
+        "type" : "object",
+        "properties" : {
+          "dinheiro" : {
+            "$ref" : "#/components/schemas/DinheiroIntegracaoDTO"
+          },
+          "cartao" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CartaoVendaIntegracaoDTO"
+            }
+          },
+          "pix" : {
+            "$ref" : "#/components/schemas/PixIntegracaoDTO"
+          }
+        },
+        "description" : "Objeto utilizado para informar as formas de pagamento de uma venda e-commerce no PDV"
+      },
+      "PixIntegracaoDTO" : {
+        "required" : [ "codigo", "valor" ],
+        "type" : "object",
+        "properties" : {
+          "codigo" : {
+            "type" : "integer",
+            "description" : "Código do tipo de pagamento PIX (Cartão)",
+            "format" : "int32",
+            "example" : 5
+          },
+          "valor" : {
+            "type" : "number",
+            "description" : "Valor pago no PIX",
+            "format" : "double",
+            "example" : 100.0
+          },
+          "numeroAutorizacao" : {
+            "type" : "integer",
+            "description" : "Número da autorização",
+            "format" : "int32",
+            "example" : 1234567890
+          },
+          "idTransacaoPIX" : {
+            "type" : "string",
+            "description" : "ID da transação PIX",
+            "example" : "1234567890"
+          }
+        },
+        "description" : "Objeto utilizado para informar a forma de pagamento PIX em uma venda e-commerce no PDV"
+      },
+      "VendaEcommerceIntegracaoDto" : {
+        "required" : [ "dataPedido", "valorTotalVenda" ],
+        "type" : "object",
+        "properties" : {
+          "numeroPedido" : {
+            "type" : "string",
+            "description" : "Número do pedido no e-commerce que será vinculado à venda",
+            "example" : "PED-20240001"
+          },
+          "numeroNota" : {
+            "maxLength" : 9,
+            "type" : "integer",
+            "description" : "Número da venda gerada no PDV (somente quando originado de um DAV)",
+            "format" : "int32",
+            "example" : 98143
+          },
+          "dataPedido" : {
+            "type" : "string",
+            "description" : "Data do pedido no e-commerce",
+            "format" : "yyyy-MM-dd'T'HH:mm:ssZ",
+            "example" : "2020-01-01T23:59:59-0300"
+          },
+          "valorTotalVenda" : {
+            "minimum" : 0,
+            "exclusiveMinimum" : true,
+            "type" : "number",
+            "description" : "Valor total do pedido, que será utilizado como total da venda",
+            "format" : "double",
+            "example" : 100.0
+          },
+          "valorFrete" : {
+            "type" : "number",
+            "description" : "Valor do frete do pedido",
+            "format" : "double",
+            "example" : 10.0
+          },
+          "entrega" : {
+            "type" : "boolean",
+            "description" : "Indica se é uma venda Tele-Entrega ou não",
+            "example" : true,
+            "default" : false,
+            "enum" : [ false ]
+          },
+          "cliente" : {
+            "$ref" : "#/components/schemas/ClienteEcommerceIntegracaoDto"
+          },
+          "enderecoEntrega" : {
+            "$ref" : "#/components/schemas/EnderecoEntregaIntegracaoDto"
+          },
+          "produtos" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VendaItemEcommerceIntegracaoDto"
+            }
+          },
+          "vendedor" : {
+            "$ref" : "#/components/schemas/VendedorEcommerceIntegracaoDto"
+          },
+          "pagamentoMultiplo" : {
+            "$ref" : "#/components/schemas/PagamentoMultiploIntegracaoDto"
+          }
+        },
+        "description" : "Objeto utilizado para gerar uma venda e-commerce no PDV"
+      },
+      "VendaItemEcommerceIntegracaoDto" : {
+        "required" : [ "codigoProduto", "nomeProduto", "quantidade", "valorUnitario" ],
+        "type" : "object",
+        "properties" : {
+          "codigoProduto" : {
+            "type" : "integer",
+            "description" : "Código do produto",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "nomeProduto" : {
+            "maxLength" : 30,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Nome do produto",
+            "example" : "Produto Exemplo"
+          },
+          "quantidade" : {
+            "minimum" : 0,
+            "exclusiveMinimum" : true,
+            "type" : "integer",
+            "description" : "Quantidade do produto",
+            "format" : "int32",
+            "example" : 2
+          },
+          "valorUnitario" : {
+            "minimum" : 0,
+            "exclusiveMinimum" : true,
+            "type" : "number",
+            "description" : "Valor unitário do produto",
+            "format" : "double",
+            "example" : 50.0
+          },
+          "valorDesconto" : {
+            "minimum" : 0.0,
+            "type" : "number",
+            "description" : "Valor unitário do desconto aplicado ao produto",
+            "format" : "double",
+            "example" : 0.5
+          },
+          "nomeDesconto" : {
+            "maxLength" : 15,
+            "minLength" : 0,
+            "type" : "string",
+            "description" : "Origem do desconto",
+            "example" : "CADPRODU"
+          },
+          "numeroSequencial" : {
+            "minimum" : 1,
+            "maxLength" : 9,
+            "type" : "integer",
+            "description" : "Número sequencial (somente quando originado de um DAV)",
+            "format" : "int32",
+            "example" : 1
+          }
+        },
+        "description" : "Item da venda e-commerce no PDV"
+      },
+      "VendedorEcommerceIntegracaoDto" : {
+        "type" : "object",
+        "properties" : {
+          "codigo" : {
+            "maxLength" : 9,
+            "type" : "integer",
+            "description" : "Código do vendedor",
+            "format" : "int32",
+            "example" : 123
+          },
+          "nome" : {
+            "maxLength" : 40,
+            "minLength" : 3,
+            "type" : "string",
+            "description" : "Nome do vendedor",
+            "example" : "Maria"
+          }
+        },
+        "description" : "Objeto utilizado para informar o vendedor de uma venda e-commerce no PDV"
+      },
+      "StatusVendaEcommerceIntegracaoRetDto" : {
+        "type" : "object",
+        "properties" : {
+          "numeroNota" : {
+            "type" : "integer",
+            "description" : "Número da venda gerada no PDV",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "numeroPedido" : {
+            "type" : "string",
+            "description" : "Número do pedido no e-commerce vinculado à venda",
+            "example" : "PED-20240001"
+          },
+          "dataPedido" : {
+            "type" : "string",
+            "description" : "Data do pedido no e-commerce",
+            "format" : "date-time"
+          },
+          "xmlNfe" : {
+            "type" : "string",
+            "description" : "XML da nota fiscal eletrônica"
+          },
+          "statusPedido" : {
+            "$ref" : "#/components/schemas/StatusPedido"
+          },
+          "numeroCupomFiscal" : {
+            "type" : "integer",
+            "description" : "Número do cupom fiscal",
+            "format" : "int32"
+          },
+          "numeroNotaFiscal" : {
+            "type" : "integer",
+            "description" : "Número da nota fiscal",
+            "format" : "int32"
+          }
+        },
+        "description" : "Objeto utilizado para retornar o status de uma venda e-commerce no PDV"
+      },
+      "VendaEcommerceFinalizacaoIntegracaoDto" : {
+        "required" : [ "numeroNota" ],
+        "type" : "object",
+        "properties" : {
+          "numeroNota" : {
+            "type" : "integer",
+            "description" : "Número da venda gerada no PDV",
+            "format" : "int32",
+            "example" : 12345
+          },
+          "numeroPedido" : {
+            "type" : "string",
+            "description" : "Número do pedido no e-commerce vinculado à venda",
+            "example" : "PED-123456"
+          },
+          "pagamentoMultiplo" : {
+            "$ref" : "#/components/schemas/PagamentoMultiploIntegracaoDto"
+          }
+        },
+        "description" : "Objeto utilizado para finalizar uma venda e-commerce no PDV"
+      }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "type" : "http",
+        "in" : "header",
+        "scheme" : "bearer",
+        "bearerFormat" : "JWT"
+      }
+    }
+  }
+}
