@@ -30,13 +30,35 @@ function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
   );
 }
 
+// Abas acessadas só pelo drawer não têm nenhum item próprio na barra
+// (abaixo) pra tocar de volta — sem isso, dava pra "ir fundo" no
+// drawer e não sobrar nenhuma pista visual de como voltar, mesmo a
+// barra inferior continuando funcional por baixo dos panos.
+function BotaoVoltar() {
+  return (
+    <Pressable
+      onPress={() => navigationRef.navigate('Dashboard' as never)}
+      style={styles.voltarButton}
+      hitSlop={8}
+    >
+      <Ionicons name="arrow-back" size={24} color={colors.white} />
+    </Pressable>
+  );
+}
+
 // tabBarButton: () => null só esconde o CONTEÚDO — o item continua
 // reservando flex:1 na barra (é assim que a lib desenha cada aba), o
 // que deixava buracos e as abas visíveis desalinhadas. Zerar o
 // tabBarItemStyle junto colapsa o espaço de verdade.
+// headerLeft: como essas abas não aparecem na barra, ganham um botão
+// de voltar explícito no header pra Dashboard (ver BotaoVoltar acima).
 function abaOculta(oculta: boolean) {
   return oculta
-    ? { tabBarButton: () => null, tabBarItemStyle: { flex: 0, width: 0, padding: 0, margin: 0 } }
+    ? {
+        tabBarButton: () => null,
+        tabBarItemStyle: { flex: 0, width: 0, padding: 0, margin: 0 },
+        headerLeft: () => <BotaoVoltar />,
+      }
     : {};
 }
 
@@ -199,6 +221,7 @@ export function RootNavigator() {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   menuButton: { marginRight: 16, padding: 4 },
+  voltarButton: { marginLeft: 12, padding: 4 },
   tabIconWrap: {
     width: 44,
     height: 34,

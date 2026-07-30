@@ -51,9 +51,21 @@ export function RankingScreen() {
   );
 
   // Dispara (ou repete, num "replay" a cada refresh) a corrida assim que
-  // sabemos a largura da pista e temos o ranking carregado.
+  // sabemos a largura da pista e temos o ranking carregado. Criar/gravar
+  // os Animated.Value aqui (efeito) em vez de durante o render evita
+  // mutar o ref como efeito colateral do render — que funciona na
+  // prática mas quebra a regra de pureza do React (double-render do
+  // StrictMode, concurrent rendering).
   useEffect(() => {
     if (!trackWidth || ranking.length === 0) return;
+
+    // remove do Map quem não está mais no ranking atual — sem isso, o
+    // Map crescia sem limite a cada refresh pra vendedor que some do
+    // ranking (mudou de papel, ficou sem venda no dia, etc.).
+    const codigosAtuais = new Set(ranking.map((item) => item.codigoVendedor));
+    for (const codigo of animsRef.current.keys()) {
+      if (!codigosAtuais.has(codigo)) animsRef.current.delete(codigo);
+    }
 
     const animations = ranking.map((item, index) => {
       let anim = animsRef.current.get(item.codigoVendedor);
@@ -101,8 +113,10 @@ export function RankingScreen() {
         <Text style={styles.empty}>Sem dados para hoje.</Text>
       ) : (
         ranking.map((item, index) => {
+          // só lê do ref — quem cria/grava é o efeito acima. Antes do
+          // efeito rodar (1º render), cai no fallback local (valor 0,
+          // sem animação ainda; o efeito substitui pelo persistente).
           const anim = animsRef.current.get(item.codigoVendedor) ?? new Animated.Value(0);
-          animsRef.current.set(item.codigoVendedor, anim);
           const pct = maxFaturamento ? item.faturamentoLiquido / maxFaturamento : 0;
           const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [0, espacoUtil * pct] });
           const isMe = profile?.role === 'vendedor' && profile.codigoVendedor === item.codigoVendedor;

@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
+import { alertar } from '../lib/alert';
 import { formatDateBR, todayISO } from '../lib/format';
 import { sincronizarNotificacoesChecklist } from '../lib/notifications';
 import { ChecklistItemStatus } from '../types/domain';
@@ -41,7 +42,16 @@ export function ChecklistScreen() {
     setItens((atual) =>
       atual.map((i) => (i.atividade.id === item.atividade.id ? { ...i, concluida: !i.concluida } : i))
     );
-    await repository.marcarChecklistItem(profile, item.atividade.id, !item.concluida);
+    try {
+      await repository.marcarChecklistItem(profile, item.atividade.id, !item.concluida);
+    } catch (erro) {
+      // desfaz o otimismo — sem isso, o checkbox ficava "marcado" na
+      // tela mesmo quando o storage não confirmava a gravação.
+      setItens((atual) =>
+        atual.map((i) => (i.atividade.id === item.atividade.id ? { ...i, concluida: item.concluida } : i))
+      );
+      alertar('Erro ao salvar', erro instanceof Error ? erro.message : 'Tente novamente.');
+    }
   };
 
   if (loading) {

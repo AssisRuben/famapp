@@ -64,6 +64,8 @@ export function CampanhasScreen() {
     try {
       const sugestoes = await repository.sugerirProdutosCampanha(profile, params);
       setItens(sugestoes.map((s) => mapearSugestaoParaItem(s, dataInicio, dataFim)));
+    } catch (erro) {
+      alertar('Erro ao gerar sugestão', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
       setGerando(false);
     }
@@ -104,6 +106,8 @@ export function CampanhasScreen() {
       setNome('');
       setItens([]);
       await carregarLista();
+    } catch (erro) {
+      alertar('Erro ao salvar campanha', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
       setSalvando(false);
     }
@@ -114,8 +118,12 @@ export function CampanhasScreen() {
       'Excluir campanha',
       `Excluir "${campanha.nome}"?`,
       async () => {
-        await repository.excluirCampanha(campanha.id);
-        await carregarLista();
+        try {
+          await repository.excluirCampanha(campanha.id);
+          await carregarLista();
+        } catch (erro) {
+          alertar('Erro ao excluir campanha', erro instanceof Error ? erro.message : 'Tente novamente.');
+        }
       },
       { textoConfirmar: 'Excluir', destrutivo: true }
     );

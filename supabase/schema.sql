@@ -173,6 +173,67 @@ create table metas (
 create unique index metas_mensal_unique on metas (codigo_vendedor, ano, mes) where semana is null;
 create unique index metas_semanal_unique on metas (codigo_vendedor, ano, mes, semana) where semana is not null;
 
+-- Meta DIÁRIA propositalmente NÃO tem tabela própria: é sempre a meta
+-- mensal dividida pelos dias do mês (ver metaDiaria() em src/lib/metas.ts
+-- no app, e a mesma conta replicada em vw_metas_progresso/dashboard). Isso
+-- evita um terceiro nível de cadastro que poderia dessincronizar do
+-- mensal — decisão tomada de propósito, não pendência.
+
+-- ============================================================
+-- FAIXAS_COMISSAO — régua de comissão sobre margem bruta, por
+-- percentual de meta MENSAL atingido (comissão não é calculada por
+-- semana nem por dia, só no fechamento do mês). Tabela (não CASE fixo
+-- no SQL) pra a farmácia poder ajustar os percentuais sem reaplicar
+-- schema. `percentual_meta_min` é o piso da faixa (inclusive); a faixa
+-- aplicada é a de maior piso que o percentual atingido alcança — ex.:
+-- 95% atingido cai na faixa de piso 90 (8%), não na de 100.
+-- ============================================================
+create table faixas_comissao (
+  id bigserial primary key,
+  percentual_meta_min numeric(5,2) not null check (percentual_meta_min >= 0),
+  percentual_comissao numeric(5,2) not null check (percentual_comissao >= 0),
+  updated_at timestamptz default now()
+);
+
+create unique index faixas_comissao_min_unique on faixas_comissao (percentual_meta_min);
+
+insert into faixas_comissao (percentual_meta_min, percentual_comissao) values
+  (100, 10),
+  (90, 8),
+  (80, 7),
+  (70, 5),
+  (0, 3);
+
+-- ============================================================
+-- CHECKLIST DIÁRIO — atividades cadastradas pelo gestor (aba "Metas"
+-- do app) e marcadas pelo vendedor todo dia. Hoje só existe como mock
+-- local (AsyncStorage) no app; estas duas tabelas são o próximo passo
+-- pra ter histórico real de conclusão no backend.
+-- `horario` (HH:mm) dispara lembrete push de segunda a sábado — ver
+-- src/lib/notifications.ts no app. `checklist_respostas` é uma marcação
+-- por atividade/vendedor/dia (não por venda), única por dia — evita
+-- duplicar/perder a marcação se o vendedor reabrir o app.
+-- ============================================================
+create table atividades_checklist (
+  id bigserial primary key,
+  titulo text not null,
+  horario time,
+  ativo boolean not null default true,
+  created_at timestamptz default now()
+);
+
+create table checklist_respostas (
+  id bigserial primary key,
+  atividade_id bigint not null references atividades_checklist(id) on delete cascade,
+  codigo_vendedor integer not null references vendedores(codigo),
+  data date not null,
+  concluida boolean not null default false,
+  concluida_em timestamptz,
+  unique (atividade_id, codigo_vendedor, data)
+);
+
+create index idx_checklist_respostas_vendedor_data on checklist_respostas (codigo_vendedor, data);
+
 -- ============================================================
 -- PRODUTO_CATALOGO — futuramente sincronizado do ProdutoIntegracaoDto
 -- real (Trier: /integracao/produto/obter-*), quando o token for
@@ -326,7 +387,12 @@ from venda_itens vi
 join vendas vd on vd.id = vi.venda_id
 group by vd.data_emissao, vi.codigo_vendedor;
 
--- Ranking diário de vendedores (por faturamento líquido)
+-- Ranking diário de vendedores (por faturamento líquido). Propositalmente
+-- SEM security_invoker (ver rls_policies.sql) — mesma família de
+-- vw_produtos_promocao_clientes: a tela "Ranking" do app é gamificação,
+-- todo vendedor precisa ver a linha de todo mundo, não só a própria.
+-- Rodando como dono, bypassa a RLS de vendas/venda_itens de propósito;
+-- só expõe faturamento_liquido/posicao (não margem, desconto, custo).
 create view vw_ranking_vendedores_dia as
 select
   data_emissao,
@@ -455,3 +521,45 @@ left join lateral (
       or (m.semana = 4 and extract(day from v.data_emissao) >= 22)
     )
 ) realizado on true;
+
+-- Comissão do mês (fechamento) — SÓ meta mensal (semana is null), a
+-- régua de faixas_comissao não se aplica a semana/dia. margem_bruta_valor
+-- é a margem bruta REAL do vendedor no mês inteiro (não proporcional ao
+-- valor_realizado da meta — vendedor pode vender fora do que compõe a
+-- meta, mas aqui usamos o mesmo período ano/mes por simplicidade e
+-- porque é isso que a farmácia comissiona: o mês todo, não só o que
+-- bateu meta). faixa_comissao é a de maior piso que o percentual
+-- atingido alcança (100%→10%, 90%→8%, ... abaixo de 70%→3%, ver
+-- faixas_comissao). security_invoker=true: respeita a RLS de `metas`
+-- (via vw_metas_progresso) e de vendas/venda_itens.
+create view vw_metas_comissao as
+select
+  mp.meta_id,
+  mp.codigo_vendedor,
+  mp.nome_vendedor,
+  mp.ano,
+  mp.mes,
+  mp.valor_meta,
+  mp.valor_realizado,
+  round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2) as percentual_atingido,
+  coalesce(margem.margem_bruta_valor, 0) as margem_bruta_valor,
+  faixa.percentual_comissao,
+  round(coalesce(margem.margem_bruta_valor, 0) * faixa.percentual_comissao / 100, 2) as comissao_valor
+from vw_metas_progresso mp
+left join lateral (
+  select sum(vi.valor_total_liquido) - sum(vi.vlr_custo_produto) as margem_bruta_valor
+  from vendas v
+  join venda_itens vi on vi.venda_id = v.id
+  where v.codigo_vendedor = mp.codigo_vendedor
+    and v.tipo_cancelamento is null
+    and extract(year from v.data_emissao) = mp.ano
+    and extract(month from v.data_emissao) = mp.mes
+) margem on true
+join lateral (
+  select percentual_comissao
+  from faixas_comissao
+  where percentual_meta_min <= coalesce(round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2), 0)
+  order by percentual_meta_min desc
+  limit 1
+) faixa on true
+where mp.semana is null;

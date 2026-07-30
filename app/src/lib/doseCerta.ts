@@ -1,11 +1,6 @@
 import { ParametrosCompra, ProdutoCatalogo, SugestaoCompra } from '../types/domain';
 import { calcularMargemPct } from './campanhas';
 
-// Mesma janela de venda recente usada em Campanhas (30 dias) — no real,
-// isso viria de uma agregação configurável sobre venda_itens; aqui é
-// fixo porque o dado mock só tem esse recorte.
-const JANELA_ANALISE_DIAS = 30;
-
 interface DemandaInfo {
   quantidadeVendidaPeriodo: number;
 }
@@ -34,7 +29,7 @@ export function calcularSugestaoCompras(
     .filter((produto) => !params.categoria || produto.categoria === params.categoria)
     .map((produto) => {
       const demanda = demandaPorProduto.get(produto.codigo);
-      const demandaMediaDiaria = demanda ? demanda.quantidadeVendidaPeriodo / JANELA_ANALISE_DIAS : 0;
+      const demandaMediaDiaria = demanda ? demanda.quantidadeVendidaPeriodo / Math.max(1, params.diasBaseVenda) : 0;
       const estoqueMinimo = demandaMediaDiaria * params.diasSeguranca;
       const estoqueAlvo = demandaMediaDiaria * (params.diasSeguranca + params.diasCobertura);
 

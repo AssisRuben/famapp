@@ -80,9 +80,17 @@ Componentes:
       produtos com promoção/receita, metas do mês) — ver
       [`supabase/seed_data.sql`](supabase/seed_data.sql).
 - [ ] Configurar bucket do Supabase Storage para as fotos de receita
-      (`venda_item_receitas.foto_url` só guarda a referência).
+      (`venda_item_receitas.foto_url` só guarda a referência) — SQL pronto
+      em [`supabase/storage_setup.sql`](supabase/storage_setup.sql), falta
+      rodar no projeto real.
 - [ ] Criar tabela real pro checklist diário de atividades (hoje só existe
-      como mock local no app — ver seção "Schema do Supabase" acima).
+      como mock local no app) — SQL pronto (`atividades_checklist` +
+      `checklist_respostas` em `schema.sql`/`rls_policies.sql`), falta
+      aplicar no projeto real.
+- [ ] Aplicar no projeto Supabase real as tabelas/views novas de comissão
+      (`faixas_comissao`, `vw_metas_comissao`) e o fix de RLS do ranking
+      (ver "Comissão sobre margem bruta" abaixo) — SQL já está em
+      `schema.sql`/`rls_policies.sql`, falta rodar.
 
 O desenvolvimento do app PODE COMEÇAR JÁ, em paralelo à liberação da API,
 usando mocks no formato exato dos DTOs reais abaixo.
@@ -253,13 +261,72 @@ Políticas de RLS aplicadas — ver [`supabase/rls_policies.sql`](supabase/rls_p
   com a data certa; cliente sem vendedor associado não aparece pra
   nenhum vendedor, só pro gestor).
 
-Gap conhecido (não mexido nesta rodada): `vw_ranking_vendedores_dia` é
-`security_invoker = true`, então no backend real um vendedor só veria a
-própria linha do ranking (sempre em 1º, sozinho) — diferente da tela
-"Ranking" do app, que mostra todo mundo de propósito (gamificação). Pra
-bater com o app de verdade, essa view vai precisar do mesmo tratamento
-dado a `vw_produtos_promocao_clientes` (rodar sem RLS) quando a Frente 2
-for implementada.
+Gap corrigido nesta rodada: `vw_ranking_vendedores_dia` estava com
+`security_invoker = true`, o que faria um vendedor real ver só a própria
+linha do ranking (sempre em 1º, sozinho) — diferente da tela "Ranking" do
+app, que mostra todo mundo de propósito (gamificação). Recebeu o mesmo
+tratamento de `vw_produtos_promocao_clientes` (roda sem RLS, de propósito
+— ver comentário na view em `schema.sql`).
+
+## Comissão sobre margem bruta
+
+Régua de comissão por percentual da meta MENSAL atingido (semana e dia
+NÃO geram comissão própria — só o fechamento do mês):
+
+| % da meta atingido | Comissão sobre a margem bruta |
+|---|---|
+| 100% | 10% |
+| 90% | 8% |
+| 80% | 7% |
+| 70% | 5% |
+| abaixo de 70% | 3% |
+
+Decisões tomadas (não reabrir sem motivo — ver histórico da conversa que
+definiu isto):
+
+- **Granularidade**: só mensal. Metas semanal/diária continuam existindo
+  só como indicador de ritmo pro vendedor/gestor, sem comissão associada.
+- **Meta diária**: continua SEM tabela própria — é sempre a meta mensal
+  dividida pelos dias do mês (`metaDiaria()` em `src/lib/metas.ts`),
+  calculada na hora, nunca persistida. Evita um terceiro nível de
+  cadastro que poderia dessincronizar do mensal.
+- **Faixas configuráveis**: viram tabela `faixas_comissao` (não um CASE
+  fixo no SQL), seedada com os valores da tabela acima, editável por
+  `gestor` via RLS — se a farmácia mudar a régua no futuro, não precisa
+  reaplicar schema, só atualizar os dados (ainda sem tela de edição no
+  app; ajuste é via SQL direto por ora).
+
+Implementação (ver `supabase/schema.sql` e `supabase/rls_policies.sql`):
+
+- `faixas_comissao(percentual_meta_min, percentual_comissao)`: piso de
+  cada faixa (inclusive) e o percentual de comissão. A faixa aplicada é
+  a de maior piso que o percentual atingido alcança (ex.: 95% atingido
+  cai na faixa de piso 90, não na de 100).
+- `vw_metas_comissao`: estende `vw_metas_progresso` (só linhas com
+  `semana is null`, ou seja, meta mensal) com margem bruta REAL do mês
+  (faturamento líquido − custo de aquisição, mesma fórmula de
+  `vw_metricas_vendedor_diario`, agregada pro mês inteiro — não
+  proporcional ao valor batido da meta), a faixa aplicada e o valor de
+  comissão calculado. `security_invoker = true`: respeita a RLS de
+  `metas` (vendedor só a própria linha) e de vendas/venda_itens.
+- Checklist diário (`atividades_checklist` + `checklist_respostas`):
+  ganhou tabelas reais nesta rodada (antes só existia como mock local no
+  app via AsyncStorage) — vendedor só lê atividades ativas e só escreve
+  as próprias respostas; gestor lê/gerencia tudo.
+- Bucket de Storage `receitas`: SQL pronto em
+  [`supabase/storage_setup.sql`](supabase/storage_setup.sql) — privado,
+  policies por pasta `<codigo_vendedor>/...` (vendedor só acessa a
+  própria pasta, gestor tudo). Convenção de path é obrigatória: o app
+  precisa subir o arquivo como `<codigo_vendedor>/<venda_item_id>.jpg`.
+
+No app (lado gestor): `MetasScreen` (aba "Metas" → segmento "Metas") já
+mostra, por vendedor, a faixa de comissão atual e o valor previsto no
+fechamento do mês, logo abaixo da barra de progresso mensal. Tipos novos
+em `src/types/domain.ts` (`FaixaComissao`, `ComissaoMensal`) e método
+`getComissoesMensal` no `DataRepository` — implementado no mock
+(`mockRepository.ts`) usando a margem bruta % do dia como proxy (mock não
+tem livro-razão do mês inteiro), fica exato quando a Frente 2 (Supabase
+real) substituir o mock por `vw_metas_comissao`.
 
 ## Métricas/insights já definidos como prioridade (para as telas do app)
 

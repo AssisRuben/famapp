@@ -312,6 +312,114 @@ with check (exists (
   select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
 ));
 
+-- atividades_checklist: cadastrada pelo gestor (aba "Metas" do app).
+-- Vendedor só lê as ATIVAS (é o que aparece no checklist diário dele);
+-- gestor lê todas (incl. inativas, pra gerenciar). Só gestor escreve.
+alter table atividades_checklist enable row level security;
+
+create policy "atividades_checklist: gestor le tudo"
+on atividades_checklist for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "atividades_checklist: vendedor le as ativas"
+on atividades_checklist for select
+using (
+  ativo = true
+  and exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'vendedor')
+);
+
+create policy "atividades_checklist: gestor insere"
+on atividades_checklist for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "atividades_checklist: gestor atualiza"
+on atividades_checklist for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "atividades_checklist: gestor deleta"
+on atividades_checklist for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+-- checklist_respostas: marcação diária escrita pelo PRÓPRIO vendedor
+-- (não pelo coletor, igual venda_item_receitas). Vendedor só mexe nas
+-- próprias respostas; gestor lê tudo (acompanhamento) mas não edita em
+-- nome do vendedor.
+alter table checklist_respostas enable row level security;
+
+create policy "checklist_respostas: select proprio ou gestor"
+on checklist_respostas for select
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = checklist_respostas.codigo_vendedor)
+));
+
+create policy "checklist_respostas: vendedor insere o proprio"
+on checklist_respostas for insert
+with check (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and p.role = 'vendedor'
+    and p.codigo_vendedor = checklist_respostas.codigo_vendedor
+));
+
+create policy "checklist_respostas: vendedor atualiza o proprio"
+on checklist_respostas for update
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and p.role = 'vendedor'
+    and p.codigo_vendedor = checklist_respostas.codigo_vendedor
+))
+with check (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and p.role = 'vendedor'
+    and p.codigo_vendedor = checklist_respostas.codigo_vendedor
+));
+
+-- faixas_comissao: régua de comissão. Qualquer autenticado lê (vendedor
+-- precisa ver em qual faixa está); só gestor edita as faixas.
+alter table faixas_comissao enable row level security;
+
+create policy "faixas_comissao: usuarios autenticados leem"
+on faixas_comissao for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "faixas_comissao: gestor insere"
+on faixas_comissao for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "faixas_comissao: gestor atualiza"
+on faixas_comissao for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "faixas_comissao: gestor deleta"
+on faixas_comissao for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
 -- sync_control: escrita continua exclusiva do coletor via service_role
 -- (nenhuma policy de insert/update/delete para authenticated). Leitura
 -- liberada pra qualquer autenticado — usada pelo app pra mostrar "dados
@@ -334,13 +442,18 @@ using (exists (
 -- ============================================================
 alter view vw_desempenho_vendedor_diario set (security_invoker = true);
 alter view vw_metricas_vendedor_diario set (security_invoker = true);
-alter view vw_ranking_vendedores_dia set (security_invoker = true);
 alter view vw_vendas_por_canal set (security_invoker = true);
 alter view vw_vendas_receita_status set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
+alter view vw_metas_comissao set (security_invoker = true);
 alter view vw_produto_fornecedor_recente set (security_invoker = true);
--- vw_produtos_promocao_clientes e vw_clientes_inatividade ficam de
--- propósito SEM security_invoker (ver comentário de cada uma em
--- schema.sql) — não é esquecimento. As duas fazem o próprio controle
--- de acesso no WHERE (checando profiles/auth.uid()) em vez de confiar
--- na RLS automática das tabelas base.
+-- vw_produtos_promocao_clientes, vw_clientes_inatividade e
+-- vw_ranking_vendedores_dia ficam de propósito SEM security_invoker (ver
+-- comentário de cada uma em schema.sql) — não é esquecimento. Gap
+-- corrigido nesta rodada: vw_ranking_vendedores_dia tinha
+-- security_invoker=true aqui antes, o que fazia um vendedor real só ver
+-- a própria linha do ranking (sempre em 1º, sozinho), diferente da tela
+-- "Ranking" do app, que mostra todo mundo de propósito (gamificação).
+-- As duas primeiras fazem o próprio controle de acesso no WHERE
+-- (checando profiles/auth.uid()) em vez de confiar na RLS automática das
+-- tabelas base; a de ranking não precisa nem disso, roda liberada.

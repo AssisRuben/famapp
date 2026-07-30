@@ -139,6 +139,29 @@ export interface SalvarMetaInput {
 }
 
 // ============================================================
+// COMISSÃO — régua sobre margem bruta pelo percentual da meta MENSAL
+// atingido (não se aplica a semana nem a dia). Espelha
+// vw_metas_comissao/faixas_comissao no Supabase real.
+// ============================================================
+export interface FaixaComissao {
+  percentualMetaMin: number;
+  percentualComissao: number;
+}
+
+export interface ComissaoMensal {
+  codigoVendedor: number;
+  nomeVendedor: string;
+  ano: number;
+  mes: number;
+  valorMeta: number;
+  valorRealizado: number;
+  percentualAtingido: number;
+  margemBrutaValor: number;
+  percentualComissao: number;
+  comissaoValor: number;
+}
+
+// ============================================================
 // CHECKLIST DIÁRIO — atividades cadastradas pelo gestor, marcadas
 // pelo vendedor todo dia. `horario` (HH:mm) dispara um lembrete
 // push de segunda a sábado nesse horário.
@@ -261,6 +284,12 @@ export interface GrupoCartazete {
 export interface ParametrosCompra {
   diasSeguranca: number;
   diasCobertura: number;
+  // Janela de venda usada pra calcular a demanda média diária (padrão
+  // 30 — mesmo recorte histórico de Campanhas/Precificação). No mock,
+  // o total vendido (quantidadeVendida30d) continua fixo em 30 dias —
+  // só o divisor muda, então é uma aproximação; no real, viria de uma
+  // agregação configurável sobre venda_itens.
+  diasBaseVenda: number;
   categoria?: string;
 }
 

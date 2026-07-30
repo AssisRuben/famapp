@@ -63,6 +63,8 @@ export function ReceitasScreen() {
 
       await repository.anexarReceita(item.itemId, { tipo: item.tipoReceita, fotoUri: uri });
       await load();
+    } catch (erro) {
+      alertar('Erro ao anexar receita', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
       setCapturandoId(null);
     }

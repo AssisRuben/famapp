@@ -3,7 +3,9 @@ import {
   Campanha,
   ChecklistItemStatus,
   ClienteInatividade,
+  ComissaoMensal,
   DesempenhoVendedorDiario,
+  FaixaComissao,
   ItemPrecificacao,
   MetaVendedor,
   MetricasVendedorDiario,
@@ -56,6 +58,13 @@ export interface DataRepository {
   // pela tela de administração (gestor-only na UI).
   getMetas(profile: Profile, ano: number, mes: number): Promise<MetaVendedor[]>;
   salvarMeta(input: SalvarMetaInput): Promise<void>;
+
+  // Comissão: só fechamento MENSAL (semana/dia não geram comissão própria
+  // — ver vw_metas_comissao). Vendedor só a própria linha, gestor todas.
+  // Faixas hoje são só leitura no app (tabela `faixas_comissao` já é
+  // editável no banco, mas ainda sem tela de edição — ajuste é via SQL).
+  getComissoesMensal(profile: Profile, ano: number, mes: number): Promise<ComissaoMensal[]>;
+  getFaixasComissao(): Promise<FaixaComissao[]>;
 
   // Checklist diário: `getAtividadesChecklist` traz só as ativas para
   // vendedor, e todas (incl. inativas) para gestor gerenciar.

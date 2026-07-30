@@ -17,6 +17,7 @@ export function ComprasScreen() {
   const { profile } = useAuth();
   const [diasSeguranca, setDiasSeguranca] = useState('7');
   const [diasCobertura, setDiasCobertura] = useState('15');
+  const [diasBaseVenda, setDiasBaseVenda] = useState('30');
   const [itens, setItens] = useState<SugestaoCompra[] | null>(null);
   const [expandido, setExpandido] = useState<number | null>(null);
   const [gerando, setGerando] = useState(false);
@@ -29,6 +30,7 @@ export function ComprasScreen() {
       const params = {
         diasSeguranca: Math.max(0, Number(diasSeguranca.replace(/\D/g, '')) || 0),
         diasCobertura: Math.max(0, Number(diasCobertura.replace(/\D/g, '')) || 0),
+        diasBaseVenda: Math.max(1, Number(diasBaseVenda.replace(/\D/g, '')) || 30),
       };
       const sugestoes = await repository.gerarSugestaoCompras(profile, params);
       setItens(sugestoes);
@@ -99,9 +101,29 @@ export function ComprasScreen() {
             <TextInput style={styles.input} keyboardType="numeric" value={diasCobertura} onChangeText={setDiasCobertura} />
           </View>
         </View>
+        <Text style={styles.explicacaoParametro}>
+          <Text style={styles.explicacaoDestaque}>Estoque de segurança: </Text>
+          colchão mínimo mantido pra não faltar produto entre uma compra e outra, cobrindo atrasos de entrega ou picos de
+          venda.
+        </Text>
+        <Text style={styles.explicacaoParametro}>
+          <Text style={styles.explicacaoDestaque}>Cobertura adicional: </Text>
+          dias além do estoque de segurança que a compra sugerida também repõe, espaçando o intervalo até a próxima
+          reposição.
+        </Text>
+
+        <View style={styles.campoMetade}>
+          <Text style={styles.campoLabel}>Base de vendas p/ cálculo (dias)</Text>
+          <TextInput style={styles.input} keyboardType="numeric" value={diasBaseVenda} onChangeText={setDiasBaseVenda} />
+        </View>
+        <Text style={styles.explicacaoParametro}>
+          <Text style={styles.explicacaoDestaque}>Base de vendas: </Text>
+          janela de dias usada pra calcular a demanda média diária de cada produto (padrão 30).
+        </Text>
+
         <Text style={styles.aviso}>
           A compra sugerida repõe até {Number(diasSeguranca || '0') + Number(diasCobertura || '0')} dias de estoque, com base
-          na venda dos últimos 30 dias.
+          na venda dos últimos {Number(diasBaseVenda || '0') || 30} dias.
         </Text>
 
         <Pressable style={styles.botaoPrimario} onPress={gerar} disabled={gerando}>
@@ -257,7 +279,9 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   linhaDoisCampos: { flexDirection: 'row', gap: 10 },
-  campoMetade: { flex: 1 },
+  campoMetade: { flex: 1, marginTop: 10 },
+  explicacaoParametro: { fontSize: 11, color: colors.textMuted, marginTop: 8, lineHeight: 15 },
+  explicacaoDestaque: { fontWeight: '700', color: colors.textSecondary },
   botaoPrimario: {
     flexDirection: 'row',
     alignItems: 'center',

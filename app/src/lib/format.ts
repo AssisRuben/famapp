@@ -2,6 +2,13 @@ export function formatBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+// Mesma formatação, sem casas decimais — usado em cards compactos onde
+// o centavo não muda a leitura do número e só ocupa espaço/faz quebrar
+// linha (ex.: tiles de indicador no Dashboard).
+export function formatBRLSemCentavos(value: number): string {
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+}
+
 export function formatDateBR(iso: string): string {
   const [year, month, day] = iso.split('-');
   return `${day}/${month}/${year}`;

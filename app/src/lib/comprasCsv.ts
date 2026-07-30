@@ -1,7 +1,11 @@
 import { SugestaoCompra } from '../types/domain';
 
 function escaparCampoCsv(valor: string): string {
-  if (/[";\n]/.test(valor)) {
+  // \r sozinho (sem \n) não separa linha pelo split usado aqui, mas
+  // ainda corrompe a leitura em alguns programas (Excel/Notepad tratam
+  // \r isolado como quebra) — por isso entra no gatilho de aspas junto
+  // com "/;/\n, não só os dois últimos.
+  if (/["\r\n;]/.test(valor)) {
     return `"${valor.replace(/"/g, '""')}"`;
   }
   return valor;

@@ -5,6 +5,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatBRL } from '../lib/format';
+import { LIMIAR_DIAS_PARADO } from '../lib/precificacao';
 import { ItemPrecificacao, TagPrecificacao } from '../types/domain';
 
 const TAG_INFO: Record<TagPrecificacao, { label: string; cor: string }> = {
@@ -73,6 +74,20 @@ export function PrecificacaoScreen() {
         continua sendo definido na aba Campanhas.
       </Text>
 
+      <Card>
+        <Text style={styles.explicacaoParametro}>
+          <Text style={styles.explicacaoDestaque}>🐌 Parado: </Text>
+          {LIMIAR_DIAS_PARADO} dias ou mais sem venda, mas ainda COM estoque disponível — se faltasse produto o problema
+          seria reposição (aba Compras), não preço.
+        </Text>
+        <Text style={styles.explicacaoParametro}>
+          <Text style={styles.explicacaoDestaque}>Elasticidade: </Text>
+          não é uma ação, é contexto pra calibrar o quanto testar de variação de preço. 🔒 Baixa elasticidade (hoje só
+          "Medicamentos") = uso contínuo/prescrição, cliente tolera menos mudança de preço. 🎯 Alta elasticidade = o
+          resto do catálogo, mais perto de conveniência/impulso, reage mais a mudança de preço.
+        </Text>
+      </Card>
+
       <View style={styles.filtroRow}>
         {(
           [
@@ -140,6 +155,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 14, lineHeight: 18 },
   empty: { color: colors.textSecondary },
+  explicacaoParametro: { fontSize: 11, color: colors.textMuted, lineHeight: 15, marginBottom: 6 },
+  explicacaoDestaque: { fontWeight: '700', color: colors.textSecondary },
   filtroRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   filtroChip: {
     paddingHorizontal: 12,

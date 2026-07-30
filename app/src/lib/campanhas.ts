@@ -22,7 +22,12 @@ export function calcularDescontoSustentavel(
   descontoAlvoPct: number,
   margemMinimaPct: number
 ): { percentualDesconto: number; precoSugerido: number; margemResultantePct: number } {
-  const precoMinimoPelaMargem = produto.custoMedio / (1 - margemMinimaPct / 100);
+  // margemMinimaPct vem de um campo de texto livre na tela — sem
+  // clamp, 100 zera o divisor (Infinity) e acima de 100 inverte o
+  // sinal (preço mínimo negativo). 95 é o teto prático: margem de
+  // 100% significaria custo zero, o que não existe no varejo.
+  const margemMinimaSegura = Math.min(95, Math.max(0, margemMinimaPct));
+  const precoMinimoPelaMargem = produto.custoMedio / (1 - margemMinimaSegura / 100);
   const precoComDescontoAlvo = produto.precoVenda * (1 - descontoAlvoPct / 100);
   const precoSugerido = Math.max(precoComDescontoAlvo, precoMinimoPelaMargem, produto.custoMedio);
   const percentualDesconto = Math.max(0, ((produto.precoVenda - precoSugerido) / produto.precoVenda) * 100);

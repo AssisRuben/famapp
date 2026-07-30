@@ -6,7 +6,9 @@ import {
   ChecklistItemStatus,
   ClienteCompradorPromocao,
   ClienteInatividade,
+  ComissaoMensal,
   DesempenhoVendedorDiario,
+  FaixaComissao,
   ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
@@ -33,6 +35,7 @@ import {
   clientesSeed,
   compraInfoSeed,
   desempenhoSeedHoje,
+  faixasComissaoSeed,
   fornecedoresSeed,
   metasSeedPadrao,
   metricasSeedHoje,
@@ -93,6 +96,48 @@ function dataDiasAtras(diasAtras: number): string {
 function visivelParaPerfil<T extends { codigoVendedor: number }>(profile: Profile, linhas: T[]): T[] {
   if (profile.role === 'gestor') return linhas;
   return linhas.filter((linha) => linha.codigoVendedor === profile.codigoVendedor);
+}
+
+// metricasSeedHoje/desempenhoSeedHoje são um snapshot FIXO de "hoje" —
+// sem variação por data, o Dashboard mostrava o mesmo faturamento
+// (e, por tabela, o mesmo "realizado" na meta do dia) não importa qual
+// dataEmissao fosse pedida, dando a impressão de que a meta diária
+// nunca muda. A meta (alvo) em si é igual em todo dia do mês por
+// design (valorMetaMensal ÷ dias do mês — ver metaDiaria() em
+// lib/metas.ts, isso está correto); o que faltava era o REALIZADO
+// reagir à data. Aplica uma variação determinística pelo dia do mês
+// (mesmo dia = mesmo valor sempre, dia diferente = valor diferente) —
+// só pra simular que o dado depende da data; no backend real isso
+// viria de vendas de verdade, não precisaria disso.
+function fatorVariacaoPorData(dataEmissao: string): number {
+  const dia = Number(dataEmissao.slice(-2)) || 1;
+  return 0.82 + ((dia % 15) / 15) * 0.36; // varia entre ~0.82x e ~1.18x
+}
+
+function metricasDoDia(dataEmissao: string): MetricasVendedorDiario[] {
+  const fator = fatorVariacaoPorData(dataEmissao);
+  return metricasSeedHoje.map((m) => {
+    const qtdNotas = Math.max(1, Math.round(m.qtdNotas * fator));
+    const faturamentoLiquido = round2(m.faturamentoLiquido * fator);
+    const faturamentoBruto = round2(m.faturamentoBruto * fator);
+    const totalDesconto = round2(m.totalDesconto * fator);
+    const comissaoEstimada = round2(m.comissaoEstimada * fator);
+    const totalCusto = round2(m.totalCusto * fator);
+    return {
+      dataEmissao,
+      codigoVendedor: m.codigoVendedor,
+      nomeVendedor: nomeVendedor(m.codigoVendedor),
+      qtdNotas,
+      faturamentoLiquido,
+      faturamentoBruto,
+      totalDesconto,
+      taxaDescontoPct: round2((totalDesconto / faturamentoBruto) * 100),
+      comissaoEstimada,
+      ticketMedio: round2(faturamentoLiquido / qtdNotas),
+      totalCusto,
+      margemBrutaPct: round2(((faturamentoLiquido - totalCusto) / faturamentoLiquido) * 100),
+    };
+  });
 }
 
 async function getReceitasOverrides(): Promise<Record<string, ReceitaOverride>> {
@@ -173,33 +218,24 @@ class MockRepository implements DataRepository {
   }
 
   async getDesempenhoVendedorDiario(profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]> {
-    const linhas = desempenhoSeedHoje.map((d) => ({
-      dataEmissao,
-      codigoVendedor: d.codigoVendedor,
-      nomeVendedor: nomeVendedor(d.codigoVendedor),
-      quantidadeAtendimentos: d.quantidadeAtendimentos,
-      quantidadeItens: d.quantidadeItens,
-      itensPorAtendimento: round2(d.quantidadeItens / d.quantidadeAtendimentos),
-    }));
+    const fator = fatorVariacaoPorData(dataEmissao);
+    const linhas = desempenhoSeedHoje.map((d) => {
+      const quantidadeAtendimentos = Math.max(1, Math.round(d.quantidadeAtendimentos * fator));
+      const quantidadeItens = Math.max(1, Math.round(d.quantidadeItens * fator));
+      return {
+        dataEmissao,
+        codigoVendedor: d.codigoVendedor,
+        nomeVendedor: nomeVendedor(d.codigoVendedor),
+        quantidadeAtendimentos,
+        quantidadeItens,
+        itensPorAtendimento: round2(quantidadeItens / quantidadeAtendimentos),
+      };
+    });
     return delay(visivelParaPerfil(profile, linhas));
   }
 
   async getMetricasVendedorDiario(profile: Profile, dataEmissao: string): Promise<MetricasVendedorDiario[]> {
-    const linhas = metricasSeedHoje.map((m) => ({
-      dataEmissao,
-      codigoVendedor: m.codigoVendedor,
-      nomeVendedor: nomeVendedor(m.codigoVendedor),
-      qtdNotas: m.qtdNotas,
-      faturamentoLiquido: m.faturamentoLiquido,
-      faturamentoBruto: m.faturamentoBruto,
-      totalDesconto: m.totalDesconto,
-      taxaDescontoPct: round2((m.totalDesconto / m.faturamentoBruto) * 100),
-      comissaoEstimada: m.comissaoEstimada,
-      ticketMedio: round2(m.faturamentoLiquido / m.qtdNotas),
-      totalCusto: m.totalCusto,
-      margemBrutaPct: round2(((m.faturamentoLiquido - m.totalCusto) / m.faturamentoLiquido) * 100),
-    }));
-    return delay(visivelParaPerfil(profile, linhas));
+    return delay(visivelParaPerfil(profile, metricasDoDia(dataEmissao)));
   }
 
   // Ranking é gamificação: mostra todo mundo, mesmo pra quem loga como
@@ -207,11 +243,11 @@ class MockRepository implements DataRepository {
   // todos veem o placar completo). Por isso NÃO usa visivelParaPerfil
   // aqui, ao contrário dos outros métodos deste repositório.
   async getRankingVendedoresDia(_profile: Profile, dataEmissao: string): Promise<RankingVendedorDia[]> {
-    const ordenado = [...metricasSeedHoje].sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido);
+    const ordenado = metricasDoDia(dataEmissao).sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido);
     const ranking = ordenado.map((m, index) => ({
       dataEmissao,
       codigoVendedor: m.codigoVendedor,
-      nomeVendedor: nomeVendedor(m.codigoVendedor),
+      nomeVendedor: m.nomeVendedor,
       faturamentoLiquido: m.faturamentoLiquido,
       posicao: index + 1,
     }));
@@ -376,6 +412,50 @@ class MockRepository implements DataRepository {
       valoresMetaSemanal: input.valoresMetaSemanal,
     };
     await AsyncStorage.setItem(METAS_OVERRIDES_KEY, JSON.stringify(overrides));
+  }
+
+  async getComissoesMensal(profile: Profile, ano: number, mes: number): Promise<ComissaoMensal[]> {
+    // Reaproveita getMetas (já filtra por perfil: vendedor só a própria
+    // linha, gestor todas) — mesma regra de visibilidade de vw_metas_comissao.
+    const metas = await this.getMetas(profile, ano, mes);
+
+    const comissoes: ComissaoMensal[] = metas.map((meta) => {
+      const metrica = metricasSeedHoje.find((m) => m.codigoVendedor === meta.codigoVendedor);
+      // O mock só tem métricas de "hoje", não um livro-razão do mês
+      // inteiro — usamos a margem bruta % de hoje como proxy, aplicada
+      // sobre o realizado mensal já mockado (realizadoSeedPadrao).
+      const margemBrutaPct = metrica && metrica.faturamentoLiquido > 0
+        ? (metrica.faturamentoLiquido - metrica.totalCusto) / metrica.faturamentoLiquido
+        : 0.35;
+      const margemBrutaValor = meta.valorRealizadoMensal * margemBrutaPct;
+      const percentualAtingido = meta.valorMetaMensal > 0
+        ? (meta.valorRealizadoMensal / meta.valorMetaMensal) * 100
+        : 0;
+
+      const faixa = faixasComissaoSeed
+        .filter((f) => f.percentualMetaMin <= percentualAtingido)
+        .sort((a, b) => b.percentualMetaMin - a.percentualMetaMin)[0]
+        ?? faixasComissaoSeed[faixasComissaoSeed.length - 1];
+
+      return {
+        codigoVendedor: meta.codigoVendedor,
+        nomeVendedor: meta.nomeVendedor,
+        ano,
+        mes,
+        valorMeta: meta.valorMetaMensal,
+        valorRealizado: meta.valorRealizadoMensal,
+        percentualAtingido: Math.round(percentualAtingido * 100) / 100,
+        margemBrutaValor: Math.round(margemBrutaValor * 100) / 100,
+        percentualComissao: faixa.percentualComissao,
+        comissaoValor: Math.round(margemBrutaValor * (faixa.percentualComissao / 100) * 100) / 100,
+      };
+    });
+
+    return delay(comissoes);
+  }
+
+  async getFaixasComissao(): Promise<FaixaComissao[]> {
+    return delay(faixasComissaoSeed);
   }
 
   async getAtividadesChecklist(profile: Profile): Promise<AtividadeChecklist[]> {

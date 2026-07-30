@@ -223,6 +223,20 @@ export const realizadoSeedPadrao: RealizadoSeedEntry[] = [
 ];
 
 // ============================================================
+// FAIXAS DE COMISSÃO — espelha a tabela `faixas_comissao` (editável no
+// Supabase real, ver supabase/schema.sql). percentualMetaMin é o piso
+// da faixa (inclusive); aplica-se a de maior piso que o percentual
+// atingido alcança. Comissão só no fechamento MENSAL, não semanal/diário.
+// ============================================================
+export const faixasComissaoSeed: { percentualMetaMin: number; percentualComissao: number }[] = [
+  { percentualMetaMin: 100, percentualComissao: 10 },
+  { percentualMetaMin: 90, percentualComissao: 8 },
+  { percentualMetaMin: 80, percentualComissao: 7 },
+  { percentualMetaMin: 70, percentualComissao: 5 },
+  { percentualMetaMin: 0, percentualComissao: 3 },
+];
+
+// ============================================================
 // CHECKLIST DIÁRIO — atividades padrão cadastradas pelo gestor.
 // ============================================================
 export interface AtividadeChecklistSeed {

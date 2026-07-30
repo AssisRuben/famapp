@@ -8,8 +8,10 @@ interface VendaInfo {
 
 // Quantos dias sem venda já contam como "parado" (referência: relatório
 // de excesso do Dose Certa fala em dezenas/centenas de dias parado —
-// 14 é um piso conservador, ajustável depois com dado real).
-const LIMIAR_DIAS_PARADO = 14;
+// 14 é um piso conservador, ajustável depois com dado real). Exportado
+// pra tela poder explicar o critério com o valor real, sem duplicar o
+// número em texto solto.
+export const LIMIAR_DIAS_PARADO = 14;
 
 // Uso contínuo/prescrição tolera menos variação de preço que
 // conveniência/impulso. produto_catalogo não tem um flag de receita —

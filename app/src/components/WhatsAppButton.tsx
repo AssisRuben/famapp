@@ -1,6 +1,7 @@
 import React from 'react';
 import { Linking, Pressable, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { alertar } from '../lib/alert';
 import { buildWhatsAppUrl } from '../lib/whatsapp';
 
 interface WhatsAppButtonProps {
@@ -10,12 +11,23 @@ interface WhatsAppButtonProps {
 }
 
 export function WhatsAppButton({ telefone, mensagem, compact }: WhatsAppButtonProps) {
+  const abrir = async () => {
+    const url = buildWhatsAppUrl(telefone, mensagem);
+    if (!url) {
+      alertar('Telefone inválido', 'Não foi possível reconhecer o formato desse número.');
+      return;
+    }
+    try {
+      await Linking.openURL(url);
+    } catch {
+      // cai aqui em web sem handler de wa.me, ou celular sem o
+      // WhatsApp instalado — Linking.openURL rejeita a promise.
+      alertar('Não foi possível abrir o WhatsApp', 'Verifique se o WhatsApp está instalado.');
+    }
+  };
+
   return (
-    <Pressable
-      style={[styles.button, compact && styles.buttonCompact]}
-      onPress={() => Linking.openURL(buildWhatsAppUrl(telefone, mensagem))}
-      hitSlop={8}
-    >
+    <Pressable style={[styles.button, compact && styles.buttonCompact]} onPress={abrir} hitSlop={8}>
       <Ionicons name="logo-whatsapp" size={compact ? 18 : 16} color="#FFFFFF" />
       {!compact && <Text style={styles.label}>WhatsApp</Text>}
     </Pressable>

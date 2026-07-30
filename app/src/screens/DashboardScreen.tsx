@@ -6,7 +6,7 @@ import { Card } from '../components/Card';
 import { MetricTile } from '../components/MetricTile';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
-import { formatBRL, formatDateHoraBR, todayISO } from '../lib/format';
+import { formatBRL, formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
 import { metaDiaria, semanaDoDia } from '../lib/metas';
 import {
   ClienteInatividade,
@@ -132,47 +132,34 @@ export function DashboardScreen() {
           <Text style={styles.empty}>Sem vendas registradas hoje.</Text>
         </Card>
       ) : (
-        <>
-          <View style={styles.tileRow}>
-            <MetricTile label="Faturamento líquido" value={formatBRL(totalFaturamento)} accentColor={colors.success} />
-            <MetricTile label="Ticket médio" value={formatBRL(ticketMedio)} accentColor={colors.navy} />
-            <MetricTile label="Itens / atendimento" value={itensPorAtendimento.toFixed(2)} accentColor="#9333ea" />
-            <MetricTile label="Taxa de desconto" value={`${taxaDesconto.toFixed(2)}%`} accentColor={colors.red} />
-            <MetricTile label="Comissão estimada" value={formatBRL(totalComissao)} accentColor="#0891b2" />
-            <MetricTile label="Notas emitidas" value={String(totalNotas)} accentColor={colors.textSecondary} />
-          </View>
-
-          {profile?.role === 'gestor' && (
-            <Card>
-              <Text style={styles.sectionTitle}>Por vendedor</Text>
-              {metricas
-                .slice()
-                .sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido)
-                .map((m) => (
-                  <View key={m.codigoVendedor} style={styles.vendedorRow}>
-                    <Text style={styles.vendedorNome}>{m.nomeVendedor}</Text>
-                    <View style={styles.vendedorValores}>
-                      <Text style={styles.vendedorValor}>{formatBRL(m.faturamentoLiquido)}</Text>
-                      <Text style={styles.vendedorMargem}>margem {m.margemBrutaPct.toFixed(1)}%</Text>
-                    </View>
-                  </View>
-                ))}
-            </Card>
-          )}
-        </>
+        <View style={styles.tileRow}>
+          <MetricTile label="Faturamento líquido" value={formatBRL(totalFaturamento)} accentColor={colors.success} />
+          <MetricTile label="Ticket médio" value={formatBRL(ticketMedio)} accentColor={colors.navy} />
+          <MetricTile label="Itens / atendimento" value={itensPorAtendimento.toFixed(2)} accentColor="#9333ea" />
+          <MetricTile label="Taxa de desconto" value={`${taxaDesconto.toFixed(2)}%`} accentColor={colors.red} />
+          <MetricTile label="Comissão estimada" value={formatBRL(totalComissao)} accentColor="#0891b2" />
+          <MetricTile label="Notas emitidas" value={String(totalNotas)} accentColor={colors.textSecondary} />
+        </View>
       )}
 
       {profile?.role === 'gestor' && (
         <Card>
           <Text style={styles.sectionTitle}>📈 Indicadores de gestão</Text>
-          <View style={styles.tileRow}>
-            <MetricTile label="Valor de vendas (bruto)" value={formatBRL(totalBruto)} accentColor={colors.navy} />
+          <View style={styles.tileRowTresColunas}>
             <MetricTile
+              style={styles.tileTercoColuna}
+              label="Valor de vendas (bruto)"
+              value={formatBRLSemCentavos(totalBruto)}
+              accentColor={colors.navy}
+            />
+            <MetricTile
+              style={styles.tileTercoColuna}
               label="Margem bruta"
               value={`${margemBruta.toFixed(2)}%`}
               accentColor={margemBruta < 30 ? colors.red : colors.success}
             />
             <MetricTile
+              style={styles.tileTercoColuna}
               label="Clientes inativos"
               value={`${clientesInativos} de ${clientesInatividade.length}`}
               accentColor={colors.red}
@@ -218,6 +205,24 @@ export function DashboardScreen() {
           )}
         </Card>
       )}
+
+      {profile?.role === 'gestor' && metricas.length > 0 && (
+        <Card>
+          <Text style={styles.sectionTitle}>Por vendedor</Text>
+          {metricas
+            .slice()
+            .sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido)
+            .map((m) => (
+              <View key={m.codigoVendedor} style={styles.vendedorRow}>
+                <Text style={styles.vendedorNome}>{m.nomeVendedor}</Text>
+                <View style={styles.vendedorValores}>
+                  <Text style={styles.vendedorValor}>{formatBRL(m.faturamentoLiquido)}</Text>
+                  <Text style={styles.vendedorMargem}>margem {m.margemBrutaPct.toFixed(1)}%</Text>
+                </View>
+              </View>
+            ))}
+        </Card>
+      )}
     </ScrollView>
   );
 }
@@ -232,6 +237,11 @@ const styles = StyleSheet.create({
   greeting: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 4 },
   syncLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 16 },
   tileRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  // 3 indicadores cabem numa linha só — evita o problema do grid de 2
+  // colunas com número ímpar de tiles (o 3º sobra sozinho numa linha
+  // nova, alinhado à esquerda com um vão enorme à direita).
+  tileRowTresColunas: { flexDirection: 'row', justifyContent: 'space-between' },
+  tileTercoColuna: { width: '31%', paddingHorizontal: 8 },
   empty: { color: colors.textSecondary },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: 10 },
   vendedorRow: {

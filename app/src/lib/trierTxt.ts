@@ -12,8 +12,13 @@ function formatarDataTrier(iso: string): string {
   return `${dia}/${mes}/${ano}`;
 }
 
+// Cada linha do .txt é delimitada por "," e as linhas em si por \n —
+// um nome de produto com quebra de linha real (não deveria acontecer
+// num catálogo bem formado, mas nada garante isso vindo de fora)
+// quebraria a linha do .txt em duas, deslocando todos os campos
+// seguintes. Substitui por espaço além de escapar aspas.
 function escaparCampo(valor: string): string {
-  return valor.replace(/"/g, "'");
+  return valor.replace(/"/g, "'").replace(/[\r\n]+/g, ' ').trim();
 }
 
 // Cada produto já carrega a própria validade (editável na tela de

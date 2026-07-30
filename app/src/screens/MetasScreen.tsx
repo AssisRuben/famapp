@@ -15,10 +15,11 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { colors } from '../theme/colors';
+import { formatBRL } from '../lib/format';
 import { mesAnoLabel, rotuloSemana } from '../lib/metas';
 import { alertar } from '../lib/alert';
 import { vendedoresSeed } from '../data/mock/seed';
-import { AtividadeChecklist, MetaVendedor } from '../types/domain';
+import { AtividadeChecklist, ComissaoMensal, MetaVendedor } from '../types/domain';
 
 type Segmento = 'metas' | 'atividades';
 
@@ -37,6 +38,8 @@ export function MetasScreen() {
   const [loadingMetas, setLoadingMetas] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
+  const [comissoes, setComissoes] = useState<ComissaoMensal[]>([]);
+
   const [valorMensal, setValorMensal] = useState('');
   const [valoresSemana, setValoresSemana] = useState(['', '', '', '']);
 
@@ -51,6 +54,9 @@ export function MetasScreen() {
     const dados = await repository.getMetas(profile, ano, mes);
     setMetas(dados);
     setLoadingMetas(false);
+    // Comissão só faz sentido pra fechamento MENSAL (não é semanal/diária)
+    // — ver comentário em vw_metas_comissao no supabase/schema.sql.
+    setComissoes(await repository.getComissoesMensal(profile, ano, mes));
   }, [profile, ano, mes]);
 
   const carregarAtividades = useCallback(async () => {
@@ -225,15 +231,29 @@ export function MetasScreen() {
           {loadingMetas ? (
             <ActivityIndicator style={{ marginTop: 12 }} />
           ) : (
-            metas.map((meta) => (
-              <Card key={meta.codigoVendedor}>
-                <MetaProgressBar
-                  label={`${meta.nomeVendedor} — mensal`}
-                  valorRealizado={meta.valorRealizadoMensal}
-                  valorMeta={meta.valorMetaMensal}
-                />
-              </Card>
-            ))
+            metas.map((meta) => {
+              const comissao = comissoes.find((c) => c.codigoVendedor === meta.codigoVendedor);
+              return (
+                <Card key={meta.codigoVendedor}>
+                  <MetaProgressBar
+                    label={`${meta.nomeVendedor} — mensal`}
+                    valorRealizado={meta.valorRealizadoMensal}
+                    valorMeta={meta.valorMetaMensal}
+                  />
+                  {comissao && (
+                    <View style={styles.comissaoRow}>
+                      <Text style={styles.comissaoTexto}>
+                        💰 Faixa atual: {comissao.percentualComissao}% sobre a margem bruta
+                        ({formatBRL(comissao.margemBrutaValor)})
+                      </Text>
+                      <Text style={styles.comissaoValor}>
+                        ≈ {formatBRL(comissao.comissaoValor)} de comissão no fechamento do mês
+                      </Text>
+                    </View>
+                  )}
+                </Card>
+              );
+            })
           )}
         </>
       ) : (
@@ -361,6 +381,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   salvarTexto: { color: colors.white, fontWeight: '700', fontSize: 14 },
+  comissaoRow: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
+  comissaoTexto: { fontSize: 11, color: colors.textSecondary },
+  comissaoValor: { fontSize: 12, fontWeight: '700', color: colors.navy, marginTop: 2 },
   sectionTitulo: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 4, marginBottom: 8 },
   novaAtividadeRow: { flexDirection: 'row', gap: 8 },
   inputAtividade: { flex: 1 },
