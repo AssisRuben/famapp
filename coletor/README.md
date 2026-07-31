@@ -227,6 +227,47 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
 
 ## Coisas que valem revisão futura
 
+- **[RESOLVIDO 31/07/2026] Vendas duplicadas quando `ser_nota_fiscal` é
+  nula**: `ON CONFLICT (numero_nota, cod_filial, ser_nota_fiscal)` nunca
+  "batia" nesse caso (Postgres trata todo `NULL` como distinto de
+  qualquer outro `NULL`), então cada reprocessamento duplicava a venda
+  inteira em vez de atualizar — encontrado em produção comparando com
+  relatório real da Trier (394 notas no nosso banco vs 148 no relatório
+  "Vendas por Vendedor" do mesmo dia; 3.242 vendas duplicadas
+  confirmadas). Corrigido em `sgf-incremental.n8n.json` (nós "Mapear
+  vendas" e "Preparar itens e cursor") e em `backfill_periodo.js`: nota
+  sem série usa `ON CONFLICT (numero_nota, cod_filial)` contra um índice
+  parcial novo (`migracao_coletor.sql`, item 4); item sem
+  `num_sequencial` passa a usar a posição no array como substituto
+  determinístico, em vez de deixar `NULL` (mesma classe de bug, evitada
+  na origem em vez de precisar de outro índice). **Rodar
+  `migracao_coletor.sql` item 4 no projeto real antes de reativar o
+  incremental ou rodar `backfill_periodo.js` de novo** — a limpeza de
+  duplicata que já existe tem que rodar antes do índice.
+- **[RESOLVIDO 31/07/2026] Duas falhas achadas rodando o fix acima em
+  produção**:
+  1. A primeira versão do `ON CONFLICT` sem série em
+     `backfill_periodo.js` esqueceu o `WHERE ser_nota_fiscal IS NULL`
+     na cláusula — pra um índice **parcial**, o Postgres só infere o
+     índice se o mesmo `WHERE` aparecer literalmente no `ON CONFLICT`,
+     senão dá "no unique or exclusion constraint matching". O
+     `sgf-incremental.n8n.json` já tinha isso certo desde o início;
+     só o script standalone tinha o bug.
+  2. Rodar vendas uma a uma (~31 mil round-trips individuais) derrubou
+     a conexão no meio ("Connection terminated unexpectedly") — sessão
+     longa demais. `backfill_periodo.js` agora processa vendas em
+     lotes de 200 (bem mais rápido, muito menos exposto) e reconecta
+     automaticamente (até 3 tentativas) se a conexão cair no meio do
+     processo.
+- **Margem/comissão/desconto vindo `NULL`**: comparando uma nota real
+  com o relatório da Trier, `vlr_custo_produto`/`prc_comissao`/
+  `vlr_desconto` vieram `NULL` em `venda_itens` mesmo com
+  `valor_total_bruto`/`valor_total_liquido` populados certos (nomes de
+  campo já conferidos contra `docs/api-sgf-openapi.json`, batem). Ainda
+  **não confirmado** se é a API que não devolve esses campos pra esse
+  token/escopo, ou se o dado realmente não existe cadastrado na Trier
+  pra esses itens — precisa abrir uma nota específica na Trier e ver se
+  o campo aparece preenchido lá também.
 - **`venda_com_desconto`**: a API manda um valor numérico, a coluna no
   banco é `boolean`. O workflow faz um mapeamento provisório (ver
   `migracao_coletor.sql`, item 2) — perde a informação do valor real.
@@ -237,4 +278,6 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
   Não tratei isso no coletor de propósito (é decisão de camada
   analítica, não de ingestão) — precisa de ajuste nas views quando forem
   revisadas com dado real.
-- **Sem paginação real** — ver seção 4 acima.
+- **Sem paginação real no incremental de 15 min** (`sgf-incremental.n8n.json`
+  continua fixo em página 0 — ver seção 4 acima). `backfill_periodo.js`
+  já tem paginação real, mas é script à parte, não o coletor recorrente.

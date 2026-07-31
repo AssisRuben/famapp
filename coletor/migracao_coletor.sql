@@ -43,3 +43,36 @@ alter table venda_itens
 -- === 'S' pro boolean na escrita — schema não precisa mudar, só
 -- documentando aqui pra não confundir quem for debugar diferença
 -- entre o payload cru da API e o que cai na tabela.
+
+-- 4) BUG REAL ENCONTRADO EM PRODUÇÃO (31/07/2026): nota fiscal sem
+-- ser_nota_fiscal (comum — 3242 vendas duplicadas encontradas num único
+-- dia, 30/07) nunca "batia" no ON CONFLICT (numero_nota, cod_filial,
+-- ser_nota_fiscal), porque Postgres trata todo NULL como distinto de
+-- qualquer outro NULL — cada reprocessamento duplicava a venda inteira
+-- em vez de atualizar. Índice parcial cobre exatamente esse caso;
+-- venda_itens não precisou de índice novo — o workflow e o
+-- backfill_periodo.js passaram a sintetizar num_sequencial a partir da
+-- posição no array quando a API não manda um, então a constraint
+-- (venda_id, num_sequencial) já existente nunca mais recebe NULL.
+--
+-- ORDEM IMPORTA: limpa a duplicata primeiro, senão o CREATE UNIQUE
+-- INDEX abaixo falha (Postgres não cria índice único sobre dado que já
+-- viola a unicidade).
+--
+-- delete from vendas
+-- where id in (
+--   select id from (
+--     select id, row_number() over (partition by numero_nota, cod_filial order by id) as rn
+--     from vendas
+--     where ser_nota_fiscal is null
+--   ) t
+--   where rn > 1
+-- );
+
+-- Rodar isso ANTES de reativar o coletor incremental ou rodar o
+-- backfill de novo — sem o índice, INSERT de venda sem série ainda
+-- funciona (só não trava a duplicação), mas com o índice e sem essa
+-- migração o coletor passaria a dar erro em vez de duplicar.
+create unique index if not exists vendas_numero_filial_unique_sem_serie
+on vendas (numero_nota, cod_filial)
+where ser_nota_fiscal is null;

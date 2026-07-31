@@ -25,6 +25,12 @@
 // incremental, que continua rodando por conta própria) e não é
 // idempotente pra compras/compras_itens (rodar duas vezes duplica —
 // ver comentário perto de sincronizarCompras).
+//
+// Resiliência: vendas processa em lotes de 200 (não 1 por vez — já
+// derrubou conexão em produção numa sessão de ~31 mil round-trips
+// individuais) e reconecta automaticamente (até 3 tentativas) se a
+// conexão cair no meio. Se mesmo assim falhar, é seguro rodar de novo
+// do zero — todo upsert é idempotente, exceto compras (ver acima).
 'use strict';
 
 const { Client } = require('pg');
@@ -65,6 +71,51 @@ function formatarDataTrier(dataUtc) {
 
 function dormir(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Sessão de Postgres longa (dezenas de milhares de queries, no caso de
+// vendas) já caiu no meio em produção ("Connection terminated
+// unexpectedly") — sem isso, um Client cru derruba o processo inteiro
+// (evento 'error' sem listener = throw não tratado no Node) e perde
+// tudo que ainda não tinha rodado. Essa wrapper reconecta e tenta de
+// novo até 3x em erro de conexão; expõe só `.query()`, então o resto
+// do script (que só chama client.query(...)) não precisa saber que o
+// client por baixo pode trocar.
+function criarConexaoResiliente(databaseUrl) {
+  let client = null;
+
+  async function conectar() {
+    client = new Client({ connectionString: databaseUrl });
+    // sem isso, uma queda assíncrona (fora de uma query em andamento)
+    // ainda derruba o processo — precisa de ALGUM listener em 'error'.
+    client.on('error', (erro) => {
+      console.warn(`\n  [conexão] evento de erro assíncrono: ${erro.message}`);
+      client = null;
+    });
+    await client.connect();
+  }
+
+  async function query(sql, params) {
+    const MAX_TENTATIVAS = 3;
+    for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+      try {
+        if (!client) await conectar();
+        return await client.query(sql, params);
+      } catch (erro) {
+        const transitorio = /connection terminated|econnreset|etimedout|timeout|socket hang up/i.test(erro.message || '');
+        client = null;
+        if (!transitorio || tentativa === MAX_TENTATIVAS) throw erro;
+        console.warn(`\n  [conexão] caiu (${erro.message}) — reconectando, tentativa ${tentativa + 1}/${MAX_TENTATIVAS}...`);
+        await dormir(2000 * tentativa);
+      }
+    }
+  }
+
+  async function encerrar() {
+    if (client) await client.end().catch(() => {});
+  }
+
+  return { query, conectar, encerrar };
 }
 
 // Paginação de verdade: incrementa primeiroRegistro em passos de 999
@@ -304,69 +355,119 @@ async function sincronizarVendas(client) {
     );
   }
 
-  let totalVendas = 0;
-  let totalItens = 0;
-  for (const v of vendas) {
-    const dataEmissao = v.dataEmissao ? String(v.dataEmissao).slice(0, 10) : null;
-    const vendaEcommerce = v.vendaEcommerce === 'S';
-    const { rows } = await client.query(
-      `INSERT INTO vendas (numero_nota, numero_nota_origem, tipo_cancelamento, data_emissao, hora_emissao, codigo_vendedor, codigo_cliente, entrega, pagamento_na_entrega, condicao_pagamento, vlr_troco, numero_cupom_fiscal, numero_nota_fiscal, xml_nfe, cod_parceiro, cod_filial, venda_ifood, venda_ecommerce, cod_ecommerce, ser_nota_fiscal, modelo_venda, dados_entrega)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
-       ON CONFLICT (numero_nota, cod_filial, ser_nota_fiscal) DO UPDATE SET
-         numero_nota_origem = EXCLUDED.numero_nota_origem, tipo_cancelamento = EXCLUDED.tipo_cancelamento,
-         data_emissao = EXCLUDED.data_emissao, hora_emissao = EXCLUDED.hora_emissao,
-         codigo_vendedor = EXCLUDED.codigo_vendedor, codigo_cliente = EXCLUDED.codigo_cliente,
-         entrega = EXCLUDED.entrega, pagamento_na_entrega = EXCLUDED.pagamento_na_entrega,
-         condicao_pagamento = EXCLUDED.condicao_pagamento, vlr_troco = EXCLUDED.vlr_troco,
-         numero_cupom_fiscal = EXCLUDED.numero_cupom_fiscal, numero_nota_fiscal = EXCLUDED.numero_nota_fiscal,
-         xml_nfe = EXCLUDED.xml_nfe, cod_parceiro = EXCLUDED.cod_parceiro,
-         venda_ifood = EXCLUDED.venda_ifood, venda_ecommerce = EXCLUDED.venda_ecommerce,
-         cod_ecommerce = EXCLUDED.cod_ecommerce, modelo_venda = EXCLUDED.modelo_venda,
-         dados_entrega = EXCLUDED.dados_entrega, updated_at = now()
-       RETURNING id`,
-      [
+  const COLUNAS_VENDA = [
+    'numero_nota', 'numero_nota_origem', 'tipo_cancelamento', 'data_emissao', 'hora_emissao', 'codigo_vendedor',
+    'codigo_cliente', 'entrega', 'pagamento_na_entrega', 'condicao_pagamento', 'vlr_troco', 'numero_cupom_fiscal',
+    'numero_nota_fiscal', 'xml_nfe', 'cod_parceiro', 'cod_filial', 'venda_ifood', 'venda_ecommerce', 'cod_ecommerce',
+    'ser_nota_fiscal', 'modelo_venda', 'dados_entrega',
+  ];
+  const UPDATE_SET_VENDA = COLUNAS_VENDA.slice(1)
+    .map((c) => `${c} = EXCLUDED.${c}`)
+    .join(', ') + ', updated_at = now()';
+
+  function chaveVenda(numeroNota, codFilial, serNotaFiscal) {
+    return `${numeroNota}|${codFilial ?? ''}|${serNotaFiscal ?? ''}`;
+  }
+
+  // ser_nota_fiscal nula precisa de um alvo de conflito diferente —
+  // (numero_nota, cod_filial, ser_nota_fiscal) nunca "bate" quando a
+  // série é NULL (Postgres trata cada NULL como distinto de si mesmo),
+  // então cada reprocessamento duplicava a venda inteira em vez de
+  // atualizar. O índice pra esse caso é PARCIAL (where ser_nota_fiscal
+  // is null) — o Postgres só infere um índice parcial se o MESMO WHERE
+  // aparecer literalmente no ON CONFLICT.
+  async function inserirVendasRetornando(subset, alvoConflito) {
+    if (subset.length === 0) return [];
+    const valores = [];
+    const grupos = subset.map((v, i) => {
+      const dataEmissao = v.dataEmissao ? String(v.dataEmissao).slice(0, 10) : null;
+      const linha = [
         v.numeroNota, v.numeroNotaOrigem ?? null, v.tipoCancelamento ?? null, dataEmissao, horaParaPg(v.horaEmissao),
         v.codigoVendedor ?? null, v.codigoCliente ?? null, v.entrega ?? null, v.pagamentoNaEntrega ?? null,
-        pgVal(v.condicaoPagamento ?? null), v.vlrTroco ?? null, v.numeroCupomFiscal ?? null, v.numeroNotaFiscal ?? null,
-        v.xmlNfe ?? null, v.codParceiro ?? null, v.codFilial ?? null, v.vendaIfood ?? null, vendaEcommerce,
-        v.codEcommerce ?? null, v.serNotaFiscal ?? null, v.modeloVenda ?? null, pgVal(v.dadosEntrega ?? null),
-      ]
-    );
-    const vendaId = rows[0].id;
-    totalVendas += 1;
-
-    const itens = v.itens || [];
-    if (itens.length === 0) continue;
-
-    const linhasItens = itens.map((item) => {
-      const vendaComDescontoBool = item.vendaComDesconto != null && item.vendaComDesconto !== item.valorTotalLiquido;
-      return [
-        vendaId, item.codigoProduto, item.codigoVendedor ?? null, item.quantidadeProdutos, item.valorTotalBruto,
-        item.valorTotalLiquido, item.valorTotalCusto, item.parceiro ?? null, item.codigoMedico ?? null, item.codBarras ?? null,
-        item.numSequencial ?? null, item.prcComissao ?? null, item.vlrDesconto ?? null, item.vlrUnitario ?? null,
-        item.vlrCustoAquisicao ?? null, item.vlrCustoProduto ?? null, item.tabelaDesconto ?? null, item.prcDesconto ?? null,
-        item.prcDescontoMax ?? null, vendaComDescontoBool,
+        v.condicaoPagamento ?? null, v.vlrTroco ?? null, v.numeroCupomFiscal ?? null, v.numeroNotaFiscal ?? null,
+        v.xmlNfe ?? null, v.codParceiro ?? null, v.codFilial ?? null, v.vendaIfood ?? null, v.vendaEcommerce === 'S',
+        v.codEcommerce ?? null, v.serNotaFiscal ?? null, v.modeloVenda ?? null, v.dadosEntrega ?? null,
       ];
+      const base = i * COLUNAS_VENDA.length;
+      valores.push(...linha.map(pgVal));
+      const placeholders = COLUNAS_VENDA.map((_, j) => `$${base + j + 1}`).join(', ');
+      return `(${placeholders}, now())`;
     });
-
-    await upsertLote(client, {
-      tabela: 'venda_itens',
-      colunas: [
-        'venda_id', 'codigo_produto', 'codigo_vendedor', 'quantidade_produtos', 'valor_total_bruto', 'valor_total_liquido',
-        'valor_total_custo', 'parceiro', 'codigo_medico', 'cod_barras', 'num_sequencial', 'prc_comissao', 'vlr_desconto',
-        'vlr_unitario', 'vlr_custo_aquisicao', 'vlr_custo_produto', 'tabela_desconto', 'prc_desconto', 'prc_desconto_max',
-        'venda_com_desconto',
-      ],
-      linhas: linhasItens,
-      conflito: 'venda_id, num_sequencial',
-      atualizarColunas: [
-        'codigo_produto', 'codigo_vendedor', 'quantidade_produtos', 'valor_total_bruto', 'valor_total_liquido',
-        'valor_total_custo', 'parceiro', 'codigo_medico', 'cod_barras', 'prc_comissao', 'vlr_desconto', 'vlr_unitario',
-        'vlr_custo_aquisicao', 'vlr_custo_produto', 'tabela_desconto', 'prc_desconto', 'prc_desconto_max', 'venda_com_desconto',
-      ],
-    });
-    totalItens += itens.length;
+    const { rows } = await client.query(
+      `INSERT INTO vendas (${COLUNAS_VENDA.join(', ')}, updated_at)
+       VALUES ${grupos.join(',\n')}
+       ON CONFLICT ${alvoConflito} DO UPDATE SET ${UPDATE_SET_VENDA}
+       RETURNING id, numero_nota, cod_filial, ser_nota_fiscal`,
+      valores
+    );
+    return rows;
   }
+
+  const COLUNAS_ITEM = [
+    'venda_id', 'codigo_produto', 'codigo_vendedor', 'quantidade_produtos', 'valor_total_bruto', 'valor_total_liquido',
+    'valor_total_custo', 'parceiro', 'codigo_medico', 'cod_barras', 'num_sequencial', 'prc_comissao', 'vlr_desconto',
+    'vlr_unitario', 'vlr_custo_aquisicao', 'vlr_custo_produto', 'tabela_desconto', 'prc_desconto', 'prc_desconto_max',
+    'venda_com_desconto',
+  ];
+
+  // Processa em lotes (não 1 venda por vez) — bem mais rápido e reduz
+  // drasticamente a exposição a queda de conexão no meio (já aconteceu
+  // em produção com ~31 mil round-trips individuais).
+  const TAMANHO_LOTE = 200;
+  let totalVendas = 0;
+  let totalItens = 0;
+
+  for (let inicio = 0; inicio < vendas.length; inicio += TAMANHO_LOTE) {
+    const lote = vendas.slice(inicio, inicio + TAMANHO_LOTE);
+    const comSerie = lote.filter((v) => v.serNotaFiscal != null);
+    const semSerie = lote.filter((v) => v.serNotaFiscal == null);
+
+    const idPorChave = new Map();
+    for (const r of await inserirVendasRetornando(comSerie, '(numero_nota, cod_filial, ser_nota_fiscal)')) {
+      idPorChave.set(chaveVenda(r.numero_nota, r.cod_filial, r.ser_nota_fiscal), r.id);
+    }
+    for (const r of await inserirVendasRetornando(semSerie, '(numero_nota, cod_filial) WHERE ser_nota_fiscal IS NULL')) {
+      idPorChave.set(chaveVenda(r.numero_nota, r.cod_filial, r.ser_nota_fiscal), r.id);
+    }
+
+    // num_sequencial nulo tem o mesmo problema de fundo (constraint
+    // venda_id + num_sequencial nunca bate pra NULL) — em vez de outro
+    // índice parcial, sintetiza a posição no array quando a API não
+    // manda um. Determinístico entre reprocessamentos (mesma venda,
+    // mesma ordem de itens = mesmo número), então nunca fica NULL.
+    const linhasItens = [];
+    for (const v of lote) {
+      const vendaId = idPorChave.get(chaveVenda(v.numeroNota, v.codFilial, v.serNotaFiscal));
+      if (!vendaId) continue; // não deveria acontecer — venda não retornou id
+      totalVendas += 1;
+      (v.itens || []).forEach((item, indice) => {
+        const vendaComDescontoBool = item.vendaComDesconto != null && item.vendaComDesconto !== item.valorTotalLiquido;
+        linhasItens.push([
+          vendaId, item.codigoProduto, item.codigoVendedor ?? null, item.quantidadeProdutos, item.valorTotalBruto,
+          item.valorTotalLiquido, item.valorTotalCusto, item.parceiro ?? null, item.codigoMedico ?? null, item.codBarras ?? null,
+          item.numSequencial ?? indice + 1, item.prcComissao ?? null, item.vlrDesconto ?? null, item.vlrUnitario ?? null,
+          item.vlrCustoAquisicao ?? null, item.vlrCustoProduto ?? null, item.tabelaDesconto ?? null, item.prcDesconto ?? null,
+          item.prcDescontoMax ?? null, vendaComDescontoBool,
+        ]);
+      });
+    }
+
+    if (linhasItens.length > 0) {
+      await upsertLote(client, {
+        tabela: 'venda_itens',
+        colunas: COLUNAS_ITEM,
+        linhas: linhasItens,
+        conflito: 'venda_id, num_sequencial',
+        // venda_id e num_sequencial são a chave do conflito — não fazem
+        // sentido no SET (já são iguais por definição quando bate o conflito).
+        atualizarColunas: COLUNAS_ITEM.filter((c) => c !== 'venda_id' && c !== 'num_sequencial'),
+      });
+      totalItens += linhasItens.length;
+    }
+
+    process.stdout.write(`\r  vendas: ${Math.min(inicio + TAMANHO_LOTE, vendas.length)}/${vendas.length} processadas...`);
+  }
+  process.stdout.write('\n');
   console.log(`  vendas: ${totalVendas} upsertadas, ${totalItens} itens.`);
 }
 
@@ -404,8 +505,8 @@ async function main() {
   console.log(`Período: ${formatarDataTrier(DATA_INICIAL)} até ${formatarDataTrier(DATA_FINAL)}`);
   console.log(`Entidades: ${[...ENTIDADES].join(', ')}\n`);
 
-  const client = new Client({ connectionString: DATABASE_URL });
-  await client.connect();
+  const client = criarConexaoResiliente(DATABASE_URL);
+  await client.conectar();
 
   try {
     // ordem importa: produto antes de compra (FK), fornecedor antes de
@@ -420,7 +521,7 @@ async function main() {
     if (ENTIDADES.has('atendimentos')) { console.log('Atendimentos diários...'); await sincronizarAtendimentos(client); }
     console.log('\nConcluído.');
   } finally {
-    await client.end();
+    await client.encerrar();
   }
 }
 
