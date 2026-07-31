@@ -54,8 +54,14 @@ export function parseDecimalBR(texto: string): number {
   return Number(t) || 0;
 }
 
+// Data local (não UTC) — toISOString() já causou o Painel pedir o dia
+// errado à noite no Brasil (UTC-3): passada a meia-noite em UTC mas
+// ainda "hoje" localmente, toISOString() já devolvia o dia seguinte,
+// que naturalmente não tem venda nenhuma ainda.
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 export function formatDateHoraBR(iso: string): string {

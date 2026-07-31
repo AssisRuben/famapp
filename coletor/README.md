@@ -136,36 +136,69 @@ código de cliente/vendedor referenciado no lote. Quando o sync real
 desse cliente/vendedor rodar (mesmo ciclo ou um futuro), o upsert dele
 sobrescreve o esqueleto com os dados de verdade.
 
-## Próximo passo planejado: workflow de backfill histórico (ainda não criado)
+## Backfill histórico único (`backfill_periodo.js`)
 
-Combinado em 30/07/2026, ainda **não implementado** — registrando aqui o
-plano pra retomar de qualquer máquina:
+Implementado em 30/07/2026 — **não** como workflow n8n (plano original,
+ver histórico abaixo), e sim como script Node standalone, porque o
+pedido mudou de "rotina recorrente" pra "importação de um período fixo,
+uma única vez" — nesse caso um loop de paginação em JS puro é mais
+simples de escrever certo (e de testar) do que montar o mesmo loop com
+nós de n8n.
 
-- **Workflow separado** do incremental de 15 min (não mexe no
-  `sgf-incremental.n8n.json` atual) — evita competir/duplicar trabalho
-  com ele enquanto roda.
+**O que faz, diferente do `sgf-incremental.n8n.json`:**
 - **Paginação de verdade**: incrementa `primeiroRegistro` em passos de
-  999 (`0`, `999`, `1998`...) até a API devolver menos que 999 registros
-  na janela — aí sabe que chegou ao fim daquela entidade. Precisa de um
-  loop no n8n (ex.: nó Code calculando o próximo `primeiroRegistro` +
-  IF checando "página cheia = continua" vs "página incompleta = parou",
-  voltando pro HTTP Request até parar).
-- **Resetar `sync_control.last_cursor` pra `2026-01-01`** antes de
-  rodar (não só complementar do cursor atual) — porque o cursor do
-  incremental já pode ter avançado além de registros nunca capturados
-  (ver o alerta na seção 4 acima). Os upserts com `ON CONFLICT` tornam
-  isso seguro: reprocessar um período já sincronizado não duplica nada.
-- Ao terminar cada entidade (página incompleta = fim), atualiza
-  `sync_control.last_cursor` dela pra "agora" — o incremental de 15 min
-  já continua dali sem buraco e sem sobreposição.
-- **Rodar de madrugada** (schedule tipo "todo dia às 3h" enquanto durar,
-  ou disparo manual) — evita concorrência com o incremental e com o uso
-  normal do sistema da farmácia durante o expediente.
-- Em aberto, decidir na hora de construir: o workflow se desativa
-  sozinho quando as 4 entidades terminam, ou fica pra desativação manual
-  depois de conferir os dados? (auto-desligar é mais "esqueça e volte
-  amanhã"; manual é mais seguro pra revisar antes de aceitar como
-  concluído.)
+  999 até a API devolver menos que isso — testado com mock simulando
+  2038 registros em 3 páginas, acumulou certo.
+- Cobre **7 entidades**, não só as 4 do incremental: vendedor, cliente,
+  venda+itens, atendimentos (mesmo mapeamento de campos do
+  `sgf-incremental.n8n.json`, só trocando interpolação de string por
+  parâmetros `$1,$2,...`) **e também produto (`produto_catalogo`),
+  fornecedor e compra+itens**, que o incremental de 15 min
+  deliberadamente não cobre (ver "Escopo desta primeira versão" acima).
+- **Não mexe em `sync_control`** — é um script à parte, o incremental
+  de 15 min continua com o próprio cursor, sem interferência.
+- Produto/fornecedor: sem filtro de data (`obter-todos`) — é sempre "o
+  catálogo atual", não faz sentido pedir "produtos alterados entre X e
+  Y" pra um cadastro que pode não ter mudado há anos mas continua
+  vendendo. Venda/atendimentos/compra: filtrados pelo período
+  (`obter-alterados` com `dataInicial`/`dataFinal`).
+- **`compras`/`compras_itens` não são idempotentes** — essas duas
+  tabelas não tinham nenhuma constraint única (ficaram vazias até
+  agora), então o script faz `INSERT` direto. Rodar o script duas vezes
+  duplica as compras do período; se precisar rodar de novo, `TRUNCATE
+  compras, compras_itens` antes (cai em cascata via FK). As outras 5
+  entidades usam `ON CONFLICT` e são seguras de rodar mais de uma vez.
+
+### Como rodar
+
+```bash
+cd coletor
+npm install
+TRIER_TOKEN="<mesmo Bearer da credencial 'SGF Trier - Bearer' no n8n>" \
+DATABASE_URL="<connection string do Session Pooler do Supabase, porta 5432>" \
+node backfill_periodo.js
+```
+
+Por padrão pega `01/01/2026` até agora e roda as 7 entidades. Pra
+retomar depois de uma falha parcial sem repetir tudo, use
+`ENTIDADES="produto,fornecedor,compra"` (lista separada por vírgula,
+mesmos nomes usados no log de saída). Ver comentário no topo do arquivo
+pra todas as variáveis de ambiente aceitas.
+
+<details>
+<summary>Plano original (n8n, descartado em favor do script acima)</summary>
+
+Ideia inicial, antes de saber que era importação única: workflow n8n
+separado do incremental, com loop de paginação via nó Code + IF,
+resetando `sync_control.last_cursor` pra `2026-01-01` antes de rodar
+(os upserts com `ON CONFLICT` tornariam isso seguro — reprocessar
+período já sincronizado não duplicaria nada) e atualizando o cursor pra
+"agora" ao terminar cada entidade, pra o incremental de 15 min continuar
+dali sem buraco. Rodar de madrugada, pra não competir com o incremental
+nem com o uso normal do sistema. Superado pelo script Node porque, sendo
+execução única, não precisa da infraestrutura de agendamento/cursor do
+n8n — só precisa rodar uma vez e terminar.
+</details>
 
 ## Desempenho das tabelas com histórico completo
 

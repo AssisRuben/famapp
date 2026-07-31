@@ -32,6 +32,7 @@ import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
 import { sugerirCandidatos } from '../../lib/campanhas';
 import { rotuloSemana } from '../../lib/metas';
+import { todayISO } from '../../lib/format';
 
 function round2(valor: number): number {
   return Math.round(valor * 100) / 100;
@@ -420,7 +421,7 @@ class SupabaseRepository implements DataRepository {
   }
 
   async getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]> {
-    const hojeIso = new Date().toISOString().slice(0, 10);
+    const hojeIso = todayISO();
     const [{ data: atividades, error: erroAtividades }, { data: respostas, error: erroRespostas }] = await Promise.all([
       supabase.from('atividades_checklist').select('id, titulo, horario, ativo').eq('ativo', true).order('titulo'),
       supabase
@@ -444,7 +445,7 @@ class SupabaseRepository implements DataRepository {
   // (não índice parcial), então onConflict funciona normalmente aqui —
   // diferente de `metas` acima.
   async marcarChecklistItem(profile: Profile, atividadeId: string, concluida: boolean): Promise<void> {
-    const hojeIso = new Date().toISOString().slice(0, 10);
+    const hojeIso = todayISO();
     const { error } = await supabase.from('checklist_respostas').upsert(
       {
         atividade_id: Number(atividadeId),
@@ -487,7 +488,7 @@ class SupabaseRepository implements DataRepository {
       ])
     );
 
-    const hojeIso = new Date().toISOString().slice(0, 10);
+    const hojeIso = todayISO();
     const codigosEmCampanhaAtiva = new Set(
       campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
     );
@@ -636,7 +637,7 @@ class SupabaseRepository implements DataRepository {
       ])
     );
 
-    const hojeIso = new Date().toISOString().slice(0, 10);
+    const hojeIso = todayISO();
     const codigosComDescontoAtivo = new Set(
       campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
     );

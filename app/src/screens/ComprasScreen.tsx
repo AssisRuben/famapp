@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
-import { formatBRL } from '../lib/format';
+import { formatBRL, todayISO } from '../lib/format';
 import { gerarCsvSugestaoCompras } from '../lib/comprasCsv';
 import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
 import { alertar } from '../lib/alert';
@@ -59,7 +59,7 @@ export function ComprasScreen() {
     setExportando(true);
     try {
       const conteudo = gerarCsvSugestaoCompras(itens);
-      const nomeArquivo = `lista-compras-${new Date().toISOString().slice(0, 10)}.csv`;
+      const nomeArquivo = `lista-compras-${todayISO()}.csv`;
 
       if (Platform.OS === 'web') {
         baixarArquivoTextoNoWeb(nomeArquivo, conteudo);
