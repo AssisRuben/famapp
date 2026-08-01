@@ -193,7 +193,7 @@ export function MetasScreen() {
           </ScrollView>
 
           <Card>
-            <Text style={styles.cardTitulo}>Meta mensal</Text>
+            <Text style={styles.cardTitulo}>Meta mensal (margem bruta)</Text>
             <TextInput
               style={styles.input}
               keyboardType="numeric"
@@ -202,7 +202,7 @@ export function MetasScreen() {
               placeholder="Valor em R$"
             />
 
-            <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Metas semanais</Text>
+            <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Metas semanais (margem bruta)</Text>
             {rotulos.map((rotulo, index) => (
               <View key={rotulo} style={styles.semanaInputRow}>
                 <Text style={styles.semanaRotulo}>{rotulo}</Text>

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { ClienteDoVendedor, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
@@ -43,6 +44,7 @@ const GRUPOS_FILTRO: GrupoFiltro[] = [
 // vendedor que atendeu, pra dar contexto).
 export function ClientesVendedorScreen() {
   const { profile } = useAuth();
+  const route = useRoute<any>();
   const [clientes, setClientes] = useState<ClienteDoVendedor[]>([]);
   const [produtos, setProdutos] = useState<ProdutoRecorrenteCliente[]>([]);
   const [busca, setBusca] = useState('');
@@ -70,6 +72,17 @@ export function ClientesVendedorScreen() {
     setLoading(true);
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // Deep-link do card "Uso contínuo atrasado" da aba Alertas
+  // (navigation.navigate('MeusClientes', { apenasRecompra: true })) —
+  // como é aba, não tela empilhada, o componente já pode estar
+  // montado; sem esse efeito, navegar de novo com o param não muda o
+  // filtro que já estava aplicado antes.
+  useEffect(() => {
+    if (route.params?.apenasRecompra) {
+      setApenasRecompra(true);
+    }
+  }, [route.params]);
 
   const onRefresh = async () => {
     setRefreshing(true);

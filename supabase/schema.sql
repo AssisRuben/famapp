@@ -765,6 +765,13 @@ group by p.codigo, p.nome, p.preco_atual, p.preco_anterior, p.percentual_descont
 -- app, aqui não precisa de dado ilustrativo. security_invoker=true:
 -- respeita a RLS de `metas` (vendedor só as próprias) e, por tabela,
 -- de vendas/venda_itens também.
+--
+-- [01/08/2026] "realizado" é MARGEM BRUTA em R$, não faturamento
+-- líquido — a meta cadastrada pela farmácia é de margem, não de
+-- venda (confirmado pelo usuário; antes comparava valor_meta contra
+-- faturamento, o que não fazia sentido). Mesmo fator de correção de
+-- custo (* 0.92) usado em vw_metricas_vendedor_diario/mensal — ver
+-- comentário lá.
 create view vw_metas_progresso as
 select
   m.id as meta_id,
@@ -778,7 +785,8 @@ select
 from metas m
 join vendedores vd on vd.codigo = m.codigo_vendedor
 left join lateral (
-  select sum(vi.valor_total_liquido) as valor
+  select
+    sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as valor
   from vendas v
   join venda_itens vi on vi.venda_id = v.id
   where v.codigo_vendedor = m.codigo_vendedor
@@ -804,6 +812,10 @@ left join lateral (
 -- atingido alcança (100%→10%, 90%→8%, ... abaixo de 70%→3%, ver
 -- faixas_comissao). security_invoker=true: respeita a RLS de `metas`
 -- (via vw_metas_progresso) e de vendas/venda_itens.
+-- [01/08/2026] mp.valor_realizado já É margem bruta agora (ver
+-- vw_metas_progresso acima) — antes essa view recalculava margem numa
+-- lateral separada porque mp.valor_realizado era faturamento; ficou
+-- redundante, então passou a reaproveitar direto.
 create view vw_metas_comissao as
 select
   mp.meta_id,
@@ -814,20 +826,10 @@ select
   mp.valor_meta,
   mp.valor_realizado,
   round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2) as percentual_atingido,
-  coalesce(margem.margem_bruta_valor, 0) as margem_bruta_valor,
+  mp.valor_realizado as margem_bruta_valor,
   faixa.percentual_comissao,
-  round(coalesce(margem.margem_bruta_valor, 0) * faixa.percentual_comissao / 100, 2) as comissao_valor
+  round(mp.valor_realizado * faixa.percentual_comissao / 100, 2) as comissao_valor
 from vw_metas_progresso mp
-left join lateral (
-  -- mesmo fator de correção de custo (* 0.92) de vw_metricas_vendedor_diario/mensal — ver comentário lá.
-  select sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as margem_bruta_valor
-  from vendas v
-  join venda_itens vi on vi.venda_id = v.id
-  where v.codigo_vendedor = mp.codigo_vendedor
-    and v.tipo_cancelamento is null
-    and extract(year from v.data_emissao) = mp.ano
-    and extract(month from v.data_emissao) = mp.mes
-) margem on true
 join lateral (
   select percentual_comissao
   from faixas_comissao

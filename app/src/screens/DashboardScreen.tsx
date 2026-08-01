@@ -28,9 +28,11 @@ function valoresDaMeta(
   realizadoHoje: number,
   semanaAtual: number
 ): { label: string; valorMeta: number; valorRealizado: number } {
+  // Meta é de margem bruta em R$, não faturamento (01/08/2026) — label
+  // deixa isso explícito pra não confundir com meta de venda.
   if (periodo === 'dia') {
     return {
-      label: 'Meta do dia',
+      label: 'Meta de margem do dia',
       valorMeta: metaDiaria(meta.valorMetaMensal, meta.ano, meta.mes),
       valorRealizado: realizadoHoje,
     };
@@ -38,12 +40,12 @@ function valoresDaMeta(
   if (periodo === 'semana') {
     const semana = meta.semanas.find((s) => s.semana === semanaAtual);
     return {
-      label: `Meta da semana (${semana?.rotulo ?? ''})`,
+      label: `Meta de margem da semana (${semana?.rotulo ?? ''})`,
       valorMeta: semana?.valorMeta ?? 0,
       valorRealizado: semana?.valorRealizado ?? 0,
     };
   }
-  return { label: 'Meta do mês', valorMeta: meta.valorMetaMensal, valorRealizado: meta.valorRealizadoMensal };
+  return { label: 'Meta de margem do mês', valorMeta: meta.valorMetaMensal, valorRealizado: meta.valorRealizadoMensal };
 }
 
 export function DashboardScreen() {
@@ -124,12 +126,16 @@ export function DashboardScreen() {
   const taxaDesconto = totalBruto ? (totalDesconto / totalBruto) * 100 : 0;
   const margemBruta = totalFaturamento ? ((totalFaturamento - totalCusto) / totalFaturamento) * 100 : 0;
   const itensPorAtendimento = totalAtendimentos ? totalItens / totalAtendimentos : 0;
-  const realizadoHojePorVendedor = new Map(metricas.map((m) => [m.codigoVendedor, m.faturamentoLiquido]));
+  // Meta agora é de margem bruta em R$, não faturamento (01/08/2026) —
+  // "realizado" do dia precisa ser margem também (faturamento - custo
+  // do dia), senão compara meta de margem contra venda bruta.
+  const realizadoHojePorVendedor = new Map(metricas.map((m) => [m.codigoVendedor, m.faturamentoLiquido - m.totalCusto]));
 
   // Projeção simples: pega o realizado do mês até hoje (já calculado de
-  // verdade em vw_metas_progresso via getMetas — não é só o dia de
-  // hoje), tira a média diária e multiplica pelos dias do mês inteiro.
-  // Ex.: dia 3, R$30 mil no mês = R$10 mil/dia de média x 30 dias = R$300 mil.
+  // verdade em vw_metas_progresso via getMetas — margem bruta, não é
+  // só o dia de hoje), tira a média diária e multiplica pelos dias do
+  // mês inteiro. Ex.: dia 3, R$9 mil de margem no mês = R$3 mil/dia de
+  // média x 30 dias = R$90 mil de margem projetada.
   const totalRealizadoMensal = sum(metas, (m) => m.valorRealizadoMensal);
   const diaDoMes = hoje.getDate();
   const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
@@ -280,7 +286,7 @@ export function DashboardScreen() {
             accentColor={colors.red}
             numberOfLines={2}
           />
-          <MetricTile label="Projeção de fechamento" value={formatBRLSemCentavos(projecaoFechamento)} accentColor="#9333ea" />
+          <MetricTile label="Projeção de margem no mês" value={formatBRLSemCentavos(projecaoFechamento)} accentColor="#9333ea" />
         </View>
       </Card>
 

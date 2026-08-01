@@ -62,9 +62,12 @@ function abaOculta(oculta: boolean) {
     : {};
 }
 
-// Barra principal fica só com as 4 abas fixas de cada papel — o resto
-// mora no drawer lateral, aberto pelo ícone de menu no header (no
-// lugar de onde ficava o botão "Sair", que agora é um item do drawer).
+// Barra principal fica só com as abas fixas de cada papel (Alertas
+// virou fixa pros dois em 01/08/2026, reaproveitando a mesma tela do
+// gestor — a lista de produto em promoção já não era filtrada por
+// vendedor) — o resto mora no drawer lateral, aberto pelo ícone de
+// menu no header (no lugar de onde ficava o botão "Sair", que agora é
+// um item do drawer).
 function AppTabs() {
   const { profile, signOut } = useAuth();
   const ehGestor = profile?.role === 'gestor';
@@ -84,10 +87,7 @@ function AppTabs() {
           { label: 'Compras', emoji: '🛒', onPress: () => irPara('Compras') },
           { label: 'Precificação', emoji: '📊', onPress: () => irPara('Precificacao') },
         ]
-      : [
-          { label: 'Clientes', emoji: '👥', onPress: () => irPara('Clientes') },
-          { label: 'Alertas', emoji: '🔔', onPress: () => irPara('Alertas') },
-        ]),
+      : [{ label: 'Clientes', emoji: '👥', onPress: () => irPara('Clientes') }]),
     { label: 'Sair', emoji: '🚪', onPress: () => { setMenuAberto(false); signOut(); }, perigo: true },
   ];
 
@@ -130,7 +130,6 @@ function AppTabs() {
           options={{
             title: 'Alertas',
             tabBarIcon: ({ focused }) => <TabIcon emoji="🔔" focused={focused} />,
-            ...abaOculta(!ehGestor),
           }}
         />
         <Tab.Screen
