@@ -27,6 +27,15 @@ using (id = auth.uid());
 -- aba Clientes do app (vendedor só vê os seus, gestor vê todos).
 -- Definida aqui (não em schema.sql) porque depende de `profiles`.
 --
+-- Usado pra gerar ação de RESGATE de cliente (mensagem de reativação,
+-- ver ClientesScreen.tsx) — por isso cliente que nunca comprou nada
+-- não entra aqui (não tem o que "resgatar"): `join lateral` normal em
+-- vez de `left join lateral` derruba da view quem não tem nenhuma
+-- linha em `vendas`, ao contrário de aparecer com `ultima_compra null`
+-- e `inativo false` (que escondia esses clientes dentro do bucket
+-- "ativo" sem ser um deles de verdade — achado em 31/07/2026 revisando
+-- o tile "Clientes inativos" do Painel).
+--
 -- Propositalmente SEM security_invoker (mesmo motivo de
 -- vw_produtos_promocao_clientes lá embaixo): se rodasse como invoker,
 -- a RLS de `vendas` (vendedor só vê as próprias) restringiria a
@@ -38,7 +47,7 @@ using (id = auth.uid());
 -- papel no WHERE — o controle de acesso aqui é manual (checa
 -- profiles/auth.uid()), não via RLS automática.
 -- ============================================================
-create view vw_clientes_inatividade as
+create or replace view vw_clientes_inatividade as
 select
   c.codigo,
   c.nome,
@@ -49,7 +58,7 @@ select
   ultima_venda.codigo_vendedor,
   vd.nome as nome_vendedor
 from clientes c
-left join lateral (
+join lateral (
   select v.data_emissao, v.codigo_vendedor
   from vendas v
   where v.codigo_cliente = c.codigo
@@ -448,6 +457,10 @@ alter view vw_metas_progresso set (security_invoker = true);
 alter view vw_metas_comissao set (security_invoker = true);
 alter view vw_produto_fornecedor_recente set (security_invoker = true);
 alter view vw_venda_recente_produto set (security_invoker = true);
+alter view vw_metricas_vendedor_mensal set (security_invoker = true);
+alter view vw_desempenho_vendedor_mensal set (security_invoker = true);
+alter view vw_metricas_vendedor_semanal set (security_invoker = true);
+alter view vw_desempenho_vendedor_semanal set (security_invoker = true);
 -- vw_produtos_promocao_clientes, vw_clientes_inatividade e
 -- vw_ranking_vendedores_dia ficam de propósito SEM security_invoker (ver
 -- comentário de cada uma em schema.sql) — não é esquecimento. Gap

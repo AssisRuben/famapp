@@ -5,16 +5,21 @@ import {
   ClienteInatividade,
   ComissaoMensal,
   DesempenhoVendedorDiario,
+  DesempenhoVendedorMensal,
+  DesempenhoVendedorSemanal,
   FaixaComissao,
   ItemPrecificacao,
   MetaVendedor,
   MetricasVendedorDiario,
+  MetricasVendedorMensal,
+  MetricasVendedorSemanal,
   ParametrosCompra,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
   RankingVendedorDia,
+  ResumoClientesInatividade,
   SalvarCampanhaInput,
   SalvarMetaInput,
   StatusSincronizacao,
@@ -41,8 +46,21 @@ export interface DataRepository {
 
   getDesempenhoVendedorDiario(profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]>;
   getMetricasVendedorDiario(profile: Profile, dataEmissao: string): Promise<MetricasVendedorDiario[]>;
+  // Mesmas métricas, agregadas pro mês inteiro — usadas pelo card
+  // "Desempenho do mês" do Painel.
+  getDesempenhoVendedorMensal(profile: Profile, ano: number, mes: number): Promise<DesempenhoVendedorMensal[]>;
+  getMetricasVendedorMensal(profile: Profile, ano: number, mes: number): Promise<MetricasVendedorMensal[]>;
+  // Mesmas métricas, agregadas por bucket de semana fixo (1-7, 8-14,
+  // 15-21, 22-fim do mês) — usadas pelo toggle Dia/Semana/Mês do card
+  // "Desempenho" do Painel.
+  getDesempenhoVendedorSemanal(profile: Profile, ano: number, mes: number, semana: 1 | 2 | 3 | 4): Promise<DesempenhoVendedorSemanal[]>;
+  getMetricasVendedorSemanal(profile: Profile, ano: number, mes: number, semana: 1 | 2 | 3 | 4): Promise<MetricasVendedorSemanal[]>;
   getRankingVendedoresDia(profile: Profile, dataEmissao: string): Promise<RankingVendedorDia[]>;
   getClientesInatividade(profile: Profile): Promise<ClienteInatividade[]>;
+  // Contagem agregada (total/inativos) pro tile do Painel — não sofre
+  // do limite padrão de 1000 linhas por request que getClientesInatividade
+  // tem quando usado só pra contar.
+  getResumoClientesInatividade(profile: Profile): Promise<ResumoClientesInatividade>;
 
   // Alertas de promoção: intencionalmente NÃO filtrado por vendedor — é
   // uma lista de oportunidades de contato, útil pra qualquer atendente.

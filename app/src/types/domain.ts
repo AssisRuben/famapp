@@ -44,6 +44,69 @@ export interface MetricasVendedorDiario {
   margemBrutaPct: number;
 }
 
+// Espelha vw_desempenho_vendedor_mensal — mesma conta de
+// DesempenhoVendedorDiario, agregada pro mês inteiro.
+export interface DesempenhoVendedorMensal {
+  ano: number;
+  mes: number;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  quantidadeAtendimentos: number;
+  quantidadeItens: number;
+  itensPorAtendimento: number;
+}
+
+// Espelha vw_metricas_vendedor_mensal — mesma conta de
+// MetricasVendedorDiario, agregada pro mês inteiro.
+export interface MetricasVendedorMensal {
+  ano: number;
+  mes: number;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  qtdNotas: number;
+  faturamentoLiquido: number;
+  faturamentoBruto: number;
+  totalDesconto: number;
+  taxaDescontoPct: number;
+  comissaoEstimada: number;
+  ticketMedio: number;
+  totalCusto: number;
+  margemBrutaPct: number;
+}
+
+// Espelha vw_desempenho_vendedor_semanal — mesma conta de
+// DesempenhoVendedorDiario, agregada por bucket de semana fixo
+// (1-7, 8-14, 15-21, 22-fim do mês — ver semanaDoDia() em lib/metas.ts).
+export interface DesempenhoVendedorSemanal {
+  ano: number;
+  mes: number;
+  semana: 1 | 2 | 3 | 4;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  quantidadeAtendimentos: number;
+  quantidadeItens: number;
+  itensPorAtendimento: number;
+}
+
+// Espelha vw_metricas_vendedor_semanal — mesma conta de
+// MetricasVendedorDiario, agregada por bucket de semana fixo.
+export interface MetricasVendedorSemanal {
+  ano: number;
+  mes: number;
+  semana: 1 | 2 | 3 | 4;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  qtdNotas: number;
+  faturamentoLiquido: number;
+  faturamentoBruto: number;
+  totalDesconto: number;
+  taxaDescontoPct: number;
+  comissaoEstimada: number;
+  ticketMedio: number;
+  totalCusto: number;
+  margemBrutaPct: number;
+}
+
 // Espelha vw_ranking_vendedores_dia
 export interface RankingVendedorDia {
   dataEmissao: string;
@@ -66,6 +129,14 @@ export interface ClienteInatividade {
   inativo: boolean;
   codigoVendedor: number | null;
   nomeVendedor: string | null;
+}
+
+// Resumo agregado pro tile "Clientes inativos" do Painel — contagem
+// feita no banco (não conta linhas trazidas pro app, que ficaria
+// sujeita ao limite padrão de 1000 linhas por request do PostgREST).
+export interface ResumoClientesInatividade {
+  total: number;
+  inativos: number;
 }
 
 export type TipoReceita = 'comum' | 'controle_especial' | 'antimicrobiano';

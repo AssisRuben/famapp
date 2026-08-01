@@ -8,17 +8,22 @@ import {
   ClienteInatividade,
   ComissaoMensal,
   DesempenhoVendedorDiario,
+  DesempenhoVendedorMensal,
+  DesempenhoVendedorSemanal,
   FaixaComissao,
   ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
   MetricasVendedorDiario,
+  MetricasVendedorMensal,
+  MetricasVendedorSemanal,
   ParametrosCompra,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
   RankingVendedorDia,
+  ResumoClientesInatividade,
   SalvarCampanhaInput,
   SalvarMetaInput,
   StatusSincronizacao,
@@ -46,7 +51,7 @@ import {
   vendaRecenteSeed,
   vendedoresSeed,
 } from './seed';
-import { rotuloSemana, semanaDoDia } from '../../lib/metas';
+import { diasDecorridosNaSemana, rotuloSemana, semanaDoDia } from '../../lib/metas';
 import { sugerirCandidatos } from '../../lib/campanhas';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
@@ -97,6 +102,7 @@ function visivelParaPerfil<T extends { codigoVendedor: number }>(profile: Profil
   if (profile.role === 'gestor') return linhas;
   return linhas.filter((linha) => linha.codigoVendedor === profile.codigoVendedor);
 }
+
 
 // metricasSeedHoje/desempenhoSeedHoje são um snapshot FIXO de "hoje" —
 // sem variação por data, o Dashboard mostrava o mesmo faturamento
@@ -238,6 +244,119 @@ class MockRepository implements DataRepository {
     return delay(visivelParaPerfil(profile, metricasDoDia(dataEmissao)));
   }
 
+  // Mock aproximado: soma metricasSeedHoje ao longo dos dias já
+  // decorridos do mês (ou o mês inteiro, se for um mês passado) — não
+  // tem pretensão de ser fiel dia a dia, só de dar um número plausível
+  // pro card "Desempenho do mês" enquanto o mock não é mais usado
+  // (Frente 2/Supabase real já é o repositório ativo).
+  async getDesempenhoVendedorMensal(profile: Profile, ano: number, mes: number): Promise<DesempenhoVendedorMensal[]> {
+    const hoje = new Date();
+    const ehMesCorrente = hoje.getFullYear() === ano && hoje.getMonth() + 1 === mes;
+    const dias = ehMesCorrente ? hoje.getDate() : new Date(ano, mes, 0).getDate();
+    const linhas = desempenhoSeedHoje.map((d) => {
+      const quantidadeAtendimentos = Math.max(1, Math.round(d.quantidadeAtendimentos * dias));
+      const quantidadeItens = Math.max(1, Math.round(d.quantidadeItens * dias));
+      return {
+        ano,
+        mes,
+        codigoVendedor: d.codigoVendedor,
+        nomeVendedor: nomeVendedor(d.codigoVendedor),
+        quantidadeAtendimentos,
+        quantidadeItens,
+        itensPorAtendimento: round2(quantidadeItens / quantidadeAtendimentos),
+      };
+    });
+    return delay(visivelParaPerfil(profile, linhas));
+  }
+
+  async getMetricasVendedorMensal(profile: Profile, ano: number, mes: number): Promise<MetricasVendedorMensal[]> {
+    const hoje = new Date();
+    const ehMesCorrente = hoje.getFullYear() === ano && hoje.getMonth() + 1 === mes;
+    const dias = ehMesCorrente ? hoje.getDate() : new Date(ano, mes, 0).getDate();
+    const linhas = metricasSeedHoje.map((m) => {
+      const qtdNotas = Math.max(1, Math.round(m.qtdNotas * dias));
+      const faturamentoLiquido = round2(m.faturamentoLiquido * dias);
+      const faturamentoBruto = round2(m.faturamentoBruto * dias);
+      const totalDesconto = round2(m.totalDesconto * dias);
+      const comissaoEstimada = round2(m.comissaoEstimada * dias);
+      const totalCusto = round2(m.totalCusto * dias);
+      return {
+        ano,
+        mes,
+        codigoVendedor: m.codigoVendedor,
+        nomeVendedor: nomeVendedor(m.codigoVendedor),
+        qtdNotas,
+        faturamentoLiquido,
+        faturamentoBruto,
+        totalDesconto,
+        taxaDescontoPct: round2((totalDesconto / faturamentoBruto) * 100),
+        comissaoEstimada,
+        ticketMedio: round2(faturamentoLiquido / qtdNotas),
+        totalCusto,
+        margemBrutaPct: round2(((faturamentoLiquido - totalCusto) / faturamentoLiquido) * 100),
+      };
+    });
+    return delay(visivelParaPerfil(profile, linhas));
+  }
+
+  async getDesempenhoVendedorSemanal(
+    profile: Profile,
+    ano: number,
+    mes: number,
+    semana: 1 | 2 | 3 | 4
+  ): Promise<DesempenhoVendedorSemanal[]> {
+    const dias = diasDecorridosNaSemana(ano, mes, semana);
+    const linhas = desempenhoSeedHoje.map((d) => {
+      const quantidadeAtendimentos = Math.max(1, Math.round(d.quantidadeAtendimentos * dias));
+      const quantidadeItens = Math.max(1, Math.round(d.quantidadeItens * dias));
+      return {
+        ano,
+        mes,
+        semana,
+        codigoVendedor: d.codigoVendedor,
+        nomeVendedor: nomeVendedor(d.codigoVendedor),
+        quantidadeAtendimentos,
+        quantidadeItens,
+        itensPorAtendimento: round2(quantidadeItens / quantidadeAtendimentos),
+      };
+    });
+    return delay(visivelParaPerfil(profile, linhas));
+  }
+
+  async getMetricasVendedorSemanal(
+    profile: Profile,
+    ano: number,
+    mes: number,
+    semana: 1 | 2 | 3 | 4
+  ): Promise<MetricasVendedorSemanal[]> {
+    const dias = diasDecorridosNaSemana(ano, mes, semana);
+    const linhas = metricasSeedHoje.map((m) => {
+      const qtdNotas = Math.max(1, Math.round(m.qtdNotas * dias));
+      const faturamentoLiquido = round2(m.faturamentoLiquido * dias);
+      const faturamentoBruto = round2(m.faturamentoBruto * dias);
+      const totalDesconto = round2(m.totalDesconto * dias);
+      const comissaoEstimada = round2(m.comissaoEstimada * dias);
+      const totalCusto = round2(m.totalCusto * dias);
+      return {
+        ano,
+        mes,
+        semana,
+        codigoVendedor: m.codigoVendedor,
+        nomeVendedor: nomeVendedor(m.codigoVendedor),
+        qtdNotas,
+        faturamentoLiquido,
+        faturamentoBruto,
+        totalDesconto,
+        taxaDescontoPct: round2((totalDesconto / faturamentoBruto) * 100),
+        comissaoEstimada,
+        ticketMedio: round2(faturamentoLiquido / qtdNotas),
+        totalCusto,
+        margemBrutaPct: round2(((faturamentoLiquido - totalCusto) / faturamentoLiquido) * 100),
+      };
+    });
+    return delay(visivelParaPerfil(profile, linhas));
+  }
+
   // Ranking é gamificação: mostra todo mundo, mesmo pra quem loga como
   // vendedor (decisão de produto — motivar competição só funciona se
   // todos veem o placar completo). Por isso NÃO usa visivelParaPerfil
@@ -256,29 +375,35 @@ class MockRepository implements DataRepository {
 
   async getClientesInatividade(profile: Profile): Promise<ClienteInatividade[]> {
     const hoje = new Date();
-    const linhas = clientesSeed.map((c) => {
-      const ultimaCompra =
-        c.diasSemComprar == null
-          ? null
-          : new Date(hoje.getTime() - c.diasSemComprar * 86400000).toISOString().slice(0, 10);
-      return {
-        codigo: c.codigo,
-        nome: c.nome,
-        telefone: c.telefone,
-        ultimaCompra,
-        diasSemComprar: c.diasSemComprar,
-        inativo: c.diasSemComprar != null && c.diasSemComprar > 60,
-        codigoVendedor: c.codigoVendedor,
-        nomeVendedor: c.codigoVendedor != null ? nomeVendedor(c.codigoVendedor) : null,
-      };
-    });
+    // cliente que nunca comprou nada não entra aqui — essa lista é pra
+    // gerar ação de RESGATE, não tem o que resgatar de quem nunca foi
+    // cliente de fato (mesmo critério da vw_clientes_inatividade real).
+    const linhas = clientesSeed
+      .filter((c) => c.diasSemComprar != null)
+      .map((c) => {
+        const ultimaCompra = new Date(hoje.getTime() - c.diasSemComprar! * 86400000).toISOString().slice(0, 10);
+        return {
+          codigo: c.codigo,
+          nome: c.nome,
+          telefone: c.telefone,
+          ultimaCompra,
+          diasSemComprar: c.diasSemComprar,
+          inativo: c.diasSemComprar! > 60,
+          codigoVendedor: c.codigoVendedor,
+          nomeVendedor: c.codigoVendedor != null ? nomeVendedor(c.codigoVendedor) : null,
+        };
+      });
 
     // gestor vê todos; vendedor só os clientes cuja última compra foi
-    // com ele mesmo (cliente sem histórico nenhum não aparece pra
-    // nenhum vendedor específico, só pro gestor).
+    // com ele mesmo.
     const visivel = profile.role === 'gestor' ? linhas : linhas.filter((l) => l.codigoVendedor === profile.codigoVendedor);
 
     return delay(visivel);
+  }
+
+  async getResumoClientesInatividade(profile: Profile): Promise<ResumoClientesInatividade> {
+    const linhas = await this.getClientesInatividade(profile);
+    return { total: linhas.length, inativos: linhas.filter((l) => l.inativo).length };
   }
 
   async getProdutosEmPromocao(_profile: Profile): Promise<ProdutoPromocaoAlerta[]> {

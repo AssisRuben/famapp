@@ -430,11 +430,15 @@ async function sincronizarVendas(client) {
       idPorChave.set(chaveVenda(r.numero_nota, r.cod_filial, r.ser_nota_fiscal), r.id);
     }
 
-    // num_sequencial nulo tem o mesmo problema de fundo (constraint
-    // venda_id + num_sequencial nunca bate pra NULL) — em vez de outro
-    // índice parcial, sintetiza a posição no array quando a API não
-    // manda um. Determinístico entre reprocessamentos (mesma venda,
-    // mesma ordem de itens = mesmo número), então nunca fica NULL.
+    // Tentar casar item por item via ON CONFLICT (venda_id, num_sequencial)
+    // com num_sequencial sintetizado pela posição no array não funciona:
+    // a Trier não garante que a ordem dos itens de uma nota seja a mesma
+    // entre chamadas diferentes, então reprocessar uma venda já
+    // sincronizada podia sintetizar um num_sequencial diferente pro
+    // mesmo item físico e duplicá-lo em vez de atualizar (achado em
+    // produção: 28.643 itens duplicados, 30,5% da tabela — ver
+    // migracao_coletor.sql item 5). Em vez disso: apaga todos os itens
+    // da venda antes de reinserir os itens atuais — imune à ordem.
     const linhasItens = [];
     for (const v of lote) {
       const vendaId = idPorChave.get(chaveVenda(v.numeroNota, v.codFilial, v.serNotaFiscal));
@@ -452,15 +456,15 @@ async function sincronizarVendas(client) {
       });
     }
 
+    const vendaIdsDoLote = [...idPorChave.values()];
+    if (vendaIdsDoLote.length > 0) {
+      await client.query('DELETE FROM venda_itens WHERE venda_id = ANY($1)', [vendaIdsDoLote]);
+    }
     if (linhasItens.length > 0) {
-      await upsertLote(client, {
+      await upsertLoteSemConflito(client, {
         tabela: 'venda_itens',
         colunas: COLUNAS_ITEM,
         linhas: linhasItens,
-        conflito: 'venda_id, num_sequencial',
-        // venda_id e num_sequencial são a chave do conflito — não fazem
-        // sentido no SET (já são iguais por definição quando bate o conflito).
-        atualizarColunas: COLUNAS_ITEM.filter((c) => c !== 'venda_id' && c !== 'num_sequencial'),
       });
       totalItens += linhasItens.length;
     }

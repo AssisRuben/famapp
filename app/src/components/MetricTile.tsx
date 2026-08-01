@@ -16,6 +16,10 @@ interface MetricTileProps {
   // tile (ver calcularFontSizeAjustada abaixo), então não precisa mais
   // passar um fontSize fixo por fora pra cada variante de grade.
   valueStyle?: StyleProp<TextStyle>;
+  // Pra valores que não cabem numa linha só mesmo com fonte mínima
+  // (ex.: "3.311 de 43.119" num tile de 3 colunas) — default 1, igual
+  // sempre foi.
+  numberOfLines?: number;
 }
 
 const FONTE_MAX = 18;
@@ -32,13 +36,17 @@ const FATOR_LARGURA_CARACTERE = 0.58;
 // calculando o font-size que cabe pro comprimento do texto. Roda de
 // novo sempre que o tile é redimensionado (ex.: rotação de tela, web
 // responsivo), então o valor nunca fica cortado nem quebra no meio.
-function calcularFontSizeAjustada(larguraDisponivel: number, tamanhoTexto: number): number {
+function calcularFontSizeAjustada(larguraDisponivel: number, tamanhoTexto: number, numeroLinhas: number): number {
   if (larguraDisponivel <= 0 || tamanhoTexto === 0) return FONTE_MAX;
-  const fonteQueCabe = Math.floor(larguraDisponivel / (tamanhoTexto * FATOR_LARGURA_CARACTERE));
+  // com mais de 1 linha permitida, cada linha só precisa caber uma
+  // fração do texto — aproximação grosseira (não sabe onde a quebra
+  // cai de verdade), mas suficiente pra parar de cortar valor longo.
+  const caracteresPorLinha = tamanhoTexto / numeroLinhas;
+  const fonteQueCabe = Math.floor(larguraDisponivel / (caracteresPorLinha * FATOR_LARGURA_CARACTERE));
   return Math.min(FONTE_MAX, Math.max(FONTE_MIN, fonteQueCabe));
 }
 
-export function MetricTile({ label, value, accentColor = colors.navy, style, valueStyle }: MetricTileProps) {
+export function MetricTile({ label, value, accentColor = colors.navy, style, valueStyle, numberOfLines = 1 }: MetricTileProps) {
   const [larguraTexto, setLarguraTexto] = useState(0);
 
   const aoMedirLargura = (evento: LayoutChangeEvent) => {
@@ -46,13 +54,13 @@ export function MetricTile({ label, value, accentColor = colors.navy, style, val
     if (largura !== larguraTexto) setLarguraTexto(largura);
   };
 
-  const fontSizeValor = calcularFontSizeAjustada(larguraTexto, value.length);
+  const fontSizeValor = calcularFontSizeAjustada(larguraTexto, value.length, numberOfLines);
 
   return (
     <View style={[styles.tile, style]}>
       <View style={[styles.accent, { backgroundColor: accentColor }]} />
       <View style={styles.textWrap} onLayout={aoMedirLargura}>
-        <Text style={[styles.value, { fontSize: fontSizeValor }, valueStyle]} numberOfLines={1}>
+        <Text style={[styles.value, { fontSize: fontSizeValor }, valueStyle]} numberOfLines={numberOfLines}>
           {value}
         </Text>
         <Text style={styles.label}>{label}</Text>

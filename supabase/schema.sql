@@ -374,6 +374,25 @@ join vendedores v on v.codigo = vvd.codigo_vendedor;
 -- `create or replace` — Postgres só deixa ACRESCENTAR coluna no fim,
 -- não realocar; ver supabase/migracao_frente2.sql pra aplicar isso no
 -- projeto já existente sem precisar recriar a view do zero.
+-- taxa_desconto_pct e total_custo/margem_bruta_pct calculados com
+-- fallback: vlr_desconto/vlr_custo_produto vêm NULL da API pra venda
+-- recente (confirmado comparando com relatório real da Trier em
+-- 31/07/2026 — 132 de 132 vendas do dia sem esses campos, não é bug de
+-- parsing nosso). Desconto: como bruto e líquido continuam vindo
+-- certos, (bruto - líquido) já É o desconto total, sem depender do
+-- campo problemático. Custo: sem um "bruto menos líquido" equivalente,
+-- cai pra coalesce entre os 3 campos de custo que a tabela tem — se
+-- nenhum vier preenchido, total_custo continua NULL (não inventa 0).
+-- FATOR_CORRECAO_CUSTO: correção empírica temporária — pra venda
+-- recente, vlr_custo_produto/vlr_custo_aquisicao vêm 100% nulos da API
+-- (só valor_total_custo é preenchido), e esse campo sozinho soma ~8%
+-- acima da coluna "Valor Custo" do relatório real "Vendas por
+-- Vendedor" da Trier (achado 31/07/2026, ver coletor/README.md e
+-- pendência "Custo/comissão/desconto/hora vindo NULL"). Não sabemos
+-- ainda o que valor_total_custo inclui a mais (ST? custo médio vs.
+-- lote?) — até confirmar com a Trier, aplica 0.92 no custo somado
+-- (reduz 8%) antes de calcular margem. Remover/ajustar esse fator
+-- assim que a causa raiz for confirmada.
 create or replace view vw_metricas_vendedor_diario as
 select
   vd.data_emissao,
@@ -381,17 +400,132 @@ select
   count(distinct vd.id) as qtd_notas,
   sum(vi.valor_total_liquido) as faturamento_liquido,
   sum(vi.valor_total_bruto) as faturamento_bruto,
-  sum(vi.vlr_desconto) as total_desconto,
-  round(sum(vi.vlr_desconto) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
+  sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido) as total_desconto,
+  round((sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido)) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
   sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
   round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
-  sum(vi.vlr_custo_produto) as total_custo,
-  round((sum(vi.valor_total_liquido) - sum(vi.vlr_custo_produto)) / nullif(sum(vi.valor_total_liquido),0) * 100, 2) as margem_bruta_pct,
+  sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as total_custo,
+  round(
+    (sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92)
+    / nullif(sum(vi.valor_total_liquido),0) * 100,
+  2) as margem_bruta_pct,
   vend.nome as nome_vendedor
 from venda_itens vi
 join vendas vd on vd.id = vi.venda_id
 join vendedores vend on vend.codigo = vi.codigo_vendedor
 group by vd.data_emissao, vi.codigo_vendedor, vend.nome;
+
+-- Mesmas contas de vw_metricas_vendedor_diario, só que agrupado por
+-- mês inteiro em vez de dia exato — usado pelo card "Desempenho do
+-- mês" do Painel (faturamento/comissão acumulados, os demais já são
+-- proporção/média por natureza).
+create view vw_metricas_vendedor_mensal as
+select
+  extract(year from vd.data_emissao)::int as ano,
+  extract(month from vd.data_emissao)::int as mes,
+  vi.codigo_vendedor,
+  count(distinct vd.id) as qtd_notas,
+  sum(vi.valor_total_liquido) as faturamento_liquido,
+  sum(vi.valor_total_bruto) as faturamento_bruto,
+  sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido) as total_desconto,
+  round((sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido)) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
+  sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
+  round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
+  sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as total_custo,
+  round(
+    (sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92)
+    / nullif(sum(vi.valor_total_liquido),0) * 100,
+  2) as margem_bruta_pct,
+  vend.nome as nome_vendedor
+from venda_itens vi
+join vendas vd on vd.id = vi.venda_id
+join vendedores vend on vend.codigo = vi.codigo_vendedor
+group by extract(year from vd.data_emissao), extract(month from vd.data_emissao), vi.codigo_vendedor, vend.nome;
+
+-- Mesma conta de vw_desempenho_vendedor_diario, agrupado por mês.
+create view vw_desempenho_vendedor_mensal as
+select
+  extract(year from vvd.data_emissao)::int as ano,
+  extract(month from vvd.data_emissao)::int as mes,
+  vvd.codigo_vendedor,
+  v.nome as nome_vendedor,
+  sum(vvd.quantidade_atendimentos) as quantidade_atendimentos,
+  sum(vvd.quantidade_itens) as quantidade_itens,
+  round(sum(vvd.quantidade_itens)::numeric / nullif(sum(vvd.quantidade_atendimentos),0), 2) as itens_por_atendimento
+from vendas_vendedor_diario vvd
+join vendedores v on v.codigo = vvd.codigo_vendedor
+group by extract(year from vvd.data_emissao), extract(month from vvd.data_emissao), vvd.codigo_vendedor, v.nome;
+
+-- Mesmas contas de vw_metricas_vendedor_diario/vw_desempenho_vendedor_diario,
+-- agrupadas por bucket de semana FIXO (1-7, 8-14, 15-21, 22-fim do mês
+-- — mesma definição de semanaDoDia() em app/src/lib/metas.ts, NÃO é
+-- janela móvel de 7 dias). Usadas pelo toggle Dia/Semana/Mês do card
+-- "Desempenho" do Painel.
+create view vw_metricas_vendedor_semanal as
+select
+  extract(year from vd.data_emissao)::int as ano,
+  extract(month from vd.data_emissao)::int as mes,
+  (case
+    when extract(day from vd.data_emissao) <= 7 then 1
+    when extract(day from vd.data_emissao) <= 14 then 2
+    when extract(day from vd.data_emissao) <= 21 then 3
+    else 4
+  end) as semana,
+  vi.codigo_vendedor,
+  count(distinct vd.id) as qtd_notas,
+  sum(vi.valor_total_liquido) as faturamento_liquido,
+  sum(vi.valor_total_bruto) as faturamento_bruto,
+  sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido) as total_desconto,
+  round((sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido)) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
+  sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
+  round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
+  sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as total_custo,
+  round(
+    (sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92)
+    / nullif(sum(vi.valor_total_liquido),0) * 100,
+  2) as margem_bruta_pct,
+  vend.nome as nome_vendedor
+from venda_itens vi
+join vendas vd on vd.id = vi.venda_id
+join vendedores vend on vend.codigo = vi.codigo_vendedor
+group by
+  extract(year from vd.data_emissao),
+  extract(month from vd.data_emissao),
+  (case
+    when extract(day from vd.data_emissao) <= 7 then 1
+    when extract(day from vd.data_emissao) <= 14 then 2
+    when extract(day from vd.data_emissao) <= 21 then 3
+    else 4
+  end),
+  vi.codigo_vendedor, vend.nome;
+
+create view vw_desempenho_vendedor_semanal as
+select
+  extract(year from vvd.data_emissao)::int as ano,
+  extract(month from vvd.data_emissao)::int as mes,
+  (case
+    when extract(day from vvd.data_emissao) <= 7 then 1
+    when extract(day from vvd.data_emissao) <= 14 then 2
+    when extract(day from vvd.data_emissao) <= 21 then 3
+    else 4
+  end) as semana,
+  vvd.codigo_vendedor,
+  v.nome as nome_vendedor,
+  sum(vvd.quantidade_atendimentos) as quantidade_atendimentos,
+  sum(vvd.quantidade_itens) as quantidade_itens,
+  round(sum(vvd.quantidade_itens)::numeric / nullif(sum(vvd.quantidade_atendimentos),0), 2) as itens_por_atendimento
+from vendas_vendedor_diario vvd
+join vendedores v on v.codigo = vvd.codigo_vendedor
+group by
+  extract(year from vvd.data_emissao),
+  extract(month from vvd.data_emissao),
+  (case
+    when extract(day from vvd.data_emissao) <= 7 then 1
+    when extract(day from vvd.data_emissao) <= 14 then 2
+    when extract(day from vvd.data_emissao) <= 21 then 3
+    else 4
+  end),
+  vvd.codigo_vendedor, v.nome;
 
 -- Ranking diário de vendedores (por faturamento líquido). Propositalmente
 -- SEM security_invoker (ver rls_policies.sql) — mesma família de
@@ -574,7 +708,8 @@ select
   round(coalesce(margem.margem_bruta_valor, 0) * faixa.percentual_comissao / 100, 2) as comissao_valor
 from vw_metas_progresso mp
 left join lateral (
-  select sum(vi.valor_total_liquido) - sum(vi.vlr_custo_produto) as margem_bruta_valor
+  -- mesmo fator de correção de custo (* 0.92) de vw_metricas_vendedor_diario/mensal — ver comentário lá.
+  select sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as margem_bruta_valor
   from vendas v
   join venda_itens vi on vi.venda_id = v.id
   where v.codigo_vendedor = mp.codigo_vendedor

@@ -7,12 +7,16 @@ import { MetricTile } from '../components/MetricTile';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
 import { formatBRL, formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
-import { metaDiaria, semanaDoDia } from '../lib/metas';
+import { diasDecorridosNaSemana, metaDiaria, semanaDoDia } from '../lib/metas';
 import {
-  ClienteInatividade,
   DesempenhoVendedorDiario,
+  DesempenhoVendedorMensal,
+  DesempenhoVendedorSemanal,
   MetaVendedor,
   MetricasVendedorDiario,
+  MetricasVendedorMensal,
+  MetricasVendedorSemanal,
+  ResumoClientesInatividade,
   StatusSincronizacao,
 } from '../types/domain';
 import { colors } from '../theme/colors';
@@ -45,33 +49,49 @@ export function DashboardScreen() {
   const { profile } = useAuth();
   const [metricas, setMetricas] = useState<MetricasVendedorDiario[]>([]);
   const [desempenho, setDesempenho] = useState<DesempenhoVendedorDiario[]>([]);
+  const [metricasMes, setMetricasMes] = useState<MetricasVendedorMensal[]>([]);
+  const [desempenhoMes, setDesempenhoMes] = useState<DesempenhoVendedorMensal[]>([]);
+  const [metricasSemana, setMetricasSemana] = useState<MetricasVendedorSemanal[]>([]);
+  const [desempenhoSemana, setDesempenhoSemana] = useState<DesempenhoVendedorSemanal[]>([]);
   const [metas, setMetas] = useState<MetaVendedor[]>([]);
   const [statusSync, setStatusSync] = useState<StatusSincronizacao[]>([]);
-  const [clientesInatividade, setClientesInatividade] = useState<ClienteInatividade[]>([]);
+  const [resumoClientes, setResumoClientes] = useState<ResumoClientesInatividade>({ total: 0, inativos: 0 });
   const [periodoMeta, setPeriodoMeta] = useState<PeriodoMeta>('mes');
+  const [periodoDesempenho, setPeriodoDesempenho] = useState<PeriodoMeta>('dia');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const data = todayISO();
   const hoje = new Date();
+  const semanaAtual = semanaDoDia(hoje.getDate());
 
   const load = useCallback(async () => {
     if (!profile) return;
     const ehGestor = profile.role === 'gestor';
-    const [m, d, mt, ss, ci] = await Promise.all([
+    const ano = hoje.getFullYear();
+    const mes = hoje.getMonth() + 1;
+    const [m, d, mm, dm, ms, ds, mt, ss, ci] = await Promise.all([
       repository.getMetricasVendedorDiario(profile, data),
       repository.getDesempenhoVendedorDiario(profile, data),
-      repository.getMetas(profile, hoje.getFullYear(), hoje.getMonth() + 1),
+      repository.getMetricasVendedorMensal(profile, ano, mes),
+      repository.getDesempenhoVendedorMensal(profile, ano, mes),
+      repository.getMetricasVendedorSemanal(profile, ano, mes, semanaAtual),
+      repository.getDesempenhoVendedorSemanal(profile, ano, mes, semanaAtual),
+      repository.getMetas(profile, ano, mes),
       repository.getStatusSincronizacao(),
       // só o gestor vê o card de clientes inativos — evita a chamada à
       // toa pro vendedor, que não usa esse dado no Dashboard.
-      ehGestor ? repository.getClientesInatividade(profile) : Promise.resolve([]),
+      ehGestor ? repository.getResumoClientesInatividade(profile) : Promise.resolve({ total: 0, inativos: 0 }),
     ]);
     setMetricas(m);
     setDesempenho(d);
+    setMetricasMes(mm);
+    setDesempenhoMes(dm);
+    setMetricasSemana(ms);
+    setDesempenhoSemana(ds);
     setMetas(mt);
     setStatusSync(ss);
-    setClientesInatividade(ci);
-  }, [profile, data]);
+    setResumoClientes(ci);
+  }, [profile, data, semanaAtual]);
 
   useEffect(() => {
     setLoading(true);
@@ -105,9 +125,102 @@ export function DashboardScreen() {
   const taxaDesconto = totalBruto ? (totalDesconto / totalBruto) * 100 : 0;
   const margemBruta = totalFaturamento ? ((totalFaturamento - totalCusto) / totalFaturamento) * 100 : 0;
   const itensPorAtendimento = totalAtendimentos ? totalItens / totalAtendimentos : 0;
-  const clientesInativos = clientesInatividade.filter((c) => c.inativo).length;
-  const semanaAtual = semanaDoDia(hoje.getDate());
   const realizadoHojePorVendedor = new Map(metricas.map((m) => [m.codigoVendedor, m.faturamentoLiquido]));
+
+  // Projeção simples: pega o realizado do mês até hoje (já calculado de
+  // verdade em vw_metas_progresso via getMetas — não é só o dia de
+  // hoje), tira a média diária e multiplica pelos dias do mês inteiro.
+  // Ex.: dia 3, R$30 mil no mês = R$10 mil/dia de média x 30 dias = R$300 mil.
+  const totalRealizadoMensal = sum(metas, (m) => m.valorRealizadoMensal);
+  const diaDoMes = hoje.getDate();
+  const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
+  const projecaoFechamento = diaDoMes > 0 ? (totalRealizadoMensal / diaDoMes) * diasNoMes : 0;
+
+  // Desempenho do mês: faturamento e comissão são o ACUMULADO (soma
+  // direta); os demais já são taxa/proporção por natureza (ticket
+  // médio, itens/atendimento, desconto, margem — todos "total sobre
+  // total", não soma), então calculá-los no escopo do mês já dá a
+  // média certa, sem precisar dividir de novo. "Vendas realizadas"
+  // vira média por dia decorrido, pra comparar com o número de hoje
+  // (senão seria só um total grande, sem contexto).
+  const totalFaturamentoMes = sum(metricasMes, (m) => m.faturamentoLiquido);
+  const totalBrutoMes = sum(metricasMes, (m) => m.faturamentoBruto);
+  const totalDescontoMes = sum(metricasMes, (m) => m.totalDesconto);
+  const totalComissaoMes = sum(metricasMes, (m) => m.comissaoEstimada);
+  const totalCustoMes = sum(metricasMes, (m) => m.totalCusto);
+  const totalNotasMes = sum(metricasMes, (m) => m.qtdNotas);
+  const totalItensMes = sum(desempenhoMes, (d) => d.quantidadeItens);
+  const totalAtendimentosMes = sum(desempenhoMes, (d) => d.quantidadeAtendimentos);
+
+  const ticketMedioMes = totalNotasMes ? totalFaturamentoMes / totalNotasMes : 0;
+  const taxaDescontoMes = totalBrutoMes ? (totalDescontoMes / totalBrutoMes) * 100 : 0;
+  const margemBrutaMes = totalFaturamentoMes ? ((totalFaturamentoMes - totalCustoMes) / totalFaturamentoMes) * 100 : 0;
+  const itensPorAtendimentoMes = totalAtendimentosMes ? totalItensMes / totalAtendimentosMes : 0;
+  const vendasPorDiaMes = diaDoMes > 0 ? totalNotasMes / diaDoMes : 0;
+
+  // Mesma ideia de "Desempenho do mês", só que no bucket de semana fixo
+  // (1-7, 8-14, 15-21, 22-fim do mês — mesmo critério de semanaDoDia()
+  // usado em Metas).
+  const totalFaturamentoSemana = sum(metricasSemana, (m) => m.faturamentoLiquido);
+  const totalBrutoSemana = sum(metricasSemana, (m) => m.faturamentoBruto);
+  const totalComissaoSemana = sum(metricasSemana, (m) => m.comissaoEstimada);
+  const totalCustoSemana = sum(metricasSemana, (m) => m.totalCusto);
+  const totalNotasSemana = sum(metricasSemana, (m) => m.qtdNotas);
+  const totalItensSemana = sum(desempenhoSemana, (d) => d.quantidadeItens);
+  const totalAtendimentosSemana = sum(desempenhoSemana, (d) => d.quantidadeAtendimentos);
+  const totalDescontoSemana = sum(metricasSemana, (m) => m.totalDesconto);
+
+  const ticketMedioSemana = totalNotasSemana ? totalFaturamentoSemana / totalNotasSemana : 0;
+  const taxaDescontoSemana = totalBrutoSemana ? (totalDescontoSemana / totalBrutoSemana) * 100 : 0;
+  const margemBrutaSemana = totalFaturamentoSemana ? ((totalFaturamentoSemana - totalCustoSemana) / totalFaturamentoSemana) * 100 : 0;
+  const itensPorAtendimentoSemana = totalAtendimentosSemana ? totalItensSemana / totalAtendimentosSemana : 0;
+  const diasNaSemana = diasDecorridosNaSemana(hoje.getFullYear(), hoje.getMonth() + 1, semanaAtual, hoje);
+  const vendasPorDiaSemana = diasNaSemana > 0 ? totalNotasSemana / diasNaSemana : 0;
+
+  // Card "Desempenho" unificado — o toggle Dia/Semana/Mês troca só os
+  // dados exibidos, a estrutura dos tiles é a mesma nos 3 casos.
+  const desempenho7 =
+    periodoDesempenho === 'dia'
+      ? {
+          vazio: metricas.length === 0,
+          faturamentoLabel: 'Faturamento líquido',
+          faturamento: totalFaturamento,
+          ticketMedio,
+          itensPorAtendimento,
+          taxaDesconto,
+          comissaoLabel: 'Comissão estimada',
+          comissao: totalComissao,
+          vendasLabel: 'Vendas realizadas',
+          vendasValor: String(totalNotas),
+          margemBruta,
+        }
+      : periodoDesempenho === 'semana'
+      ? {
+          vazio: metricasSemana.length === 0,
+          faturamentoLabel: 'Faturamento líquido (acum.)',
+          faturamento: totalFaturamentoSemana,
+          ticketMedio: ticketMedioSemana,
+          itensPorAtendimento: itensPorAtendimentoSemana,
+          taxaDesconto: taxaDescontoSemana,
+          comissaoLabel: 'Comissão estimada (acum.)',
+          comissao: totalComissaoSemana,
+          vendasLabel: 'Vendas / dia (média)',
+          vendasValor: vendasPorDiaSemana.toFixed(1),
+          margemBruta: margemBrutaSemana,
+        }
+      : {
+          vazio: metricasMes.length === 0,
+          faturamentoLabel: 'Faturamento líquido (acum.)',
+          faturamento: totalFaturamentoMes,
+          ticketMedio: ticketMedioMes,
+          itensPorAtendimento: itensPorAtendimentoMes,
+          taxaDesconto: taxaDescontoMes,
+          comissaoLabel: 'Comissão estimada (acum.)',
+          comissao: totalComissaoMes,
+          vendasLabel: 'Vendas / dia (média)',
+          vendasValor: vendasPorDiaMes.toFixed(1),
+          margemBruta: margemBrutaMes,
+        };
 
   // mostra a sincronização mais ANTIGA entre as entidades — é o pior
   // caso de "quão desatualizado" algum dado pode estar.
@@ -127,100 +240,100 @@ export function DashboardScreen() {
         <Text style={styles.syncLabel}>🔄 Dados sincronizados em {formatDateHoraBR(ultimaSincronizacao)}</Text>
       )}
 
-      {metricas.length === 0 ? (
-        <Card>
-          <Text style={styles.empty}>Sem vendas registradas hoje.</Text>
-        </Card>
-      ) : (
-        <View style={styles.tileRow}>
-          <MetricTile label="Faturamento líquido" value={formatBRL(totalFaturamento)} accentColor={colors.success} />
-          <MetricTile label="Ticket médio" value={formatBRL(ticketMedio)} accentColor={colors.navy} />
-          <MetricTile label="Itens / atendimento" value={itensPorAtendimento.toFixed(2)} accentColor="#9333ea" />
-          <MetricTile label="Taxa de desconto" value={`${taxaDesconto.toFixed(2)}%`} accentColor={colors.red} />
-          <MetricTile label="Comissão estimada" value={formatBRL(totalComissao)} accentColor="#0891b2" />
-          <MetricTile label="Notas emitidas" value={String(totalNotas)} accentColor={colors.textSecondary} />
-        </View>
-      )}
+      <Card>
+        <Text style={styles.sectionTitle}>Desempenho</Text>
+        <PeriodoMetaSelector value={periodoDesempenho} onChange={setPeriodoDesempenho} />
+        {desempenho7.vazio ? (
+          <Text style={styles.empty}>Sem vendas registradas nesse período.</Text>
+        ) : (
+          <View style={styles.tileRow}>
+            <MetricTile label={desempenho7.faturamentoLabel} value={formatBRL(desempenho7.faturamento)} accentColor={colors.success} />
+            <MetricTile label="Ticket médio" value={formatBRL(desempenho7.ticketMedio)} accentColor={colors.navy} />
+            <MetricTile label="Itens / atendimento" value={desempenho7.itensPorAtendimento.toFixed(2)} accentColor="#9333ea" />
+            <MetricTile label="Taxa de desconto" value={`${desempenho7.taxaDesconto.toFixed(2)}%`} accentColor={colors.red} />
+            <MetricTile label={desempenho7.comissaoLabel} value={formatBRL(desempenho7.comissao)} accentColor="#0891b2" />
+            <MetricTile label={desempenho7.vendasLabel} value={desempenho7.vendasValor} accentColor={colors.textSecondary} />
+            <MetricTile
+              label="Margem bruta"
+              value={`${desempenho7.margemBruta.toFixed(2)}%`}
+              accentColor={desempenho7.margemBruta < 30 ? colors.red : colors.success}
+            />
+          </View>
+        )}
+      </Card>
 
       {profile?.role === 'gestor' && (
         <Card>
           <Text style={styles.sectionTitle}>📈 Indicadores de gestão</Text>
-          <View style={styles.tileRowTresColunas}>
+          <View style={styles.tileRow}>
             <MetricTile
-              style={styles.tileTercoColuna}
-              label="Valor de vendas (bruto)"
-              value={formatBRLSemCentavos(totalBruto)}
-              accentColor={colors.navy}
-            />
-            <MetricTile
-              style={styles.tileTercoColuna}
-              label="Margem bruta"
-              value={`${margemBruta.toFixed(2)}%`}
-              accentColor={margemBruta < 30 ? colors.red : colors.success}
-            />
-            <MetricTile
-              style={styles.tileTercoColuna}
               label="Clientes inativos"
-              value={`${clientesInativos} de ${clientesInatividade.length}`}
+              value={`${resumoClientes.inativos.toLocaleString('pt-BR')} de ${resumoClientes.total.toLocaleString('pt-BR')}`}
               accentColor={colors.red}
+              numberOfLines={2}
             />
+            <MetricTile label="Projeção de fechamento" value={formatBRLSemCentavos(projecaoFechamento)} accentColor="#9333ea" />
           </View>
         </Card>
       )}
 
-      {metas.length > 0 && (
-        <Card>
-          <Text style={styles.sectionTitle}>🎯 Metas</Text>
-          <PeriodoMetaSelector value={periodoMeta} onChange={setPeriodoMeta} />
-          {profile?.role === 'gestor' ? (
-            metas
-              .slice()
-              .map((meta) => ({
-                meta,
-                valores: valoresDaMeta(meta, periodoMeta, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual),
-              }))
-              .sort((a, b) => b.valores.valorRealizado / (b.valores.valorMeta || 1) - a.valores.valorRealizado / (a.valores.valorMeta || 1))
-              .map(({ meta, valores }) => (
+      <Card>
+        <Text style={styles.sectionTitle}>🎯 Metas</Text>
+        <PeriodoMetaSelector value={periodoMeta} onChange={setPeriodoMeta} />
+        {metas.length === 0 ? (
+          <Text style={styles.empty}>Nenhuma meta cadastrada pra este mês ainda.</Text>
+        ) : profile?.role === 'gestor' ? (
+          metas
+            .slice()
+            .map((meta) => ({
+              meta,
+              valores: valoresDaMeta(meta, periodoMeta, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual),
+            }))
+            .sort((a, b) => b.valores.valorRealizado / (b.valores.valorMeta || 1) - a.valores.valorRealizado / (a.valores.valorMeta || 1))
+            .map(({ meta, valores }) => (
+              <MetaProgressBar
+                key={meta.codigoVendedor}
+                label={meta.nomeVendedor}
+                valorRealizado={valores.valorRealizado}
+                valorMeta={valores.valorMeta}
+              />
+            ))
+        ) : (
+          metas
+            .filter((m) => m.codigoVendedor === profile?.codigoVendedor)
+            .map((meta) => {
+              const valores = valoresDaMeta(meta, periodoMeta, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual);
+              return (
                 <MetaProgressBar
                   key={meta.codigoVendedor}
-                  label={meta.nomeVendedor}
+                  label={valores.label}
                   valorRealizado={valores.valorRealizado}
                   valorMeta={valores.valorMeta}
                 />
-              ))
-          ) : (
-            metas
-              .filter((m) => m.codigoVendedor === profile?.codigoVendedor)
-              .map((meta) => {
-                const valores = valoresDaMeta(meta, periodoMeta, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual);
-                return (
-                  <MetaProgressBar
-                    key={meta.codigoVendedor}
-                    label={valores.label}
-                    valorRealizado={valores.valorRealizado}
-                    valorMeta={valores.valorMeta}
-                  />
-                );
-              })
-          )}
-        </Card>
-      )}
+              );
+            })
+        )}
+      </Card>
 
-      {profile?.role === 'gestor' && metricas.length > 0 && (
+      {profile?.role === 'gestor' && (
         <Card>
           <Text style={styles.sectionTitle}>Por vendedor</Text>
-          {metricas
-            .slice()
-            .sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido)
-            .map((m) => (
-              <View key={m.codigoVendedor} style={styles.vendedorRow}>
-                <Text style={styles.vendedorNome}>{m.nomeVendedor}</Text>
-                <View style={styles.vendedorValores}>
-                  <Text style={styles.vendedorValor}>{formatBRL(m.faturamentoLiquido)}</Text>
-                  <Text style={styles.vendedorMargem}>margem {m.margemBrutaPct.toFixed(1)}%</Text>
+          {metricas.length === 0 ? (
+            <Text style={styles.empty}>Sem vendas registradas hoje ainda.</Text>
+          ) : (
+            metricas
+              .slice()
+              .sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido)
+              .map((m) => (
+                <View key={m.codigoVendedor} style={styles.vendedorRow}>
+                  <Text style={styles.vendedorNome}>{m.nomeVendedor}</Text>
+                  <View style={styles.vendedorValores}>
+                    <Text style={styles.vendedorValor}>{formatBRL(m.faturamentoLiquido)}</Text>
+                    <Text style={styles.vendedorMargem}>margem {m.margemBrutaPct.toFixed(1)}%</Text>
+                  </View>
                 </View>
-              </View>
-            ))}
+              ))
+          )}
         </Card>
       )}
     </ScrollView>
@@ -237,11 +350,6 @@ const styles = StyleSheet.create({
   greeting: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 4 },
   syncLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 16 },
   tileRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  // 3 indicadores cabem numa linha só — evita o problema do grid de 2
-  // colunas com número ímpar de tiles (o 3º sobra sozinho numa linha
-  // nova, alinhado à esquerda com um vão enorme à direita).
-  tileRowTresColunas: { flexDirection: 'row', justifyContent: 'space-between' },
-  tileTercoColuna: { width: '31%', paddingHorizontal: 8 },
   empty: { color: colors.textSecondary },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: 10 },
   vendedorRow: {

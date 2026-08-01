@@ -76,3 +76,55 @@ alter table venda_itens
 create unique index if not exists vendas_numero_filial_unique_sem_serie
 on vendas (numero_nota, cod_filial)
 where ser_nota_fiscal is null;
+
+-- 5) BUG REAL #2 ENCONTRADO EM PRODUÇÃO (31/07/2026): a defesa do
+-- item 1/4 (sintetizar num_sequencial pela posição no array, pra
+-- constraint venda_itens_venda_num_sequencial_unique nunca receber
+-- NULL) só funciona se a Trier devolver os itens de uma nota SEMPRE
+-- na mesma ordem entre chamadas — não devolve. Toda vez que uma
+-- venda já sincronizada é reprocessada (backfill rodado de novo, ou
+-- o n8n reprocessando uma nota já sincronizada) e a ordem muda, o
+-- mesmo item físico sintetiza um num_sequencial diferente do que já
+-- estava salvo — não bate no ON CONFLICT, e a Trier "insere de novo"
+-- um item que já existia, em vez de atualizar.
+--
+-- Resultado real: 28.643 de 93.944 linhas em venda_itens eram
+-- duplicata (30,5% da tabela!), afetando 13.650 de 32.655 vendas
+-- (41,8%), R$774.480,87 inflados. Achado investigando divergência do
+-- faturamento mensal vs relatório real da Trier (o efeito em julho/26
+-- especificamente era pequeno — só 47 linhas/R$746,77 — a maior parte
+-- da contaminação estava em meses anteriores do backfill).
+--
+-- Correção definitiva: coletor/backfill_periodo.js e o workflow n8n
+-- pararam de tentar casar item por item via chave sintética — agora
+-- apagam TODOS os itens da venda antes de reinserir os itens atuais
+-- (delete-then-reinsert por venda_id), o que elimina o problema
+-- independente da ordem que a API devolver. A constraint do item 1
+-- continua existindo mas não é mais o mecanismo de proteção real.
+--
+-- Verificação (só leitura) — quantas linhas seriam removidas:
+-- select count(*) as itens_duplicados, sum(dup.valor_total_liquido) as valor
+-- from (
+--   select vi.*,
+--     row_number() over (
+--       partition by venda_id, codigo_produto, cod_barras, valor_total_liquido, quantidade_produtos
+--       order by id
+--     ) as rn
+--   from venda_itens vi
+-- ) dup
+-- where dup.rn > 1;
+--
+-- Limpeza (mantém a linha de menor id de cada grupo duplicado) —
+-- rode só DEPOIS de já ter atualizado backfill_periodo.js e o
+-- workflow n8n pro delete-then-reinsert, senão o próximo sync ainda
+-- pode reintroduzir duplicata:
+-- delete from venda_itens d
+-- using (
+--   select id,
+--     row_number() over (
+--       partition by venda_id, codigo_produto, cod_barras, valor_total_liquido, quantidade_produtos
+--       order by id
+--     ) as rn
+--   from venda_itens
+-- ) dup
+-- where d.id = dup.id and dup.rn > 1;

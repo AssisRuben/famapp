@@ -8,17 +8,22 @@ import {
   ClienteInatividade,
   ComissaoMensal,
   DesempenhoVendedorDiario,
+  DesempenhoVendedorMensal,
+  DesempenhoVendedorSemanal,
   FaixaComissao,
   ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
   MetricasVendedorDiario,
+  MetricasVendedorMensal,
+  MetricasVendedorSemanal,
   ParametrosCompra,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
   RankingVendedorDia,
+  ResumoClientesInatividade,
   Role,
   SalvarCampanhaInput,
   SalvarMetaInput,
@@ -157,6 +162,104 @@ class SupabaseRepository implements DataRepository {
     }));
   }
 
+  async getDesempenhoVendedorMensal(_profile: Profile, ano: number, mes: number): Promise<DesempenhoVendedorMensal[]> {
+    const { data, error } = await supabase
+      .from('vw_desempenho_vendedor_mensal')
+      .select('*')
+      .eq('ano', ano)
+      .eq('mes', mes);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      ano: r.ano,
+      mes: r.mes,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      quantidadeAtendimentos: r.quantidade_atendimentos,
+      quantidadeItens: r.quantidade_itens,
+      itensPorAtendimento: Number(r.itens_por_atendimento ?? 0),
+    }));
+  }
+
+  async getMetricasVendedorMensal(_profile: Profile, ano: number, mes: number): Promise<MetricasVendedorMensal[]> {
+    const { data, error } = await supabase
+      .from('vw_metricas_vendedor_mensal')
+      .select('*')
+      .eq('ano', ano)
+      .eq('mes', mes);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      ano: r.ano,
+      mes: r.mes,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      qtdNotas: r.qtd_notas,
+      faturamentoLiquido: Number(r.faturamento_liquido),
+      faturamentoBruto: Number(r.faturamento_bruto),
+      totalDesconto: Number(r.total_desconto),
+      taxaDescontoPct: Number(r.taxa_desconto_pct ?? 0),
+      comissaoEstimada: Number(r.comissao_estimada),
+      ticketMedio: Number(r.ticket_medio ?? 0),
+      totalCusto: Number(r.total_custo),
+      margemBrutaPct: Number(r.margem_bruta_pct ?? 0),
+    }));
+  }
+
+  async getDesempenhoVendedorSemanal(
+    _profile: Profile,
+    ano: number,
+    mes: number,
+    semana: 1 | 2 | 3 | 4
+  ): Promise<DesempenhoVendedorSemanal[]> {
+    const { data, error } = await supabase
+      .from('vw_desempenho_vendedor_semanal')
+      .select('*')
+      .eq('ano', ano)
+      .eq('mes', mes)
+      .eq('semana', semana);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      ano: r.ano,
+      mes: r.mes,
+      semana: r.semana,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      quantidadeAtendimentos: r.quantidade_atendimentos,
+      quantidadeItens: r.quantidade_itens,
+      itensPorAtendimento: Number(r.itens_por_atendimento ?? 0),
+    }));
+  }
+
+  async getMetricasVendedorSemanal(
+    _profile: Profile,
+    ano: number,
+    mes: number,
+    semana: 1 | 2 | 3 | 4
+  ): Promise<MetricasVendedorSemanal[]> {
+    const { data, error } = await supabase
+      .from('vw_metricas_vendedor_semanal')
+      .select('*')
+      .eq('ano', ano)
+      .eq('mes', mes)
+      .eq('semana', semana);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      ano: r.ano,
+      mes: r.mes,
+      semana: r.semana,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      qtdNotas: r.qtd_notas,
+      faturamentoLiquido: Number(r.faturamento_liquido),
+      faturamentoBruto: Number(r.faturamento_bruto),
+      totalDesconto: Number(r.total_desconto),
+      taxaDescontoPct: Number(r.taxa_desconto_pct ?? 0),
+      comissaoEstimada: Number(r.comissao_estimada),
+      ticketMedio: Number(r.ticket_medio ?? 0),
+      totalCusto: Number(r.total_custo),
+      margemBrutaPct: Number(r.margem_bruta_pct ?? 0),
+    }));
+  }
+
   // vw_ranking_vendedores_dia roda sem RLS de propósito (gamificação —
   // todo vendedor vê o placar inteiro), então não precisa de filtro por
   // profile aqui, igual ao mock.
@@ -187,6 +290,21 @@ class SupabaseRepository implements DataRepository {
       codigoVendedor: r.codigo_vendedor,
       nomeVendedor: r.nome_vendedor,
     }));
+  }
+
+  // count 'exact' + head:true não traz linha nenhuma, só o total real no
+  // header — imune ao limite padrão de 1000 linhas por request que
+  // getClientesInatividade(select '*') tem (a RLS da view já filtra por
+  // papel, então cada count aqui já reflete só o que aquele usuário pode
+  // ver, igual à lista completa).
+  async getResumoClientesInatividade(_profile: Profile): Promise<ResumoClientesInatividade> {
+    const [totalRes, inativosRes] = await Promise.all([
+      supabase.from('vw_clientes_inatividade').select('*', { count: 'exact', head: true }),
+      supabase.from('vw_clientes_inatividade').select('*', { count: 'exact', head: true }).eq('inativo', true),
+    ]);
+    if (totalRes.error) throw totalRes.error;
+    if (inativosRes.error) throw inativosRes.error;
+    return { total: totalRes.count ?? 0, inativos: inativosRes.count ?? 0 };
   }
 
   // vw_produtos_promocao_clientes também roda sem RLS de propósito —

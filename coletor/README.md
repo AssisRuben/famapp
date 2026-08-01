@@ -227,6 +227,37 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
 
 ## Coisas que valem revisão futura
 
+- **[PENDENTE — precisa de resposta da Trier] Perguntas em aberto pro
+  suporte/sistema da Trier** (31/07/2026): consolidação das pendências
+  abaixo que não dá pra resolver só com os dados que a API expõe —
+  precisa de alguém checando a tela da Trier ou abrindo chamado com o
+  suporte:
+  1. **Campos nulos em venda recente**: `vlr_custo_produto`,
+     `prc_comissao`, `vlr_desconto` (`venda_itens`) e `hora_emissao`
+     (`vendas`) vêm vazios da API pra notas recentes. É limitação da
+     API pro nosso token/escopo, ou o dado genuinamente não existe
+     ainda (ex.: só fecha num batch noturno)? Abrindo uma nota recente
+     na tela da Trier, esses campos aparecem preenchidos lá?
+  2. **O que `valor_total_custo` inclui**: é o único campo de custo
+     preenchido pra venda recente (os outros dois vêm 100% nulos) e
+     soma ~8% acima da coluna "Valor Custo" do relatório "Vendas por
+     Vendedor" pro mesmo período (ver item de margem bruta abaixo). O
+     que esse campo inclui que o relatório não conta (ST, custo médio
+     vs. custo do lote, outro encargo)? Existe campo/endpoint que
+     devolva o custo "puro" de aquisição, equivalente ao da coluna do
+     relatório?
+  3. **`modelo_venda` sempre `NULL`**: esperado vir vazio, ou é sinal
+     de nota ainda não fiscalmente processada?
+  4. **Resíduo de ~1,4% no faturamento mensal** (54 notas, R$4.652,76
+     em julho/26, depois de descartar cancelamento, duplicata, canal
+     ifood/ecommerce, nota de origem e valores negativos): conferir se
+     números de nota específicos da nossa base aparecem no relatório
+     "Vendas por Vendedor" da Trier do período — se não aparecerem,
+     por quê.
+  5. **Divergência da Maryana** (R$55,75, dia 31/07/26): existe log ou
+     relatório da Trier que mostre o horário exato de cada venda, já
+     que `hora_emissao` não vem pela API (item 1 acima)?
+
 - **[RESOLVIDO 31/07/2026] Vendas duplicadas quando `ser_nota_fiscal` é
   nula**: `ON CONFLICT (numero_nota, cod_filial, ser_nota_fiscal)` nunca
   "batia" nesse caso (Postgres trata todo `NULL` como distinto de
@@ -259,15 +290,97 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
      lotes de 200 (bem mais rápido, muito menos exposto) e reconecta
      automaticamente (até 3 tentativas) se a conexão cair no meio do
      processo.
-- **Margem/comissão/desconto vindo `NULL`**: comparando uma nota real
-  com o relatório da Trier, `vlr_custo_produto`/`prc_comissao`/
-  `vlr_desconto` vieram `NULL` em `venda_itens` mesmo com
-  `valor_total_bruto`/`valor_total_liquido` populados certos (nomes de
-  campo já conferidos contra `docs/api-sgf-openapi.json`, batem). Ainda
-  **não confirmado** se é a API que não devolve esses campos pra esse
+- **[RESOLVIDO 31/07/2026] Itens de venda duplicados por instabilidade de
+  ordem da API**: a defesa da duplicação de vendas acima (sintetizar
+  `num_sequencial` pela posição no array, pra constraint
+  `venda_itens_venda_num_sequencial_unique` nunca receber `NULL`) só
+  funciona se a Trier devolver os itens de uma nota **sempre na mesma
+  ordem** entre chamadas — não devolve. Toda vez que uma venda já
+  sincronizada era reprocessada (backfill rodado de novo, ou o n8n
+  reprocessando uma nota já sincronizada) e a ordem mudava, o mesmo item
+  físico sintetizava um `num_sequencial` diferente do que já estava
+  salvo — não batia no `ON CONFLICT`, e a Trier "inseria de novo" um
+  item que já existia. Achado investigando divergência do faturamento
+  mensal vs relatório real da Trier: **28.643 de 93.944 linhas em
+  `venda_itens` eram duplicata (30,5% da tabela), afetando 13.650 de
+  32.655 vendas (41,8%), R$774.480,87 inflados** — concentrado nos
+  meses anteriores do backfill (o efeito em julho/26 especificamente
+  era pequeno, 47 linhas/R$746,77). Corrigido em `backfill_periodo.js`
+  e em `sgf-incremental.n8n.json` (nó "Preparar itens e cursor"):
+  pararam de tentar casar item por item via chave sintética — agora
+  apagam todos os itens da venda antes de reinserir os itens atuais
+  (delete-then-reinsert por `venda_id`), imune à ordem da API. Limpeza
+  de duplicata já rodada no projeto real (ver `migracao_coletor.sql`
+  item 5). **Efeito colateral aceito**: `venda_item_receitas` tem FK
+  `on delete cascade` pra `venda_itens.id`, então uma receita anexada
+  via app a um item é perdida se aquela venda for ressincronizada —
+  sem uso real dessa feature em produção ainda; se passar a ter,
+  precisa de lógica extra pra capturar/reanexar a receita antes do
+  delete.
+- **Custo/comissão/desconto/hora vindo `NULL` pra venda recente**:
+  comparando com o relatório real da Trier (31/07/2026), confirmado que
+  `vlr_custo_produto`/`prc_comissao`/`vlr_desconto` **e agora também
+  `hora_emissao`** vêm `NULL` em `venda_itens`/`vendas`, mesmo com
+  `valor_total_bruto`/`valor_total_liquido`/`data_emissao` populados
+  certos — 132 de 132 vendas de 31/07 sem hora (100%, não é caso
+  isolado). Nomes de campo já conferidos contra
+  `docs/api-sgf-openapi.json`, batem (`horaEmissao` documentado como
+  ISO 8601 igual `dataEmissao`, e o parser `horaParaPg()` já trata esse
+  formato — não é bug de parsing). Ainda **não confirmado** se é a API
+  que não devolve esses 4 campos pra venda recente com esse
   token/escopo, ou se o dado realmente não existe cadastrado na Trier
-  pra esses itens — precisa abrir uma nota específica na Trier e ver se
-  o campo aparece preenchido lá também.
+  ainda pra esses itens (ex.: campo só fecha num batch noturno) —
+  precisa abrir uma nota específica na Trier e ver se os campos
+  aparecem preenchidos lá também.
+  **Impacto medido em margem bruta (31/07/2026)**: pra julho/26,
+  `vlr_custo_produto` e `vlr_custo_aquisicao` estão **100% nulos**
+  (9.204 de 9.204 itens) — `valor_total_custo` é a única fonte de
+  custo disponível pro `coalesce()` das views, não uma opção entre
+  várias. Esse campo soma R$188.731,40, **~8% acima** do "Valor Custo"
+  do relatório real "Vendas por Vendedor" da Trier (R$174.851,92) —
+  margem bruta calculada sai 30,35% contra 34,53% real (conservadora,
+  não inflada). Não é bug de código (a fórmula já usa a única fonte
+  disponível); provavelmente `valor_total_custo` inclui algo a mais
+  que o relatório não conta (ST, custo médio vs. custo do lote, etc.)
+  — precisaria confirmar com quem entende a contabilidade de custo da
+  Trier pra saber se dá pra corrigir. Aceito como pendência por ora.
+- **Pequena divergência de valor por vendedor, sem explicação
+  confirmada** (31/07/2026): comparando com o relatório "Vendas por
+  Vendedor" da Trier do mesmo dia, 5 de 6 vendedores bateram
+  exatamente; Maryana ficou R$55,75 acima do relatório (R$880,87 vs
+  R$825,12) — não dá pra confirmar se é venda nova entrando depois do
+  relatório (mesmo padrão observado no dia anterior, onde a explicação
+  se confirmou) porque `hora_emissao` está `NULL` (ver item acima),
+  então não tem como comparar o horário da venda com o horário do
+  relatório. Descartado como bug de duplicação (itens e nota batem 1:1,
+  sem mistura de vendedor entre nota e item — conferido). Aceito como
+  pendência por ora, não bloqueante.
+- **[RESOLVIDO 31/07/2026] Dados fake de `supabase/seed_data.sql` no
+  projeto real**: `seed_data.sql` tinha sido aplicado direto no projeto
+  Supabase real no começo do projeto (pra popular tela sem dado de
+  verdade ainda) e nunca foi limpo — coexistia silenciosamente com o
+  dado real importado depois, porque o backfill só faz `upsert`, nunca
+  `delete`. Achado comparando faturamento mensal de julho/26 com o
+  relatório real da Trier: os vendedores fake 201/202 ("João
+  Mendes"/"Camila Duarte") apareciam na nossa base com R$36.115,96 e 72
+  notas que não existem na Trier. Limpo via `supabase/limpeza_dados_fake.sql`
+  (vendedores, clientes, vendas+itens, metas, contas de Auth fake, e o
+  catálogo/campanha de demonstração). Cuidado se for reaplicar
+  `seed_data.sql` em ambiente de desenvolvimento: **nunca rodar contra o
+  projeto real**, só contra um projeto Supabase separado.
+- **Pendência não bloqueante — resíduo de ~1,4% no faturamento mensal**:
+  depois de limpar o dado fake acima e corrigir a duplicação de item
+  (item resolvido logo acima), o faturamento líquido de julho/26 ficou
+  em R$271.698,96/4.494 notas contra R$267.046,20/4.440 notas do
+  relatório real da Trier — uma diferença de R$4.652,76 (54 notas,
+  1,4%). Hipóteses descartadas com diagnóstico real (não é achismo):
+  timing do relatório (usuário confirmou que tirou o relatório depois
+  de fechar a farmácia, então não é "relatório tirado mais cedo"),
+  vendas canceladas, duplicata de nota, canal ifood/ecommerce, nota de
+  origem (`numero_nota_origem`), `modelo_venda`, nota fiscal ausente,
+  valores negativos/devolução. Não dá pra ir além só com os campos que
+  sincronizamos — precisaria comparar número de nota específico contra
+  a tela da Trier manualmente. Aceito como pendência por ora.
 - **`venda_com_desconto`**: a API manda um valor numérico, a coluna no
   banco é `boolean`. O workflow faz um mapeamento provisório (ver
   `migracao_coletor.sql`, item 2) — perde a informação do valor real.
