@@ -5,6 +5,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { MetricTile } from '../components/MetricTile';
 import { MetaProgressBar } from '../components/MetaProgressBar';
+import { CorridaDeVendas } from '../components/CorridaDeVendas';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
 import { formatBRL, formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
 import { diasDecorridosNaSemana, metaDiaria, semanaDoDia } from '../lib/metas';
@@ -66,7 +67,6 @@ export function DashboardScreen() {
 
   const load = useCallback(async () => {
     if (!profile) return;
-    const ehGestor = profile.role === 'gestor';
     const ano = hoje.getFullYear();
     const mes = hoje.getMonth() + 1;
     const [m, d, mm, dm, ms, ds, mt, ss, ci] = await Promise.all([
@@ -78,9 +78,8 @@ export function DashboardScreen() {
       repository.getDesempenhoVendedorSemanal(profile, ano, mes, semanaAtual),
       repository.getMetas(profile, ano, mes),
       repository.getStatusSincronizacao(),
-      // só o gestor vê o card de clientes inativos — evita a chamada à
-      // toa pro vendedor, que não usa esse dado no Dashboard.
-      ehGestor ? repository.getResumoClientesInatividade(profile) : Promise.resolve({ total: 0, inativos: 0 }),
+      // "Indicadores de gestão" agora aparece pra todo mundo (01/08/2026).
+      repository.getResumoClientesInatividade(profile),
     ]);
     setMetricas(m);
     setDesempenho(d);
@@ -222,6 +221,16 @@ export function DashboardScreen() {
           margemBruta: margemBrutaMes,
         };
 
+  // Ranking (corrida de vendas) — mesma fonte de dado do card
+  // "Desempenho", só que por vendedor em vez de somada, ordenada por
+  // faturamento. Segue o mesmo período selecionado (periodoDesempenho).
+  const metricasDoPeriodo =
+    periodoDesempenho === 'dia' ? metricas : periodoDesempenho === 'semana' ? metricasSemana : metricasMes;
+  const rankingAtual = metricasDoPeriodo
+    .slice()
+    .sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido)
+    .map((m) => ({ codigoVendedor: m.codigoVendedor, nomeVendedor: m.nomeVendedor, faturamentoLiquido: m.faturamentoLiquido }));
+
   // mostra a sincronização mais ANTIGA entre as entidades — é o pior
   // caso de "quão desatualizado" algum dado pode estar.
   const timestampsSync = statusSync
@@ -262,27 +271,27 @@ export function DashboardScreen() {
         )}
       </Card>
 
-      {profile?.role === 'gestor' && (
-        <Card>
-          <Text style={styles.sectionTitle}>📈 Indicadores de gestão</Text>
-          <View style={styles.tileRow}>
-            <MetricTile
-              label="Clientes inativos"
-              value={`${resumoClientes.inativos.toLocaleString('pt-BR')} de ${resumoClientes.total.toLocaleString('pt-BR')}`}
-              accentColor={colors.red}
-              numberOfLines={2}
-            />
-            <MetricTile label="Projeção de fechamento" value={formatBRLSemCentavos(projecaoFechamento)} accentColor="#9333ea" />
-          </View>
-        </Card>
-      )}
+      <Card>
+        <Text style={styles.sectionTitle}>📈 Indicadores de gestão</Text>
+        <View style={styles.tileRow}>
+          <MetricTile
+            label="Clientes inativos"
+            value={`${resumoClientes.inativos.toLocaleString('pt-BR')} de ${resumoClientes.total.toLocaleString('pt-BR')}`}
+            accentColor={colors.red}
+            numberOfLines={2}
+          />
+          <MetricTile label="Projeção de fechamento" value={formatBRLSemCentavos(projecaoFechamento)} accentColor="#9333ea" />
+        </View>
+      </Card>
 
       <Card>
         <Text style={styles.sectionTitle}>🎯 Metas</Text>
         <PeriodoMetaSelector value={periodoMeta} onChange={setPeriodoMeta} />
         {metas.length === 0 ? (
           <Text style={styles.empty}>Nenhuma meta cadastrada pra este mês ainda.</Text>
-        ) : profile?.role === 'gestor' ? (
+        ) : (
+          // Ranking completo pra todo mundo (gestor e vendedor) — "ver
+          // o resultado dos outros" (01/08/2026), não só o próprio.
           metas
             .slice()
             .map((meta) => ({
@@ -298,44 +307,17 @@ export function DashboardScreen() {
                 valorMeta={valores.valorMeta}
               />
             ))
-        ) : (
-          metas
-            .filter((m) => m.codigoVendedor === profile?.codigoVendedor)
-            .map((meta) => {
-              const valores = valoresDaMeta(meta, periodoMeta, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual);
-              return (
-                <MetaProgressBar
-                  key={meta.codigoVendedor}
-                  label={valores.label}
-                  valorRealizado={valores.valorRealizado}
-                  valorMeta={valores.valorMeta}
-                />
-              );
-            })
         )}
       </Card>
 
-      {profile?.role === 'gestor' && (
-        <Card>
-          <Text style={styles.sectionTitle}>Por vendedor</Text>
-          {metricas.length === 0 ? (
-            <Text style={styles.empty}>Sem vendas registradas hoje ainda.</Text>
-          ) : (
-            metricas
-              .slice()
-              .sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido)
-              .map((m) => (
-                <View key={m.codigoVendedor} style={styles.vendedorRow}>
-                  <Text style={styles.vendedorNome}>{m.nomeVendedor}</Text>
-                  <View style={styles.vendedorValores}>
-                    <Text style={styles.vendedorValor}>{formatBRL(m.faturamentoLiquido)}</Text>
-                    <Text style={styles.vendedorMargem}>margem {m.margemBrutaPct.toFixed(1)}%</Text>
-                  </View>
-                </View>
-              ))
-          )}
-        </Card>
-      )}
+      <Card>
+        <Text style={styles.sectionTitle}>🏆 Ranking</Text>
+        <Text style={styles.rankingPeriodo}>
+          {periodoDesempenho === 'dia' ? 'Hoje' : periodoDesempenho === 'semana' ? 'Esta semana' : 'Este mês'}
+          {' · segue o período escolhido em "Desempenho" acima'}
+        </Text>
+        <CorridaDeVendas ranking={rankingAtual} meuCodigoVendedor={profile?.codigoVendedor} />
+      </Card>
     </ScrollView>
   );
 }
@@ -352,15 +334,5 @@ const styles = StyleSheet.create({
   tileRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   empty: { color: colors.textSecondary },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: 10 },
-  vendedorRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  vendedorNome: { color: colors.textSecondary },
-  vendedorValores: { alignItems: 'flex-end' },
-  vendedorValor: { color: colors.textPrimary, fontWeight: '600' },
-  vendedorMargem: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
+  rankingPeriodo: { fontSize: 11, color: colors.textMuted, marginBottom: 10 },
 });

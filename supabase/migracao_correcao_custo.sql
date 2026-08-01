@@ -8,13 +8,26 @@
 -- esse campo sozinho soma ~8% acima da coluna "Valor Custo" do
 -- relatório real "Vendas por Vendedor" da Trier (achado 31/07/2026,
 -- comparando julho/26: nosso R$188.731,40 vs R$174.851,92 real —
--- 174851.92/188731.40 ≈ 0.9264, arredondado pra 0.92 de fator). Não
--- sabemos ainda o que valor_total_custo inclui a mais (ST? custo
--- médio vs. custo do lote?) — ver coletor/README.md, pendência
--- "Perguntas em aberto pro suporte/sistema da Trier", item 2.
+-- 174851.92/188731.40 ≈ 0.9264, arredondado pra 0.92 de fator).
 --
--- Remover esse fator (ou recalibrar) assim que a causa raiz for
--- confirmada com a Trier. Idempotente (create or replace).
+-- CAUSA RAIZ CONFIRMADA (01/08/2026): a tela de relatório da Trier
+-- tem 4 critérios de custo configuráveis (Custo do Cadastro de
+-- Produtos, Custo de Aquisição, Valor Última Entrada, Valor Última
+-- Entrada Com ST). valor_total_custo da API bate com o critério
+-- PADRÃO (Custo do Cadastro), não com "Custo de Aquisição" (o que a
+-- farmácia usa) — confirmado comparando dois relatórios do mesmo dia
+-- com critérios diferentes: R$1.842,34 (padrão, bate exato com nosso
+-- sum(valor_total_custo)) vs R$1.722,00 (Custo de Aquisição). O campo
+-- que teria o valor certo (vlr_custo_aquisicao) é justamente o que
+-- vem NULL pra venda recente. A proporção entre os dois critérios
+-- varia por período (~6,5% em 01/08 vs ~7,4% em julho/26 inteiro) —
+-- 0.92 é uma aproximação, não uma relação fixa. Ver coletor/README.md,
+-- pendência "Perguntas em aberto pro suporte/sistema da Trier", item 2
+-- (perguntar se dá pra pedir "Custo de Aquisição" direto via API).
+--
+-- Remover esse fator (ou recalibrar) se a Trier confirmar um jeito de
+-- pegar Custo de Aquisição direto pra venda recente. Idempotente
+-- (create or replace).
 -- ============================================================
 
 create or replace view vw_metricas_vendedor_diario as

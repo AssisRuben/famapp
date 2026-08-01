@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { LoginScreen } from '../screens/LoginScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
-import { RankingScreen } from '../screens/RankingScreen';
+import { ClientesVendedorScreen } from '../screens/ClientesVendedorScreen';
 import { MetasScreen } from '../screens/MetasScreen';
 import { ChecklistScreen } from '../screens/ChecklistScreen';
 import { ClientesScreen } from '../screens/ClientesScreen';
@@ -78,7 +78,6 @@ function AppTabs() {
   const itensDrawer = [
     ...(ehGestor
       ? [
-          { label: 'Ranking', emoji: '🏆', onPress: () => irPara('Ranking') },
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
           { label: 'Campanhas', emoji: '📢', onPress: () => irPara('Campanhas') },
           { label: 'Cartazetes', emoji: '🖨️', onPress: () => irPara('Cartazetes') },
@@ -117,11 +116,11 @@ function AppTabs() {
           options={{ title: 'Painel', tabBarIcon: ({ focused }) => <TabIcon emoji="📊" focused={focused} /> }}
         />
         <Tab.Screen
-          name="Ranking"
-          component={RankingScreen}
+          name="MeusClientes"
+          component={ClientesVendedorScreen}
           options={{
-            title: 'Ranking',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="🏆" focused={focused} />,
+            title: 'Meus Clientes',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="📇" focused={focused} />,
             ...abaOculta(ehGestor),
           }}
         />

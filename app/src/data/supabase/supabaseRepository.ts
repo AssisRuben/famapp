@@ -5,12 +5,14 @@ import {
   AtividadeChecklist,
   Campanha,
   ChecklistItemStatus,
+  ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
   FaixaComissao,
+  HistoricoCompraCliente,
   ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
@@ -22,6 +24,7 @@ import {
   ProdutoCatalogo,
   ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
+  ProdutoRecorrenteCliente,
   RankingVendedorDia,
   ResumoClientesInatividade,
   Role,
@@ -305,6 +308,103 @@ class SupabaseRepository implements DataRepository {
     if (totalRes.error) throw totalRes.error;
     if (inativosRes.error) throw inativosRes.error;
     return { total: totalRes.count ?? 0, inativos: inativosRes.count ?? 0 };
+  }
+
+  async getClientesDoVendedor(profile: Profile): Promise<ClienteDoVendedor[]> {
+    if (profile.codigoVendedor == null) return [];
+    // PostgREST limita 1000 linhas por request por padrão — sem
+    // paginação aqui, um vendedor com carteira grande via a lista
+    // cortada em exatamente 1000 (achado 01/08/2026, mesma causa do
+    // tile "Clientes inativos" antes de corrigir pra count agregado).
+    // Aqui não dá pra usar só count (a tela precisa dos dados
+    // completos pra buscar/filtrar), então pagina de verdade.
+    // Desempate por codigo (client) além de ultima_compra — só a data
+    // pode empatar entre clientes diferentes, e sem desempate único a
+    // ordenação não é garantida estável entre páginas (mesmo risco do
+    // getProdutosRecorrentesDoVendedor abaixo).
+    const TAMANHO_PAGINA = 1000;
+    const linhas: Record<string, unknown>[] = [];
+    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
+      const { data, error } = await supabase
+        .from('vw_clientes_por_vendedor')
+        .select('*')
+        .eq('codigo_vendedor', profile.codigoVendedor)
+        .order('ultima_compra', { ascending: false })
+        .order('codigo', { ascending: true })
+        .range(inicio, inicio + TAMANHO_PAGINA - 1);
+      if (error) throw error;
+      linhas.push(...(data ?? []));
+      if (!data || data.length < TAMANHO_PAGINA) break;
+    }
+    return linhas.map((r: any) => ({
+      codigo: r.codigo,
+      nome: r.nome,
+      telefone: r.telefone,
+      email: r.email,
+      dataNascimento: r.data_nascimento,
+      valorTotal: Number(r.valor_total),
+      ultimaCompra: r.ultima_compra,
+    }));
+  }
+
+  // Só os últimos 5 (limit no app, não na view — a view fica genérica
+  // pra outros usos futuros também poderem pedir mais/menos).
+  async getHistoricoComprasCliente(_profile: Profile, codigoCliente: number): Promise<HistoricoCompraCliente[]> {
+    const { data, error } = await supabase
+      .from('vw_historico_compras_cliente')
+      .select('*')
+      .eq('codigo_cliente', codigoCliente)
+      .order('data_emissao', { ascending: false })
+      .limit(5);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      itemId: r.item_id,
+      vendaId: r.venda_id,
+      dataEmissao: r.data_emissao,
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.nome_produto,
+      quantidade: Number(r.quantidade_produtos),
+      valorTotal: Number(r.valor_total_liquido),
+    }));
+  }
+
+  async getProdutosRecorrentesDoVendedor(profile: Profile): Promise<ProdutoRecorrenteCliente[]> {
+    if (profile.codigoVendedor == null) return [];
+    // mesma paginação de getClientesDoVendedor — pode passar de 1000
+    // linhas fácil (1 linha por produto distinto de cada cliente).
+    // .order() ANTES do .range() não é opcional aqui: sem ordenação
+    // estável o Postgres não garante que cada página traga linhas
+    // diferentes das outras — sem isso, a mesma linha podia aparecer
+    // em duas páginas (e outra sumir), causando produto duplicado pro
+    // mesmo cliente (achado 01/08/2026 — "Encountered two children
+    // with the same key" no app, key = codigo_produto repetido).
+    const TAMANHO_PAGINA = 1000;
+    const linhas: Record<string, unknown>[] = [];
+    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
+      const { data, error } = await supabase
+        .from('vw_clientes_produtos_vendedor')
+        .select('*')
+        .eq('codigo_vendedor', profile.codigoVendedor)
+        .order('codigo_cliente', { ascending: true })
+        .order('codigo_produto', { ascending: true })
+        .range(inicio, inicio + TAMANHO_PAGINA - 1);
+      if (error) throw error;
+      linhas.push(...(data ?? []));
+      if (!data || data.length < TAMANHO_PAGINA) break;
+    }
+    return linhas.map((r: any) => ({
+      codigoCliente: r.codigo_cliente,
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.nome_produto,
+      categoria: r.categoria,
+      grupo: r.grupo,
+      qtdCompras: r.qtd_compras,
+      ultimaCompra: r.ultima_compra,
+      intervaloMedioDias: r.intervalo_medio_dias == null ? null : Number(r.intervalo_medio_dias),
+      diasDesdeUltimaCompra: r.dias_desde_ultima_compra,
+      recorrente: r.recorrente,
+      atrasado: r.atrasado,
+    }));
   }
 
   // vw_produtos_promocao_clientes também roda sem RLS de propósito —

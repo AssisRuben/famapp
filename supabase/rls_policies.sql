@@ -38,14 +38,17 @@ using (id = auth.uid());
 --
 -- Propositalmente SEM security_invoker (mesmo motivo de
 -- vw_produtos_promocao_clientes lá embaixo): se rodasse como invoker,
--- a RLS de `vendas` (vendedor só vê as próprias) restringiria a
--- subquery da última venda ANTES do filtro de papel rodar, fazendo um
--- vendedor "roubar" a última compra de um cliente que na verdade foi
--- atendido por outro vendedor (mostraria uma última compra
--- desatualizada, não a real). Rodando como dono, calculamos a última
--- compra de verdade pra todo mundo e SÓ DEPOIS aplicamos o filtro de
--- papel no WHERE — o controle de acesso aqui é manual (checa
--- profiles/auth.uid()), não via RLS automática.
+-- a RLS de `vendas` (agora liberada pra todo autenticado — ver
+-- migracao_acesso_vendedor.sql) não teria mais esse problema, mas
+-- rodar como dono continua correto/mais simples de raciocinar. O
+-- controle de acesso aqui é manual (checa profiles/auth.uid()), não
+-- via RLS automática.
+--
+-- [01/08/2026] Vendedor vê todo cliente agora, não só os próprios —
+-- "resultado dos outros" (mesma decisão de vendas/metas, ver
+-- migracao_acesso_vendedor.sql). codigo_vendedor/nome_vendedor da
+-- última compra continuam na view (útil pra saber quem atendeu),
+-- só não filtra mais quem pode VER a linha.
 -- ============================================================
 create or replace view vw_clientes_inatividade as
 select
@@ -67,9 +70,7 @@ join lateral (
 ) ultima_venda on true
 left join vendedores vd on vd.codigo = ultima_venda.codigo_vendedor
 where exists (
-  select 1 from profiles p
-  where p.id = auth.uid()
-    and (p.role = 'gestor' or ultima_venda.codigo_vendedor = p.codigo_vendedor)
+  select 1 from profiles p where p.id = auth.uid()
 );
 
 -- ============================================================
@@ -81,17 +82,16 @@ where exists (
 
 alter table vendedores enable row level security;
 
-create policy "vendedores: gestor le tudo"
+-- Vendedor vê o cadastro de todo mundo (não só o próprio) — decisão de
+-- produto: o Painel deve mostrar "venda geral e resultado dos outros"
+-- pra qualquer vendedor, igual ao gestor (01/08/2026). Views com
+-- security_invoker=true que fazem join com vendedores (métricas
+-- diário/semanal/mensal) dependem disso pra trazer nome_vendedor de
+-- todo mundo, não só do usuário logado.
+create policy "vendedores: usuarios autenticados leem"
 on vendedores for select
 using (exists (
-  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
-));
-
-create policy "vendedores: vendedor le o proprio registro"
-on vendedores for select
-using (exists (
-  select 1 from profiles p
-  where p.id = auth.uid() and p.role = 'vendedor' and p.codigo_vendedor = vendedores.codigo
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
 -- clientes: qualquer usuário autenticado com profile pode ler
@@ -106,47 +106,28 @@ using (exists (
 
 alter table vendas enable row level security;
 
-create policy "vendas: gestor le tudo"
+-- Mesma decisão de vendedores acima: vendedor lê vendas de todo mundo,
+-- não só as próprias.
+create policy "vendas: usuarios autenticados leem"
 on vendas for select
 using (exists (
-  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
-));
-
-create policy "vendas: vendedor le as proprias"
-on vendas for select
-using (exists (
-  select 1 from profiles p
-  where p.id = auth.uid() and p.role = 'vendedor' and p.codigo_vendedor = vendas.codigo_vendedor
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
 alter table venda_itens enable row level security;
 
-create policy "venda_itens: gestor le tudo"
+create policy "venda_itens: usuarios autenticados leem"
 on venda_itens for select
 using (exists (
-  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
-));
-
-create policy "venda_itens: vendedor le os proprios"
-on venda_itens for select
-using (exists (
-  select 1 from profiles p
-  where p.id = auth.uid() and p.role = 'vendedor' and p.codigo_vendedor = venda_itens.codigo_vendedor
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
 alter table vendas_vendedor_diario enable row level security;
 
-create policy "vvd: gestor le tudo"
+create policy "vvd: usuarios autenticados leem"
 on vendas_vendedor_diario for select
 using (exists (
-  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
-));
-
-create policy "vvd: vendedor le o proprio"
-on vendas_vendedor_diario for select
-using (exists (
-  select 1 from profiles p
-  where p.id = auth.uid() and p.role = 'vendedor' and p.codigo_vendedor = vendas_vendedor_diario.codigo_vendedor
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
 -- produtos: curadoria manual (promoção / exige receita). Qualquer
@@ -186,15 +167,14 @@ using (exists (
 -- só mexe nas receitas dos itens que ele mesmo vendeu; gestor, tudo.
 alter table venda_item_receitas enable row level security;
 
-create policy "receitas: select proprio ou gestor"
+-- Leitura liberada pra todo autenticado (mesma decisão de vendas
+-- acima); insert/update continuam restritos a "próprio ou gestor" —
+-- só quem atendeu a venda (ou o gestor) deve poder anexar/editar a
+-- receita, mesmo que agora todo mundo possa VER a fila inteira.
+create policy "receitas: usuarios autenticados leem"
 on venda_item_receitas for select
 using (exists (
-  select 1
-  from profiles pr
-  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
-  join vendas v on v.id = vi.venda_id
-  where pr.id = auth.uid()
-    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
 create policy "receitas: insert proprio ou gestor"
@@ -229,14 +209,15 @@ with check (exists (
 
 -- metas: cadastrada pelo gestor na tela "Metas". Vendedor só lê as
 -- próprias (pra ver o progresso no Dashboard); só gestor escreve.
+-- [01/08/2026] Leitura liberada pra todo mundo ver o ranking completo
+-- de metas de todo mundo, não só a própria — mesma decisão de
+-- vendas/venda_itens acima. Escrita continua gestor-only.
 alter table metas enable row level security;
 
-create policy "metas: select proprio ou gestor"
+create policy "metas: usuarios autenticados leem"
 on metas for select
 using (exists (
-  select 1 from profiles p
-  where p.id = auth.uid()
-    and (p.role = 'gestor' or p.codigo_vendedor = metas.codigo_vendedor)
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
 create policy "metas: gestor insere"
@@ -461,6 +442,9 @@ alter view vw_metricas_vendedor_mensal set (security_invoker = true);
 alter view vw_desempenho_vendedor_mensal set (security_invoker = true);
 alter view vw_metricas_vendedor_semanal set (security_invoker = true);
 alter view vw_desempenho_vendedor_semanal set (security_invoker = true);
+alter view vw_clientes_por_vendedor set (security_invoker = true);
+alter view vw_historico_compras_cliente set (security_invoker = true);
+alter view vw_clientes_produtos_vendedor set (security_invoker = true);
 -- vw_produtos_promocao_clientes, vw_clientes_inatividade e
 -- vw_ranking_vendedores_dia ficam de propósito SEM security_invoker (ver
 -- comentário de cada uma em schema.sql) — não é esquecimento. Gap

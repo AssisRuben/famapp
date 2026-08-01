@@ -107,6 +107,52 @@ export interface MetricasVendedorSemanal {
   margemBrutaPct: number;
 }
 
+// Espelha vw_clientes_por_vendedor — clientes distintos que o
+// vendedor já atendeu, com total gasto COM ELE especificamente (tela
+// "Meus clientes").
+export interface ClienteDoVendedor {
+  codigo: number;
+  nome: string;
+  telefone: string | null;
+  email: string | null;
+  dataNascimento: string | null;
+  valorTotal: number;
+  ultimaCompra: string | null;
+}
+
+// Espelha vw_historico_compras_cliente — histórico de compra por
+// PRODUTO (não por nota) do cliente inteiro (qualquer vendedor),
+// mostrado ao expandir um cliente na tela "Meus clientes" (só os
+// últimos 5, filtro no app).
+export interface HistoricoCompraCliente {
+  itemId: number;
+  vendaId: number;
+  dataEmissao: string;
+  codigoProduto: number;
+  nomeProduto: string;
+  quantidade: number;
+  valorTotal: number;
+}
+
+// Espelha vw_clientes_produtos_vendedor — base dos filtros de resgate
+// da tela "Meus clientes": 1 linha por (cliente, produto) que o
+// vendedor já vendeu. "atrasado" é o sinal mais forte pra resgate —
+// cliente que compra esse produto com regularidade e já passou do
+// prazo esperado pra comprar de novo.
+export interface ProdutoRecorrenteCliente {
+  codigoCliente: number;
+  codigoProduto: number;
+  nomeProduto: string;
+  categoria: string | null;
+  grupo: string | null;
+  qtdCompras: number;
+  ultimaCompra: string;
+  intervaloMedioDias: number | null;
+  diasDesdeUltimaCompra: number;
+  recorrente: boolean;
+  atrasado: boolean;
+}
+
 // Espelha vw_ranking_vendedores_dia
 export interface RankingVendedorDia {
   dataEmissao: string;

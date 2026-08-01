@@ -298,11 +298,11 @@ export function MetasScreen() {
                     >
                       {atividade.titulo}
                     </Text>
-                    {atividade.horario && (
+                    {atividade.horario ? (
                       <Text style={styles.atividadeHorario}>
                         🔔 {atividade.horario} · seg a sáb
                       </Text>
-                    )}
+                    ) : null}
                   </View>
                   <Switch
                     value={atividade.ativo}

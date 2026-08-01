@@ -238,14 +238,15 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
      API pro nosso token/escopo, ou o dado genuinamente não existe
      ainda (ex.: só fecha num batch noturno)? Abrindo uma nota recente
      na tela da Trier, esses campos aparecem preenchidos lá?
-  2. **O que `valor_total_custo` inclui**: é o único campo de custo
-     preenchido pra venda recente (os outros dois vêm 100% nulos) e
-     soma ~8% acima da coluna "Valor Custo" do relatório "Vendas por
-     Vendedor" pro mesmo período (ver item de margem bruta abaixo). O
-     que esse campo inclui que o relatório não conta (ST, custo médio
-     vs. custo do lote, outro encargo)? Existe campo/endpoint que
-     devolva o custo "puro" de aquisição, equivalente ao da coluna do
-     relatório?
+  2. **`valor_total_custo` usa o critério errado de custo** — causa
+     raiz JÁ CONFIRMADA em 01/08/2026 (ver item de margem bruta
+     abaixo): esse campo bate com o critério "Custo do Cadastro de
+     Produtos" (padrão da tela de relatório da Trier), não com "Custo
+     de Aquisição" (o que a farmácia usa pra calcular margem de
+     verdade — ~6,5-8% mais baixo). O campo certo (`vlr_custo_aquisicao`)
+     vem `NULL` pra venda recente. Pergunta pra Trier: existe algum
+     parâmetro na chamada da API (ou outro endpoint) que devolva o
+     custo já no critério "Custo de Aquisição", em vez do padrão?
   3. **`modelo_venda` sempre `NULL`**: esperado vir vazio, ou é sinal
      de nota ainda não fiscalmente processada?
   4. **Resíduo de ~1,4% no faturamento mensal** (54 notas, R$4.652,76
@@ -339,11 +340,29 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
   várias. Esse campo soma R$188.731,40, **~8% acima** do "Valor Custo"
   do relatório real "Vendas por Vendedor" da Trier (R$174.851,92) —
   margem bruta calculada sai 30,35% contra 34,53% real (conservadora,
-  não inflada). Não é bug de código (a fórmula já usa a única fonte
-  disponível); provavelmente `valor_total_custo` inclui algo a mais
-  que o relatório não conta (ST, custo médio vs. custo do lote, etc.)
-  — precisaria confirmar com quem entende a contabilidade de custo da
-  Trier pra saber se dá pra corrigir. Aceito como pendência por ora.
+  não inflada). Aplicada correção empírica de -8% (`* 0.92`) nas views
+  de margem enquanto a causa raiz não é resolvida de vez — ver
+  `supabase/migracao_correcao_custo.sql`.
+  **[CAUSA RAIZ CONFIRMADA 01/08/2026]** A tela de configuração de
+  relatório da Trier ("Seleção Custo") tem 4 critérios: Custo do
+  Cadastro de Produtos, Custo de Aquisição, Valor Última Entrada e
+  Valor Última Entrada Com ST. Comparando dois relatórios do mesmo dia
+  (01/08/26) gerados 3 minutos um do outro: com o critério padrão o
+  "Valor Custo" total deu R$1.842,34 (bate EXATO com `sum(valor_total_custo)`
+  do nosso banco pro mesmo dia); com "Custo de Aquisição" selecionado,
+  deu R$1.722,00 — diferente. Ou seja: `valor_total_custo` da API
+  corresponde ao critério **padrão** da Trier (provavelmente "Custo do
+  Cadastro de Produtos"), não a "Custo de Aquisição" — que é o que a
+  farmácia prefere ver na margem. O campo que daria o número certo
+  (`vlr_custo_aquisicao`) é exatamente o que vem `NULL` pra venda
+  recente — não tem como pegar "Custo de Aquisição" direto da API hoje.
+  A proporção entre os dois critérios varia por período (1722/1842,34
+  ≈ 6,5% em 01/08, vs ~7,4% em julho/26 inteiro) — o fator -8% é uma
+  aproximação razoável, não uma relação matemática fixa; esperar
+  alguma imprecisão dia a dia. Continua pendência: perguntar pro
+  suporte Trier se existe algum jeito de pedir "Custo de Aquisição"
+  específico via API (parâmetro na chamada, ou outro endpoint) em vez
+  de depender do critério padrão.
 - **Pequena divergência de valor por vendedor, sem explicação
   confirmada** (31/07/2026): comparando com o relatório "Vendas por
   Vendedor" da Trier do mesmo dia, 5 de 6 vendedores bateram

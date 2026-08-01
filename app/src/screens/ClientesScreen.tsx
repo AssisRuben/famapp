@@ -49,7 +49,7 @@ export function ClientesScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{profile?.role === 'gestor' ? 'Clientes em potencial' : 'Meus clientes em potencial'}</Text>
+      <Text style={styles.title}>Clientes em potencial</Text>
       <Text style={styles.subtitle}>
         {clientes.length} clientes · {inativos} inativos (sem compra há mais de 60 dias)
       </Text>
@@ -63,11 +63,11 @@ export function ClientesScreen() {
           <View style={styles.row}>
             <View style={styles.info}>
               <Text style={styles.nome}>{item.nome}</Text>
-              {profile?.role === 'gestor' && item.nomeVendedor && (
+              {item.nomeVendedor ? (
                 <View style={styles.vendedorTag}>
                   <Text style={styles.vendedorTagTexto}>{item.nomeVendedor}</Text>
                 </View>
-              )}
+              ) : null}
               <Text style={styles.detalhe}>
                 {item.ultimaCompra ? `Última compra: ${formatDateBR(item.ultimaCompra)}` : 'Sem histórico de compra'}
               </Text>
@@ -80,9 +80,9 @@ export function ClientesScreen() {
                 </Text>
               </View>
             </View>
-            {item.telefone && (
+            {item.telefone ? (
               <WhatsAppButton compact telefone={item.telefone} mensagem={mensagemReativacao(item)} />
-            )}
+            ) : null}
           </View>
         )}
       />

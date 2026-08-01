@@ -13,6 +13,16 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
 
+// Vendedor loga só com usuário (sem "@") — a Trier não tem e-mail
+// cadastrado pra ninguém, então a conta é criada com um e-mail interno
+// fake (usuario@farmapp.local, nunca recebe e-mail de verdade) e a
+// pessoa nem precisa saber que isso existe por trás. Gestor continua
+// digitando o e-mail real normalmente (já tem "@", passa direto).
+function credencialLogin(digitado: string): string {
+  const valor = digitado.trim();
+  return valor.includes('@') ? valor : `${valor.toLowerCase()}@farmapp.local`;
+}
+
 export function LoginScreen() {
   const { signIn, signingIn, error } = useAuth();
   const [email, setEmail] = useState('');
@@ -35,10 +45,9 @@ export function LoginScreen() {
 
           <TextInput
             style={styles.input}
-            placeholder="E-mail"
+            placeholder="Usuário ou e-mail"
             placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
-            keyboardType="email-address"
             value={email}
             onChangeText={setEmail}
           />
@@ -55,7 +64,7 @@ export function LoginScreen() {
 
           <Pressable
             style={[styles.button, signingIn && styles.buttonDisabled]}
-            onPress={() => signIn(email.trim(), senha)}
+            onPress={() => signIn(credencialLogin(email), senha)}
             disabled={signingIn}
           >
             {signingIn ? (

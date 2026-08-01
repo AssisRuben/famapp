@@ -2,12 +2,14 @@ import {
   AtividadeChecklist,
   Campanha,
   ChecklistItemStatus,
+  ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
   FaixaComissao,
+  HistoricoCompraCliente,
   ItemPrecificacao,
   MetaVendedor,
   MetricasVendedorDiario,
@@ -18,6 +20,7 @@ import {
   ProdutoCatalogo,
   ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
+  ProdutoRecorrenteCliente,
   RankingVendedorDia,
   ResumoClientesInatividade,
   SalvarCampanhaInput,
@@ -57,6 +60,17 @@ export interface DataRepository {
   getMetricasVendedorSemanal(profile: Profile, ano: number, mes: number, semana: 1 | 2 | 3 | 4): Promise<MetricasVendedorSemanal[]>;
   getRankingVendedoresDia(profile: Profile, dataEmissao: string): Promise<RankingVendedorDia[]>;
   getClientesInatividade(profile: Profile): Promise<ClienteInatividade[]>;
+  // Tela "Meus clientes" — clientes distintos que o vendedor logado já
+  // atendeu, com busca por nome feita no app (lista pequena por
+  // vendedor, não precisa de busca no banco). Gestor (sem
+  // codigoVendedor) recebe lista vazia — tela é por vendedor mesmo.
+  getClientesDoVendedor(profile: Profile): Promise<ClienteDoVendedor[]>;
+  // Histórico de compra do cliente (qualquer vendedor), mostrado ao
+  // expandir um cliente na tela "Meus clientes".
+  getHistoricoComprasCliente(profile: Profile, codigoCliente: number): Promise<HistoricoCompraCliente[]>;
+  // Base dos filtros de resgate ("Uso contínuo" + categoria/produto)
+  // da tela "Meus clientes" — 1 linha por (cliente, produto).
+  getProdutosRecorrentesDoVendedor(profile: Profile): Promise<ProdutoRecorrenteCliente[]>;
   // Contagem agregada (total/inativos) pro tile do Painel — não sofre
   // do limite padrão de 1000 linhas por request que getClientesInatividade
   // tem quando usado só pra contar.

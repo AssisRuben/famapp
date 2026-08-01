@@ -36,6 +36,7 @@ create table clientes (
   logradouro text,
   numero_endereco text,
   ativo boolean default true,
+  data_nascimento date,      -- dataNascimento da API (date-time; guarda só a data)
   grupo jsonb,              -- objeto "Grupo" retornado pela API, guardado como está
   empresa_convenio jsonb,    -- objeto "EmpresaConvenio" retornado pela API
   updated_at timestamptz default now()
@@ -246,7 +247,8 @@ create table produto_catalogo (
   codigo integer primary key,
   codigo_barras text,
   nome text not null,
-  categoria text,
+  categoria text,           -- ProdutoIntegracaoDto.nomeCategoria — tipo de uso (ex.: "Uso Adulto"), não é bem uma categoria de produto
+  grupo text,                -- ProdutoIntegracaoDto.nomeGrupo — grupo de verdade (ex.: "Analgésicos", "Fraldas") — mais útil pra filtro de produto/categoria
   marca text,
   preco_venda numeric(12,2) not null,
   custo_medio numeric(12,2) not null,
@@ -255,6 +257,7 @@ create table produto_catalogo (
 );
 
 create index idx_produto_catalogo_categoria on produto_catalogo (categoria);
+create index idx_produto_catalogo_grupo on produto_catalogo (grupo);
 
 -- ============================================================
 -- FORNECEDORES / COMPRAS — espelha FornecedorIntegracaoDto e
@@ -388,11 +391,14 @@ join vendedores v on v.codigo = vvd.codigo_vendedor;
 -- (só valor_total_custo é preenchido), e esse campo sozinho soma ~8%
 -- acima da coluna "Valor Custo" do relatório real "Vendas por
 -- Vendedor" da Trier (achado 31/07/2026, ver coletor/README.md e
--- pendência "Custo/comissão/desconto/hora vindo NULL"). Não sabemos
--- ainda o que valor_total_custo inclui a mais (ST? custo médio vs.
--- lote?) — até confirmar com a Trier, aplica 0.92 no custo somado
--- (reduz 8%) antes de calcular margem. Remover/ajustar esse fator
--- assim que a causa raiz for confirmada.
+-- pendência "Custo/comissão/desconto/hora vindo NULL"). Causa raiz
+-- confirmada em 01/08/2026: valor_total_custo bate com o critério
+-- PADRÃO de custo da tela de relatório da Trier (Custo do Cadastro de
+-- Produtos), não com "Custo de Aquisição" (o que a farmácia usa pra
+-- margem) — e o campo certo (vlr_custo_aquisicao) é o que vem NULL.
+-- A proporção varia por período (~6,5-8%) — 0.92 é aproximação, não
+-- fixo. Remover/ajustar esse fator se a Trier confirmar um jeito de
+-- pegar Custo de Aquisição direto pra venda recente.
 create or replace view vw_metricas_vendedor_diario as
 select
   vd.data_emissao,
@@ -541,6 +547,111 @@ select
   rank() over (partition by data_emissao order by faturamento_liquido desc) as posicao,
   nome_vendedor
 from vw_metricas_vendedor_diario;
+
+-- Clientes distintos que cada vendedor já atendeu (pelo menos 1 venda
+-- com esse codigo_vendedor), com total gasto COM ESSE vendedor
+-- especificamente (não é a última compra do cliente com qualquer um,
+-- é o histórico dele com o vendedor da tela "Meus clientes" do app).
+-- Inclui email/data_nascimento pro card da tela mostrar direto, sem
+-- precisar de outra consulta. Usada pra listar + buscar cliente
+-- (01/08/2026).
+create view vw_clientes_por_vendedor as
+select
+  v.codigo_vendedor,
+  c.codigo,
+  c.nome,
+  c.fone as telefone,
+  c.email,
+  c.data_nascimento,
+  count(distinct v.id) as qtd_compras,
+  sum(vi.valor_total_liquido) as valor_total,
+  max(v.data_emissao) as ultima_compra
+from vendas v
+join venda_itens vi on vi.venda_id = v.id
+join clientes c on c.codigo = v.codigo_cliente
+where v.codigo_vendedor is not null and v.codigo_cliente is not null
+group by v.codigo_vendedor, c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
+
+-- Histórico de compra por PRODUTO (não por nota) — 1 linha por item
+-- vendido, com nome do produto (produto_catalogo, sincronizado da
+-- Trier; sem FK formal com venda_itens.codigo_produto, daí o left
+-- join) e data. Usado quando o vendedor expande um cliente na tela
+-- "Meus clientes" (mostra os últimos 5, filtro de LIMIT fica no app).
+-- Histórico INTEIRO do cliente (qualquer vendedor que atendeu), não só
+-- com quem está vendo a tela, pra dar contexto completo.
+create view vw_historico_compras_cliente as
+select
+  v.codigo_cliente,
+  vi.id as item_id,
+  v.id as venda_id,
+  v.data_emissao,
+  vi.codigo_produto,
+  coalesce(pc.nome, 'Produto ' || vi.codigo_produto) as nome_produto,
+  vi.quantidade_produtos,
+  vi.valor_total_liquido
+from vendas v
+join venda_itens vi on vi.venda_id = v.id
+left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+where v.codigo_cliente is not null;
+
+-- Base pros filtros de resgate da tela "Meus clientes" (01/08/2026):
+-- 1 linha por (vendedor, cliente, produto) que o vendedor já vendeu
+-- pra esse cliente, com sinal de recompra:
+--   recorrente: comprou o mesmo produto 2+ vezes com esse vendedor.
+--   intervalo_medio_dias: média de dias entre as compras (só faz
+--     sentido quando recorrente).
+--   atrasado: já passou 30% a mais do intervalo médio desde a última
+--     compra — heurística de "já devia ter voltado a comprar" (ex.:
+--     compra a cada 30 dias, se passar de 39 sem comprar de novo,
+--     entra aqui). Sinal mais forte pra lista de resgate do que só
+--     "comprou uma vez uma categoria".
+create view vw_clientes_produtos_vendedor as
+with compras as (
+  select
+    v.codigo_vendedor,
+    v.codigo_cliente,
+    vi.codigo_produto,
+    coalesce(pc.nome, 'Produto ' || vi.codigo_produto) as nome_produto,
+    pc.categoria,
+    pc.grupo,
+    v.data_emissao
+  from vendas v
+  join venda_itens vi on vi.venda_id = v.id
+  left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+  where v.codigo_vendedor is not null and v.codigo_cliente is not null
+),
+agregado as (
+  select
+    codigo_vendedor,
+    codigo_cliente,
+    codigo_produto,
+    nome_produto,
+    categoria,
+    grupo,
+    count(*) as qtd_compras,
+    max(data_emissao) as ultima_compra,
+    (max(data_emissao) - min(data_emissao))::numeric / nullif(count(*) - 1, 0) as intervalo_medio_dias
+  from compras
+  group by codigo_vendedor, codigo_cliente, codigo_produto, nome_produto, categoria, grupo
+)
+select
+  codigo_vendedor,
+  codigo_cliente,
+  codigo_produto,
+  nome_produto,
+  categoria,
+  grupo,
+  qtd_compras,
+  ultima_compra,
+  round(intervalo_medio_dias, 1) as intervalo_medio_dias,
+  (current_date - ultima_compra) as dias_desde_ultima_compra,
+  (qtd_compras >= 2) as recorrente,
+  (
+    qtd_compras >= 2
+    and intervalo_medio_dias is not null
+    and (current_date - ultima_compra) > intervalo_medio_dias * 1.3
+  ) as atrasado
+from agregado;
 
 -- Vendas por canal (presencial vs ecommerce vs ifood)
 create view vw_vendas_por_canal as

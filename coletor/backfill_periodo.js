@@ -199,14 +199,14 @@ async function sincronizarClientes(client) {
   const linhas = await buscarTudo('/cliente/obter-todos-v1');
   const colunas = [
     'codigo', 'nome', 'numero_cpf_cnpj', 'codigo_cidade', 'email', 'cep', 'estado',
-    'fone', 'bairro', 'logradouro', 'numero_endereco', 'ativo', 'grupo', 'empresa_convenio',
+    'fone', 'bairro', 'logradouro', 'numero_endereco', 'ativo', 'data_nascimento', 'grupo', 'empresa_convenio',
   ];
   const total = await upsertLote(client, {
     tabela: 'clientes',
     colunas,
     linhas: linhas.map((c) => [
       c.codigo, c.nome, c.numeroCpfCnpj, c.codigoCidade, c.email, c.cep, c.estado,
-      c.fone, c.bairro, c.logradouro, c.numeroEndereco, c.ativo, c.grupo ?? null, c.empresaConvenio ?? null,
+      c.fone, c.bairro, c.logradouro, c.numeroEndereco, c.ativo, c.dataNascimento ?? null, c.grupo ?? null, c.empresaConvenio ?? null,
     ]),
     conflito: 'codigo',
     atualizarColunas: colunas.slice(1),
@@ -219,7 +219,11 @@ async function sincronizarClientes(client) {
 // coisa. codigoBarras vem como int64 na API; nossa coluna é text.
 async function sincronizarProdutos(client) {
   const linhas = await buscarTudo('/produto/obter-todos-v1');
-  const colunas = ['codigo', 'codigo_barras', 'nome', 'categoria', 'marca', 'preco_venda', 'custo_medio', 'estoque_atual'];
+  // categoria = nomeCategoria (tipo de uso, ex. "Uso Adulto" — não é
+  // categoria de produto de verdade); grupo = nomeGrupo (esse sim é
+  // útil pra filtro, ex. "Analgésicos", "Fraldas") — campos separados
+  // de propósito, achado 01/08/2026 que estavam sendo conflados.
+  const colunas = ['codigo', 'codigo_barras', 'nome', 'categoria', 'grupo', 'marca', 'preco_venda', 'custo_medio', 'estoque_atual'];
   const total = await upsertLote(client, {
     tabela: 'produto_catalogo',
     colunas,
@@ -227,7 +231,8 @@ async function sincronizarProdutos(client) {
       p.codigo,
       p.codigoBarras != null ? String(p.codigoBarras) : null,
       p.nome,
-      p.nomeCategoria ?? p.nomeGrupo ?? null,
+      p.nomeCategoria ?? null,
+      p.nomeGrupo ?? null,
       p.nomeLaboratorio ?? null,
       p.valorVenda ?? 0,
       p.valorCustoMedio ?? p.valorCusto ?? 0,

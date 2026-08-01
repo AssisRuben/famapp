@@ -91,13 +91,13 @@ export function AlertasScreen() {
                         Última vez em {formatDateBR(cliente.ultimaCompraProduto)}
                       </Text>
                     </View>
-                    {cliente.telefone && (
+                    {cliente.telefone ? (
                       <WhatsAppButton
                         compact
                         telefone={cliente.telefone}
                         mensagem={mensagemPromocao(alerta, cliente.nomeCliente, cliente.ultimaCompraProduto)}
                       />
-                    )}
+                    ) : null}
                   </View>
                 ))}
               </View>

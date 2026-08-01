@@ -99,12 +99,12 @@ export function ChecklistScreen() {
               <Text style={[styles.itemTexto, item.concluida && styles.itemTextoConcluido]}>
                 {item.atividade.titulo}
               </Text>
-              {item.atividade.horario && (
+              {item.atividade.horario ? (
                 <View style={styles.horarioBadge}>
                   <Ionicons name="notifications-outline" size={12} color={colors.navy} />
                   <Text style={styles.horarioBadgeTexto}>{item.atividade.horario}</Text>
                 </View>
-              )}
+              ) : null}
             </Card>
           </Pressable>
         ))

@@ -5,12 +5,14 @@ import {
   Campanha,
   ChecklistItemStatus,
   ClienteCompradorPromocao,
+  ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
   FaixaComissao,
+  HistoricoCompraCliente,
   ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
@@ -22,6 +24,7 @@ import {
   ProdutoCatalogo,
   ProdutoElegibilidade,
   ProdutoPromocaoAlerta,
+  ProdutoRecorrenteCliente,
   RankingVendedorDia,
   ResumoClientesInatividade,
   SalvarCampanhaInput,
@@ -404,6 +407,96 @@ class MockRepository implements DataRepository {
   async getResumoClientesInatividade(profile: Profile): Promise<ResumoClientesInatividade> {
     const linhas = await this.getClientesInatividade(profile);
     return { total: linhas.length, inativos: linhas.filter((l) => l.inativo).length };
+  }
+
+  async getClientesDoVendedor(profile: Profile): Promise<ClienteDoVendedor[]> {
+    if (profile.codigoVendedor == null) return delay([]);
+    const doVendedor = vendaItensDetalheSeed.filter((v) => v.codigoVendedor === profile.codigoVendedor);
+    const porCliente = new Map<number, { valorTotal: number; ultimaCompra: string }>();
+    for (const item of doVendedor) {
+      const produto = produtosSeed.find((p) => p.codigo === item.codigoProduto);
+      const valor = (produto?.precoAtual ?? 0) * item.quantidade;
+      const data = dataDiasAtras(item.diasAtras);
+      const atual = porCliente.get(item.codigoCliente);
+      porCliente.set(item.codigoCliente, {
+        valorTotal: round2((atual?.valorTotal ?? 0) + valor),
+        ultimaCompra: atual && atual.ultimaCompra > data ? atual.ultimaCompra : data,
+      });
+    }
+    const linhas = Array.from(porCliente.entries())
+      .map(([codigo, agregado]) => ({
+        codigo,
+        nome: nomeCliente(codigo),
+        telefone: telefoneCliente(codigo),
+        email: null,
+        dataNascimento: null,
+        ...agregado,
+      }))
+      .sort((a, b) => b.ultimaCompra.localeCompare(a.ultimaCompra));
+    return delay(linhas);
+  }
+
+  async getHistoricoComprasCliente(_profile: Profile, codigoCliente: number): Promise<HistoricoCompraCliente[]> {
+    const linhas = vendaItensDetalheSeed
+      .filter((v) => v.codigoCliente === codigoCliente)
+      .map((item, indice) => {
+        const produto = produtosSeed.find((p) => p.codigo === item.codigoProduto);
+        return {
+          itemId: indice + 1,
+          vendaId: indice + 1,
+          dataEmissao: dataDiasAtras(item.diasAtras),
+          codigoProduto: item.codigoProduto,
+          nomeProduto: produto?.nome ?? `Produto ${item.codigoProduto}`,
+          quantidade: item.quantidade,
+          valorTotal: round2((produto?.precoAtual ?? 0) * item.quantidade),
+        };
+      })
+      .sort((a, b) => b.dataEmissao.localeCompare(a.dataEmissao))
+      .slice(0, 5);
+    return delay(linhas);
+  }
+
+  async getProdutosRecorrentesDoVendedor(profile: Profile): Promise<ProdutoRecorrenteCliente[]> {
+    if (profile.codigoVendedor == null) return delay([]);
+    const doVendedor = vendaItensDetalheSeed.filter((v) => v.codigoVendedor === profile.codigoVendedor);
+    const porChave = new Map<string, { codigoCliente: number; codigoProduto: number; datas: string[] }>();
+    for (const item of doVendedor) {
+      const chave = `${item.codigoCliente}-${item.codigoProduto}`;
+      const atual = porChave.get(chave) ?? { codigoCliente: item.codigoCliente, codigoProduto: item.codigoProduto, datas: [] };
+      atual.datas.push(dataDiasAtras(item.diasAtras));
+      porChave.set(chave, atual);
+    }
+    const linhas = Array.from(porChave.values()).map(({ codigoCliente, codigoProduto, datas }) => {
+      const produto = produtosSeed.find((p) => p.codigo === codigoProduto);
+      const ordenadas = datas.slice().sort();
+      const ultimaCompra = ordenadas[ordenadas.length - 1];
+      const qtdCompras = ordenadas.length;
+      const diasDesdeUltimaCompra = Math.round(
+        (Date.now() - new Date(ultimaCompra).getTime()) / 86400000
+      );
+      const intervaloMedioDias =
+        qtdCompras >= 2
+          ? Math.round(
+              (new Date(ultimaCompra).getTime() - new Date(ordenadas[0]).getTime()) / 86400000 / (qtdCompras - 1)
+            )
+          : null;
+      const recorrente = qtdCompras >= 2;
+      const atrasado = recorrente && intervaloMedioDias != null && diasDesdeUltimaCompra > intervaloMedioDias * 1.3;
+      return {
+        codigoCliente,
+        codigoProduto,
+        nomeProduto: produto?.nome ?? `Produto ${codigoProduto}`,
+        categoria: null,
+        grupo: null,
+        qtdCompras,
+        ultimaCompra,
+        intervaloMedioDias,
+        diasDesdeUltimaCompra,
+        recorrente,
+        atrasado,
+      };
+    });
+    return delay(linhas);
   }
 
   async getProdutosEmPromocao(_profile: Profile): Promise<ProdutoPromocaoAlerta[]> {
