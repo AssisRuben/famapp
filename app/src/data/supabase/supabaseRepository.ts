@@ -1,4 +1,5 @@
 import type { User } from '@supabase/supabase-js';
+import { File as ExpoFile } from 'expo-file-system';
 import { supabase } from './client';
 import { DataRepository } from '../repository';
 import {
@@ -13,6 +14,7 @@ import {
   DesempenhoVendedorSemanal,
   FaixaComissao,
   HistoricoCompraCliente,
+  IdentificacaoCompradorVendedor,
   ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
@@ -35,6 +37,7 @@ import {
   SugestaoCompra,
   TipoReceita,
   VendaReceitaPendente,
+  VendaSemIdentificacaoComprador,
 } from '../../types/domain';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
@@ -450,7 +453,22 @@ class SupabaseRepository implements DataRepository {
     const { data, error } = await supabase.from('vw_vendas_receita_status').select('*');
     if (error) throw error;
 
-    const linhas: VendaReceitaPendente[] = (data ?? []).map((r) => ({
+    const linhas = data ?? [];
+
+    // foto_url na view é só o path dentro do bucket (bucket "receitas" é
+    // privado) — precisa virar signed URL pra <Image> conseguir carregar.
+    // createSignedUrls (plural) resolve todas de uma vez, 1 chamada só,
+    // em vez de 1 request por item anexado.
+    const paths = [...new Set(linhas.map((r) => r.foto_url).filter((p): p is string => !!p))];
+    const urlPorPath = new Map<string, string>();
+    if (paths.length > 0) {
+      const { data: assinadas } = await supabase.storage.from('receitas').createSignedUrls(paths, 60 * 60);
+      for (const item of assinadas ?? []) {
+        if (item.path && item.signedUrl) urlPorPath.set(item.path, item.signedUrl);
+      }
+    }
+
+    const resultado: VendaReceitaPendente[] = linhas.map((r) => ({
       itemId: String(r.venda_item_id),
       dataVenda: r.data_venda,
       codigoProduto: r.codigo_produto,
@@ -462,14 +480,52 @@ class SupabaseRepository implements DataRepository {
       nomeVendedor: r.nome_vendedor,
       receitaAnexada: r.receita_anexada,
       receitaDataAnexo: r.data_anexo,
-      receitaFotoUri: r.foto_url,
+      receitaFotoUri: r.foto_url ? urlPorPath.get(r.foto_url) ?? null : null,
     }));
 
-    linhas.sort((a, b) => {
+    resultado.sort((a, b) => {
       if (a.receitaAnexada !== b.receitaAnexada) return a.receitaAnexada ? 1 : -1;
       return b.dataVenda.localeCompare(a.dataVenda);
     });
-    return linhas;
+    return resultado;
+  }
+
+  async getIdentificacaoCompradorPorVendedor(_profile: Profile): Promise<IdentificacaoCompradorVendedor[]> {
+    const { data, error } = await supabase.from('vw_receita_identificacao_comprador').select('*');
+    if (error) throw error;
+
+    return (data ?? [])
+      .map((r) => ({
+        codigoVendedor: r.codigo_vendedor,
+        nomeVendedor: r.nome_vendedor,
+        totalVendasControladas: r.total_vendas_controladas,
+        vendasSemIdentificacao: r.vendas_sem_identificacao,
+        percentualSemIdentificacao:
+          r.total_vendas_controladas > 0
+            ? Math.round((r.vendas_sem_identificacao / r.total_vendas_controladas) * 1000) / 10
+            : 0,
+      }))
+      .sort((a, b) => b.percentualSemIdentificacao - a.percentualSemIdentificacao);
+  }
+
+  async getVendasSemIdentificacaoComprador(
+    _profile: Profile,
+    codigoVendedor: number
+  ): Promise<VendaSemIdentificacaoComprador[]> {
+    const { data, error } = await supabase
+      .from('vw_vendas_sem_identificacao_comprador')
+      .select('*')
+      .eq('codigo_vendedor', codigoVendedor);
+    if (error) throw error;
+
+    return (data ?? []).map((r) => ({
+      itemId: String(r.venda_item_id),
+      dataVenda: r.data_venda,
+      horaVenda: r.hora_emissao ?? null,
+      numeroNota: r.numero_nota,
+      nomeProduto: r.nome_produto,
+      motivo: r.motivo as 'sem_cliente' | 'proprio_cpf',
+    }));
   }
 
   // Convenção de path fixada em storage_setup.sql: as policies do bucket
@@ -487,9 +543,11 @@ class SupabaseRepository implements DataRepository {
     let fotoUrl: string | null = null;
     if (info.fotoUri) {
       const path = `${item.codigo_vendedor}/${itemId}.jpg`;
-      const resposta = await fetch(info.fotoUri);
-      const blob = await resposta.blob();
-      const { error: uploadError } = await supabase.storage.from('receitas').upload(path, blob, {
+      // fetch(uri).blob() pra arquivo local ficou pouco confiável no
+      // SDK 57 (Nova Arquitetura) — usa a API nova do expo-file-system
+      // (File implementa Blob e expõe .arrayBuffer() direto).
+      const arrayBuffer = await new ExpoFile(info.fotoUri).arrayBuffer();
+      const { error: uploadError } = await supabase.storage.from('receitas').upload(path, arrayBuffer, {
         contentType: 'image/jpeg',
         upsert: true,
       });

@@ -13,6 +13,7 @@ import {
   DesempenhoVendedorSemanal,
   FaixaComissao,
   HistoricoCompraCliente,
+  IdentificacaoCompradorVendedor,
   ItemPrecificacao,
   MetaSemana,
   MetaVendedor,
@@ -34,6 +35,7 @@ import {
   SugestaoCompra,
   TipoReceita,
   VendaReceitaPendente,
+  VendaSemIdentificacaoComprador,
 } from '../../types/domain';
 import {
   GESTOR_EMAIL,
@@ -571,6 +573,60 @@ class MockRepository implements DataRepository {
     });
 
     return delay(visivel);
+  }
+
+  async getIdentificacaoCompradorPorVendedor(profile: Profile): Promise<IdentificacaoCompradorVendedor[]> {
+    const produtosComReceita = new Set(produtosSeed.filter((p) => p.exigeReceita).map((p) => p.codigo));
+    const porVendedor = new Map<number, { nome: string; total: number; semIdentificacao: number }>();
+
+    for (const v of vendaItensDetalheSeed) {
+      if (!produtosComReceita.has(v.codigoProduto)) continue;
+      const atual = porVendedor.get(v.codigoVendedor) ?? {
+        nome: nomeVendedor(v.codigoVendedor),
+        total: 0,
+        semIdentificacao: 0,
+      };
+      atual.total += 1;
+      if (v.codigoCliente == null) atual.semIdentificacao += 1;
+      porVendedor.set(v.codigoVendedor, atual);
+    }
+
+    const linhas: IdentificacaoCompradorVendedor[] = Array.from(porVendedor.entries()).map(([codigoVendedor, v]) => ({
+      codigoVendedor,
+      nomeVendedor: v.nome,
+      totalVendasControladas: v.total,
+      vendasSemIdentificacao: v.semIdentificacao,
+      percentualSemIdentificacao: v.total > 0 ? Math.round((v.semIdentificacao / v.total) * 1000) / 10 : 0,
+    }));
+
+    const visivel = visivelParaPerfil(profile, linhas);
+    visivel.sort((a, b) => b.percentualSemIdentificacao - a.percentualSemIdentificacao);
+    return delay(visivel);
+  }
+
+  async getVendasSemIdentificacaoComprador(
+    profile: Profile,
+    codigoVendedor: number
+  ): Promise<VendaSemIdentificacaoComprador[]> {
+    const podeVer = profile.role === 'gestor' || profile.codigoVendedor === codigoVendedor;
+    if (!podeVer) return delay([]);
+
+    const produtosComReceita = new Set(produtosSeed.filter((p) => p.exigeReceita).map((p) => p.codigo));
+    const linhas: VendaSemIdentificacaoComprador[] = vendaItensDetalheSeed
+      .filter((v) => v.codigoVendedor === codigoVendedor && produtosComReceita.has(v.codigoProduto) && v.codigoCliente == null)
+      .map((v) => {
+        const produto = produtosSeed.find((p) => p.codigo === v.codigoProduto)!;
+        return {
+          itemId: v.id,
+          dataVenda: dataDiasAtras(v.diasAtras),
+          horaVenda: null,
+          numeroNota: Number(v.id) || 0,
+          nomeProduto: produto.nome,
+          motivo: 'sem_cliente' as const,
+        };
+      });
+
+    return delay(linhas);
   }
 
   async anexarReceita(itemId: string, info: { tipo: TipoReceita; fotoUri: string | null }): Promise<void> {

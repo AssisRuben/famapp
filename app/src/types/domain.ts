@@ -226,6 +226,31 @@ export interface VendaReceitaPendente {
   receitaFotoUri: string | null;
 }
 
+// Compliance: venda de produto controlado sem identificação real do
+// comprador — sem cliente na venda, OU cliente = o próprio vendedor
+// (usado como atalho pra não pedir o CPF de quem comprou de verdade).
+// Alimenta o card "Venda controlada sem comprador" em Alertas
+// (02/08/2026, achado analisando os dados reais com o usuário).
+export interface IdentificacaoCompradorVendedor {
+  codigoVendedor: number;
+  nomeVendedor: string;
+  totalVendasControladas: number;
+  vendasSemIdentificacao: number;
+  percentualSemIdentificacao: number;
+}
+
+// Drill-down de IdentificacaoCompradorVendedor: a venda específica
+// por trás do número (clicar no vendedor no card de Alertas mostra
+// essa lista — nota, data, produto, motivo).
+export interface VendaSemIdentificacaoComprador {
+  itemId: string;
+  dataVenda: string;
+  horaVenda: string | null;
+  numeroNota: number;
+  nomeProduto: string;
+  motivo: 'sem_cliente' | 'proprio_cpf';
+}
+
 // ============================================================
 // METAS — mensal + 4 buckets semanais fixos (1–7, 8–14, 15–21,
 // 22–fim do mês).

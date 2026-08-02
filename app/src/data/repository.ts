@@ -26,10 +26,12 @@ import {
   SalvarCampanhaInput,
   SalvarMetaInput,
   StatusSincronizacao,
+  IdentificacaoCompradorVendedor,
   SugestaoCampanhaParams,
   SugestaoCompra,
   TipoReceita,
   VendaReceitaPendente,
+  VendaSemIdentificacaoComprador,
 } from '../types/domain';
 
 /**
@@ -85,6 +87,17 @@ export interface DataRepository {
   // Fila de receitas: aqui sim segue a mesma regra de vendedor-vê-só-o-seu.
   getVendasComReceita(profile: Profile): Promise<VendaReceitaPendente[]>;
   anexarReceita(itemId: string, info: { tipo: TipoReceita; fotoUri: string | null }): Promise<void>;
+
+  // Compliance: % de venda de controlado sem identificação real do
+  // comprador, por vendedor — card "Venda controlada sem comprador" em Alertas.
+  // Gestor vê todos, vendedor só a própria linha (dado sensível, ao
+  // contrário do resto do app — ver comentário na view).
+  getIdentificacaoCompradorPorVendedor(profile: Profile): Promise<IdentificacaoCompradorVendedor[]>;
+  // Drill-down: as vendas específicas por trás do número de um vendedor.
+  getVendasSemIdentificacaoComprador(
+    profile: Profile,
+    codigoVendedor: number
+  ): Promise<VendaSemIdentificacaoComprador[]>;
 
   // Metas: vendedor só as próprias, gestor todas. `salvarMeta` é usado
   // pela tela de administração (gestor-only na UI).

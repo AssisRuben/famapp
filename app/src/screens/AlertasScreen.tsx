@@ -11,11 +11,18 @@ import { formatBRL, formatDateBR } from '../lib/format';
 import {
   ClienteDoVendedor,
   HistoricoCompraCliente,
+  IdentificacaoCompradorVendedor,
   MetaVendedor,
   ProdutoPromocaoAlerta,
   ProdutoRecorrenteCliente,
   VendaReceitaPendente,
+  VendaSemIdentificacaoComprador,
 } from '../types/domain';
+
+const MOTIVO_LABEL: Record<VendaSemIdentificacaoComprador['motivo'], string> = {
+  sem_cliente: 'Sem cliente na venda',
+  proprio_cpf: 'No CPF do próprio vendedor',
+};
 
 // Reaproveitada nas 3 listas de Alertas que mostram cliente
 // (aniversário, alto valor sumindo, e dentro de promoção) — mesmo
@@ -90,6 +97,74 @@ function LinhaClienteComHistorico({
   );
 }
 
+// Drill-down do card "Venda controlada sem comprador": clica no
+// vendedor, expande as vendas específicas (nota, data, produto,
+// motivo) — mesmo padrão de LinhaClienteComHistorico acima, mas sem
+// ação de WhatsApp (não faz sentido aqui, é autoconferência/cobrança
+// interna, não contato com cliente).
+function LinhaVendedorSemComprador({ vendedor }: { vendedor: IdentificacaoCompradorVendedor }) {
+  const { profile } = useAuth();
+  const [aberto, setAberto] = useState(false);
+  const [vendas, setVendas] = useState<VendaSemIdentificacaoComprador[]>([]);
+  const [carregando, setCarregando] = useState(false);
+
+  const alternar = async () => {
+    if (aberto) {
+      setAberto(false);
+      return;
+    }
+    setAberto(true);
+    if (vendas.length > 0 || !profile) return;
+    setCarregando(true);
+    try {
+      setVendas(await repository.getVendasSemIdentificacaoComprador(profile, vendedor.codigoVendedor));
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  return (
+    <View>
+      <Pressable style={styles.itemRow} onPress={alternar}>
+        <View style={styles.itemInfo}>
+          <Text style={styles.itemNome}>{vendedor.nomeVendedor}</Text>
+          <Text style={styles.itemDetalhe}>
+            {vendedor.vendasSemIdentificacao} de {vendedor.totalVendasControladas} vendas de controlado
+          </Text>
+        </View>
+        <View style={styles.itemAcoes}>
+          <Text style={styles.percentualDestaque}>{vendedor.percentualSemIdentificacao.toFixed(0)}%</Text>
+          <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+        </View>
+      </Pressable>
+      {aberto && (
+        <View style={styles.historicoPainel}>
+          {carregando ? (
+            <ActivityIndicator style={{ marginTop: 6 }} />
+          ) : vendas.length === 0 ? (
+            <Text style={styles.empty}>Nenhuma venda encontrada.</Text>
+          ) : (
+            vendas.map((v) => (
+              <View key={v.itemId} style={styles.historicoRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.historicoProduto} numberOfLines={1}>
+                    Nota {v.numeroNota} · {v.nomeProduto}
+                  </Text>
+                  <Text style={styles.historicoMotivo}>{MOTIVO_LABEL[v.motivo]}</Text>
+                </View>
+                <Text style={styles.historicoData}>
+                  {formatDateBR(v.dataVenda)}
+                  {v.horaVenda ? ` ${v.horaVenda.slice(0, 5)}` : ''}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
 function mensagemPromocao(alerta: ProdutoPromocaoAlerta, nomeCliente: string, ultimaCompra: string): string {
   const { produto } = alerta;
   return `Olá, ${nomeCliente}! 🎉 O ${produto.nome}, que você já levou aqui na Conviva (última vez em ${formatDateBR(
@@ -137,6 +212,7 @@ export function AlertasScreen() {
   const [clientes, setClientes] = useState<ClienteDoVendedor[]>([]);
   const [produtosRecorrentes, setProdutosRecorrentes] = useState<ProdutoRecorrenteCliente[]>([]);
   const [receitas, setReceitas] = useState<VendaReceitaPendente[]>([]);
+  const [identificacaoComprador, setIdentificacaoComprador] = useState<IdentificacaoCompradorVendedor[]>([]);
   const [metas, setMetas] = useState<MetaVendedor[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -151,17 +227,19 @@ export function AlertasScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     const hoje = new Date();
-    const [promocao, cli, prod, rec, met] = await Promise.all([
+    const [promocao, cli, prod, rec, ident, met] = await Promise.all([
       repository.getProdutosEmPromocao(profile),
       repository.getClientesDoVendedor(profile),
       repository.getProdutosRecorrentesDoVendedor(profile),
       repository.getVendasComReceita(profile),
+      repository.getIdentificacaoCompradorPorVendedor(profile),
       repository.getMetas(profile, hoje.getFullYear(), hoje.getMonth() + 1),
     ]);
     setAlertasPromocao(promocao);
     setClientes(cli);
     setProdutosRecorrentes(prod);
     setReceitas(rec);
+    setIdentificacaoComprador(ident);
     setMetas(met);
   }, [profile]);
 
@@ -242,6 +320,13 @@ export function AlertasScreen() {
     { chave: 'aniversario', emoji: '🎂', titulo: 'Aniversário essa semana', contagem: aniversariantes.length, cor: '#0891b2' },
     { chave: 'meta_risco', emoji: '📉', titulo: 'Meta em risco', contagem: metasEmRisco.length, cor: colors.red },
     { chave: 'receita_pendente', emoji: '💊', titulo: 'Receita pendente há tempo', contagem: receitasPendentesAntigas.length, cor: colors.red },
+    {
+      chave: 'sem_comprador',
+      emoji: '🪪',
+      titulo: 'Venda controlada sem comprador',
+      contagem: identificacaoComprador.reduce((soma, v) => soma + v.vendasSemIdentificacao, 0),
+      cor: colors.red,
+    },
     { chave: 'alto_valor_sumindo', emoji: '💸', titulo: 'Cliente de alto valor sumindo', contagem: clientesAltoValorSumindo.length, cor: colors.navy },
     { chave: 'promocao', emoji: '🔔', titulo: 'Produto em promoção', contagem: alertasPromocao.length, cor: colors.success },
   ];
@@ -263,6 +348,7 @@ export function AlertasScreen() {
     <ScrollView
       ref={scrollRef}
       style={styles.container}
+      contentContainerStyle={expandido ? styles.containerContentComFab : undefined}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.title}>🔔 Alertas</Text>
@@ -323,6 +409,24 @@ export function AlertasScreen() {
                 </View>
               </View>
             ))
+          )}
+        </Card>
+      )}
+
+      {expandido === 'sem_comprador' && (
+        <Card>
+          <Text style={styles.listaTitulo}>
+            Venda de produto controlado sem identificação real do comprador (desde julho/2026)
+          </Text>
+          <Text style={styles.listaSubtitulo}>
+            Sem cliente na venda, ou cliente cadastrado é o próprio vendedor.
+          </Text>
+          {identificacaoComprador.filter((v) => v.vendasSemIdentificacao > 0).length === 0 ? (
+            <Text style={styles.empty}>Nenhuma pendência — todo mundo identificando o comprador certinho.</Text>
+          ) : (
+            identificacaoComprador
+              .filter((v) => v.vendasSemIdentificacao > 0)
+              .map((v) => <LinhaVendedorSemComprador key={v.codigoVendedor} vendedor={v} />)
           )}
         </Card>
       )}
@@ -404,6 +508,7 @@ export function AlertasScreen() {
 const styles = StyleSheet.create({
   wrapper: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
+  containerContentComFab: { paddingBottom: 72 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fab: {
     position: 'absolute',
@@ -446,7 +551,9 @@ const styles = StyleSheet.create({
   cardTextos: { flexShrink: 1 },
   cardContagem: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   cardTitulo: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  listaTitulo: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: 10 },
+  listaTitulo: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: 4 },
+  listaSubtitulo: { fontSize: 11, color: colors.textMuted, marginBottom: 10 },
+  percentualDestaque: { fontSize: 16, fontWeight: '700', color: colors.red },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -474,6 +581,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   historicoProduto: { fontSize: 12, color: colors.textPrimary, flex: 1 },
+  historicoMotivo: { fontSize: 11, color: colors.red, marginTop: 1 },
   historicoData: { fontSize: 12, color: colors.textSecondary },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   produtoNome: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, flexShrink: 1, marginRight: 8 },

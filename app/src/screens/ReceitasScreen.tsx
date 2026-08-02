@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -10,6 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { alertar } from '../lib/alert';
@@ -17,10 +19,16 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatDateBR } from '../lib/format';
+import { NOMES_MES } from '../lib/metas';
 import { TIPO_RECEITA_LABEL } from '../data/mock/seed';
 import { VendaReceitaPendente } from '../types/domain';
 
 const TODOS = 'todos';
+
+function labelMes(mesChave: string): string {
+  const [anoStr, mesStr] = mesChave.split('-');
+  return `${NOMES_MES[Number(mesStr) - 1]}/${anoStr}`;
+}
 
 export function ReceitasScreen() {
   const { profile } = useAuth();
@@ -29,6 +37,9 @@ export function ReceitasScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [capturandoId, setCapturandoId] = useState<string | null>(null);
   const [filtroVendedor, setFiltroVendedor] = useState<number | typeof TODOS>(TODOS);
+  const [filtroStatus, setFiltroStatus] = useState<'pendente' | 'anexada' | null>(null);
+  const [filtroMes, setFiltroMes] = useState<string | null>(null);
+  const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -63,6 +74,7 @@ export function ReceitasScreen() {
 
       await repository.anexarReceita(item.itemId, { tipo: item.tipoReceita, fotoUri: uri });
       await load();
+      alertar('Receita anexada', 'Foto salva com sucesso.');
     } catch (erro) {
       alertar('Erro ao anexar receita', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
@@ -78,10 +90,19 @@ export function ReceitasScreen() {
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [itens]);
 
-  const itensFiltrados =
-    profile?.role === 'gestor' && filtroVendedor !== TODOS
-      ? itens.filter((i) => i.codigoVendedor === filtroVendedor)
-      : itens;
+  const mesesNaLista = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of itens) set.add(item.dataVenda.slice(0, 7));
+    return Array.from(set).sort().reverse();
+  }, [itens]);
+
+  const itensFiltrados = itens.filter((i) => {
+    if (profile?.role === 'gestor' && filtroVendedor !== TODOS && i.codigoVendedor !== filtroVendedor) return false;
+    if (filtroStatus === 'pendente' && i.receitaAnexada) return false;
+    if (filtroStatus === 'anexada' && !i.receitaAnexada) return false;
+    if (filtroMes && i.dataVenda.slice(0, 7) !== filtroMes) return false;
+    return true;
+  });
 
   if (loading) {
     return (
@@ -102,6 +123,41 @@ export function ReceitasScreen() {
       <Text style={styles.subtitle}>
         {itensFiltrados.length} vendas de produtos controlados · {pendentes} com receita pendente
       </Text>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtroScroll} contentContainerStyle={styles.filtroRow}>
+        <Pressable
+          style={[styles.filtroChip, filtroStatus === 'pendente' && styles.filtroChipAtivo]}
+          onPress={() => setFiltroStatus((atual) => (atual === 'pendente' ? null : 'pendente'))}
+        >
+          <Text style={[styles.filtroChipTexto, filtroStatus === 'pendente' && styles.filtroChipTextoAtivo]}>
+            Sem receita
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.filtroChip, filtroStatus === 'anexada' && styles.filtroChipAtivo]}
+          onPress={() => setFiltroStatus((atual) => (atual === 'anexada' ? null : 'anexada'))}
+        >
+          <Text style={[styles.filtroChipTexto, filtroStatus === 'anexada' && styles.filtroChipTextoAtivo]}>
+            Com receita
+          </Text>
+        </Pressable>
+      </ScrollView>
+
+      {mesesNaLista.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtroScroll} contentContainerStyle={styles.filtroRow}>
+          {mesesNaLista.map((mesChave) => (
+            <Pressable
+              key={mesChave}
+              style={[styles.filtroChip, filtroMes === mesChave && styles.filtroChipAtivo]}
+              onPress={() => setFiltroMes((atual) => (atual === mesChave ? null : mesChave))}
+            >
+              <Text style={[styles.filtroChipTexto, filtroMes === mesChave && styles.filtroChipTextoAtivo]}>
+                {labelMes(mesChave)}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
 
       {profile?.role === 'gestor' && vendedoresNaLista.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtroScroll} contentContainerStyle={styles.filtroRow}>
@@ -163,7 +219,9 @@ export function ReceitasScreen() {
             {item.receitaAnexada && (
               <View style={styles.anexoBox}>
                 {item.receitaFotoUri ? (
-                  <Image source={{ uri: item.receitaFotoUri }} style={styles.anexoThumb} />
+                  <Pressable onPress={() => setFotoAmpliada(item.receitaFotoUri)}>
+                    <Image source={{ uri: item.receitaFotoUri }} style={styles.anexoThumb} />
+                  </Pressable>
                 ) : (
                   <Text style={styles.anexoIcone}>📄</Text>
                 )}
@@ -204,6 +262,15 @@ export function ReceitasScreen() {
           No navegador, o botão de câmera abre o seletor de arquivo/webcam do próprio browser.
         </Text>
       )}
+
+      <Modal visible={fotoAmpliada != null} transparent animationType="fade" onRequestClose={() => setFotoAmpliada(null)}>
+        <Pressable style={styles.modalFundo} onPress={() => setFotoAmpliada(null)}>
+          {fotoAmpliada ? <Image source={{ uri: fotoAmpliada }} style={styles.modalFoto} resizeMode="contain" /> : null}
+          <Pressable style={styles.modalFechar} onPress={() => setFotoAmpliada(null)} hitSlop={8}>
+            <Ionicons name="close" size={28} color={colors.white} />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -274,4 +341,7 @@ const styles = StyleSheet.create({
   cameraIcone: { fontSize: 16 },
   cameraTexto: { color: colors.white, fontWeight: '600', fontSize: 14 },
   webHint: { fontSize: 11, color: colors.textMuted, textAlign: 'center', marginBottom: 16 },
+  modalFundo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', alignItems: 'center', justifyContent: 'center' },
+  modalFoto: { width: '100%', height: '80%' },
+  modalFechar: { position: 'absolute', top: 48, right: 20, padding: 8 },
 });

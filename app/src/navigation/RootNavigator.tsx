@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { LoginScreen } from '../screens/LoginScreen';
@@ -72,6 +73,7 @@ function AppTabs() {
   const { profile, signOut } = useAuth();
   const ehGestor = profile?.role === 'gestor';
   const [menuAberto, setMenuAberto] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const irPara = (rota: string) => {
     setMenuAberto(false);
@@ -106,7 +108,7 @@ function AppTabs() {
           tabBarActiveTintColor: colors.navy,
           tabBarInactiveTintColor: colors.textMuted,
           tabBarLabelStyle: { fontSize: 10 },
-          tabBarStyle: { height: 68, paddingTop: 6, paddingBottom: 8 },
+          tabBarStyle: { height: 58 + insets.bottom, paddingTop: 6, paddingBottom: insets.bottom + 8 },
           tabBarItemStyle: { flex: 1 },
         }}
       >

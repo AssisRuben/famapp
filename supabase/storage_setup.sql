@@ -5,11 +5,14 @@
 -- devem ser acessíveis via signed URL, gerada sob demanda pelo app
 -- pra quem tem permissão (mesma regra de venda_item_receitas).
 --
--- Convenção de path OBRIGATÓRIA (as policies abaixo dependem disso):
--- receitas/<codigo_vendedor>/<venda_item_id>.jpg
--- O app precisa subir o arquivo nesse formato — é o que permite às
--- policies checarem "o vendedor é dono da pasta" sem precisar de uma
--- tabela extra de mapeamento arquivo -> vendedor.
+-- Convenção de path: receitas/<codigo_vendedor>/<venda_item_id>.jpg
+-- (<codigo_vendedor> é do vendedor DONO DA VENDA original, não de
+-- quem anexou a foto — só organiza em pastas, não limita mais quem
+-- pode escrever, ver policies abaixo).
+--
+-- [02/08/2026] Leitura E escrita liberadas pra qualquer autenticado —
+-- mesma decisão de venda_item_receitas: qualquer vendedor/farmacêutico
+-- de plantão pode anexar a receita, não só quem fez a venda original.
 --
 -- Rodar depois de schema.sql + rls_policies.sql (depende de `profiles`).
 -- ============================================================
@@ -18,64 +21,30 @@ insert into storage.buckets (id, name, public)
 values ('receitas', 'receitas', false)
 on conflict (id) do nothing;
 
--- SELECT: vendedor só lê fotos da própria pasta (storage.foldername
--- devolve um array dos segmentos do path; [1] é o primeiro segmento
--- depois do nome do bucket, ou seja, <codigo_vendedor>); gestor lê tudo.
-create policy "receitas storage: select proprio ou gestor"
+create policy "receitas storage: usuarios autenticados leem"
 on storage.objects for select
 using (
   bucket_id = 'receitas'
-  and exists (
-    select 1 from profiles p
-    where p.id = auth.uid()
-      and (
-        p.role = 'gestor'
-        or p.codigo_vendedor::text = (storage.foldername(name))[1]
-      )
-  )
+  and exists (select 1 from profiles p where p.id = auth.uid())
 );
 
--- INSERT: vendedor só sobe foto na própria pasta; gestor em qualquer uma.
-create policy "receitas storage: insert proprio ou gestor"
+create policy "receitas storage: usuarios autenticados inserem"
 on storage.objects for insert
 with check (
   bucket_id = 'receitas'
-  and exists (
-    select 1 from profiles p
-    where p.id = auth.uid()
-      and (
-        p.role = 'gestor'
-        or p.codigo_vendedor::text = (storage.foldername(name))[1]
-      )
-  )
+  and exists (select 1 from profiles p where p.id = auth.uid())
 );
 
--- UPDATE/DELETE: mesmo padrão — útil se o vendedor precisar substituir
--- uma foto (receita ilegível) sem reabrir chamado com o gestor.
-create policy "receitas storage: update proprio ou gestor"
+create policy "receitas storage: usuarios autenticados atualizam"
 on storage.objects for update
 using (
   bucket_id = 'receitas'
-  and exists (
-    select 1 from profiles p
-    where p.id = auth.uid()
-      and (
-        p.role = 'gestor'
-        or p.codigo_vendedor::text = (storage.foldername(name))[1]
-      )
-  )
+  and exists (select 1 from profiles p where p.id = auth.uid())
 );
 
-create policy "receitas storage: delete proprio ou gestor"
+create policy "receitas storage: usuarios autenticados deletam"
 on storage.objects for delete
 using (
   bucket_id = 'receitas'
-  and exists (
-    select 1 from profiles p
-    where p.id = auth.uid()
-      and (
-        p.role = 'gestor'
-        or p.codigo_vendedor::text = (storage.foldername(name))[1]
-      )
-  )
+  and exists (select 1 from profiles p where p.id = auth.uid())
 );

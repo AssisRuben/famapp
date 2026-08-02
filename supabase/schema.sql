@@ -253,11 +253,20 @@ create table produto_catalogo (
   preco_venda numeric(12,2) not null,
   custo_medio numeric(12,2) not null,
   estoque_atual integer not null default 0,
+  -- ProdutoIntegracaoDto.tipoLista — classificação regulatória
+  -- (Portaria 344/98): null/vazio = comum, "T" = antimicrobiano
+  -- (retenção de receita), qualquer outro valor (A1/A2/A3/B1/B2/
+  -- C1..C5) = controle especial (psicotrópico etc.). Confirmado
+  -- 02/08/2026 comparando produto comum vs. grupos ETICO/GENERICO
+  -- CONTROLADOS e ANTIMICROBIANOS — é a Trier já mandando pronto se
+  -- o produto exige receita, sem precisar de curadoria manual.
+  tipo_lista text,
   updated_at timestamptz default now()
 );
 
 create index idx_produto_catalogo_categoria on produto_catalogo (categoria);
 create index idx_produto_catalogo_grupo on produto_catalogo (grupo);
+create index idx_produto_catalogo_tipo_lista on produto_catalogo (tipo_lista) where tipo_lista is not null;
 
 -- ============================================================
 -- FORNECEDORES / COMPRAS — espelha FornecedorIntegracaoDto e
@@ -720,13 +729,24 @@ group by vi.codigo_produto;
 -- Status de receita dos produtos controlados vendidos (tela "Receitas"
 -- do app). security_invoker=true (ver rls_policies.sql): respeita a
 -- RLS de vendas/venda_itens, então vendedor só vê os próprios itens.
+--
+-- [02/08/2026] Antes dependia de curadoria manual (tabela `produtos`,
+-- que nunca foi preenchida — "Receita pendente" sempre dava 0). Agora
+-- deriva de produto_catalogo.tipo_lista, que a Trier já manda pronto
+-- pra CADA produto do catálogo — ver comentário na criação da coluna.
+--
+-- Corte em 01/07/2026: controle de receita passa a valer a partir
+-- desse mês, continuando pra frente — histórico anterior é perdoado
+-- (a funcionalidade nunca funcionou de verdade antes, então cobrar
+-- retroativo geraria milhares de "pendência" que não são de verdade
+-- uma falha do vendedor).
 create view vw_vendas_receita_status as
 select
   vi.id as venda_item_id,
   v.data_emissao as data_venda,
-  p.codigo as codigo_produto,
-  p.nome as nome_produto,
-  p.tipo_receita,
+  pc.codigo as codigo_produto,
+  pc.nome as nome_produto,
+  case when trim(pc.tipo_lista) = 'T' then 'antimicrobiano' else 'controle_especial' end as tipo_receita,
   v.codigo_cliente,
   c.nome as nome_cliente,
   v.codigo_vendedor,
@@ -736,10 +756,85 @@ select
   r.foto_url
 from venda_itens vi
 join vendas v on v.id = vi.venda_id
-join produtos p on p.codigo = vi.codigo_produto and p.exige_receita = true
+join produto_catalogo pc on pc.codigo = vi.codigo_produto and nullif(trim(pc.tipo_lista), '') is not null
 left join clientes c on c.codigo = v.codigo_cliente
 left join vendedores vd on vd.codigo = v.codigo_vendedor
-left join venda_item_receitas r on r.venda_item_id = vi.id;
+left join venda_item_receitas r on r.venda_item_id = vi.id
+where v.data_emissao >= '2026-07-01';
+
+-- Compliance: por vendedor, quantas vendas de produto controlado (a
+-- partir de 01/07/2026, mesmo corte de vw_vendas_receita_status) não
+-- têm identificação real do comprador — sem cliente na venda, OU
+-- cliente cadastrado é o PRÓPRIO vendedor (mesmo CPF, comparado sem
+-- pontuação). Achado analisando os dados reais 02/08/2026: alguns
+-- vendedores usam o próprio CPF como atalho em vez de pedir o do
+-- cliente.
+--
+-- DIFERENTE do resto do app (que abre RLS pra todo mundo ver o
+-- resultado de todos): aqui é dado de desempenho/compliance
+-- individual, sensível — gestor vê todo mundo, vendedor só a própria
+-- linha. Por isso o controle de acesso é no próprio WHERE (checando
+-- profiles/auth.uid()), não confia na RLS aberta das tabelas base.
+create view vw_receita_identificacao_comprador as
+select
+  v.codigo_vendedor,
+  vd.nome as nome_vendedor,
+  count(*) as total_vendas_controladas,
+  count(*) filter (
+    where v.codigo_cliente is null
+      or (
+        vd.numero_cpf is not null
+        and c.numero_cpf_cnpj is not null
+        and regexp_replace(c.numero_cpf_cnpj, '\D', '', 'g') = regexp_replace(vd.numero_cpf, '\D', '', 'g')
+      )
+  ) as vendas_sem_identificacao
+from venda_itens vi
+join vendas v on v.id = vi.venda_id
+join produto_catalogo pc on pc.codigo = vi.codigo_produto and nullif(trim(pc.tipo_lista), '') is not null
+left join clientes c on c.codigo = v.codigo_cliente
+left join vendedores vd on vd.codigo = v.codigo_vendedor
+where v.data_emissao >= '2026-07-01'
+  and v.codigo_vendedor is not null
+  and exists (
+    select 1 from profiles p
+    where p.id = auth.uid()
+      and (p.role = 'gestor' or p.codigo_vendedor = v.codigo_vendedor)
+  )
+group by v.codigo_vendedor, vd.nome;
+
+-- Detalhe item a item por trás da view acima (drill-down do card em
+-- Alertas: clicar num vendedor mostra a lista de vendas específicas —
+-- nota, data, produto, motivo). Mesmo controle de acesso no WHERE.
+create view vw_vendas_sem_identificacao_comprador as
+select
+  vi.id as venda_item_id,
+  v.data_emissao as data_venda,
+  v.numero_nota,
+  pc.nome as nome_produto,
+  v.codigo_vendedor,
+  case when v.codigo_cliente is null then 'sem_cliente' else 'proprio_cpf' end as motivo,
+  v.hora_emissao
+from venda_itens vi
+join vendas v on v.id = vi.venda_id
+join produto_catalogo pc on pc.codigo = vi.codigo_produto and nullif(trim(pc.tipo_lista), '') is not null
+left join clientes c on c.codigo = v.codigo_cliente
+left join vendedores vd on vd.codigo = v.codigo_vendedor
+where v.data_emissao >= '2026-07-01'
+  and v.codigo_vendedor is not null
+  and (
+    v.codigo_cliente is null
+    or (
+      vd.numero_cpf is not null
+      and c.numero_cpf_cnpj is not null
+      and regexp_replace(c.numero_cpf_cnpj, '\D', '', 'g') = regexp_replace(vd.numero_cpf, '\D', '', 'g')
+    )
+  )
+  and exists (
+    select 1 from profiles p
+    where p.id = auth.uid()
+      and (p.role = 'gestor' or p.codigo_vendedor = v.codigo_vendedor)
+  )
+order by v.data_emissao desc;
 
 -- Alertas de promoção (tela "Alertas" do app): produtos em promoção e,
 -- pra cada um, os clientes que já compraram antes. Propositalmente SEM

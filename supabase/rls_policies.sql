@@ -163,48 +163,35 @@ using (exists (
 ));
 
 -- venda_item_receitas: escrita pelo próprio app (diferente das outras
--- tabelas de negócio, que só o coletor/service_role escreve). Vendedor
--- só mexe nas receitas dos itens que ele mesmo vendeu; gestor, tudo.
+-- tabelas de negócio, que só o coletor/service_role escreve).
 alter table venda_item_receitas enable row level security;
 
--- Leitura liberada pra todo autenticado (mesma decisão de vendas
--- acima); insert/update continuam restritos a "próprio ou gestor" —
--- só quem atendeu a venda (ou o gestor) deve poder anexar/editar a
--- receita, mesmo que agora todo mundo possa VER a fila inteira.
+-- [02/08/2026] Leitura E escrita liberadas pra qualquer autenticado —
+-- mesma decisão já tomada pra vendas/clientes (todo mundo vê/mexe no
+-- resultado de todos). Antes insert/update exigiam ser o vendedor
+-- dono da venda (ou gestor), mas isso não faz sentido real: um
+-- cliente pode voltar e ser atendido por outro vendedor/farmacêutico
+-- de plantão, que precisa poder anexar a receita mesmo não tendo
+-- feito a venda original.
 create policy "receitas: usuarios autenticados leem"
 on venda_item_receitas for select
 using (exists (
   select 1 from profiles p where p.id = auth.uid()
 ));
 
-create policy "receitas: insert proprio ou gestor"
+create policy "receitas: usuarios autenticados inserem"
 on venda_item_receitas for insert
 with check (exists (
-  select 1
-  from profiles pr
-  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
-  join vendas v on v.id = vi.venda_id
-  where pr.id = auth.uid()
-    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
-create policy "receitas: update proprio ou gestor"
+create policy "receitas: usuarios autenticados atualizam"
 on venda_item_receitas for update
 using (exists (
-  select 1
-  from profiles pr
-  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
-  join vendas v on v.id = vi.venda_id
-  where pr.id = auth.uid()
-    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+  select 1 from profiles p where p.id = auth.uid()
 ))
 with check (exists (
-  select 1
-  from profiles pr
-  join venda_itens vi on vi.id = venda_item_receitas.venda_item_id
-  join vendas v on v.id = vi.venda_id
-  where pr.id = auth.uid()
-    and (pr.role = 'gestor' or pr.codigo_vendedor = v.codigo_vendedor)
+  select 1 from profiles p where p.id = auth.uid()
 ));
 
 -- metas: cadastrada pelo gestor na tela "Metas". Vendedor só lê as
@@ -434,6 +421,8 @@ alter view vw_desempenho_vendedor_diario set (security_invoker = true);
 alter view vw_metricas_vendedor_diario set (security_invoker = true);
 alter view vw_vendas_por_canal set (security_invoker = true);
 alter view vw_vendas_receita_status set (security_invoker = true);
+alter view vw_receita_identificacao_comprador set (security_invoker = true);
+alter view vw_vendas_sem_identificacao_comprador set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
 alter view vw_metas_comissao set (security_invoker = true);
 alter view vw_produto_fornecedor_recente set (security_invoker = true);

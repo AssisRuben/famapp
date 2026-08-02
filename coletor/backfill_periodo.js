@@ -223,7 +223,7 @@ async function sincronizarProdutos(client) {
   // categoria de produto de verdade); grupo = nomeGrupo (esse sim é
   // útil pra filtro, ex. "Analgésicos", "Fraldas") — campos separados
   // de propósito, achado 01/08/2026 que estavam sendo conflados.
-  const colunas = ['codigo', 'codigo_barras', 'nome', 'categoria', 'grupo', 'marca', 'preco_venda', 'custo_medio', 'estoque_atual'];
+  const colunas = ['codigo', 'codigo_barras', 'nome', 'categoria', 'grupo', 'marca', 'preco_venda', 'custo_medio', 'estoque_atual', 'tipo_lista'];
   const total = await upsertLote(client, {
     tabela: 'produto_catalogo',
     colunas,
@@ -237,6 +237,7 @@ async function sincronizarProdutos(client) {
       p.valorVenda ?? 0,
       p.valorCustoMedio ?? p.valorCusto ?? 0,
       p.quantidadeEstoque ?? 0,
+      p.tipoLista ?? null,
     ]),
     conflito: 'codigo',
     atualizarColunas: colunas.slice(1),
@@ -320,12 +321,19 @@ async function upsertLoteSemConflito(client, { tabela, colunas, linhas, tamanhoL
 // sgf-incremental.n8n.json (stub de FK, parsing de hora, mapeamento de
 // venda_com_desconto/venda_ecommerce) — só trocando a interpolação de
 // string por parâmetros e adicionando paginação de verdade.
+// horaEmissao vem como "HH:MM:SS-0300" (hora + fuso, sem data, sem
+// "T") — formato descoberto 02/08/2026 inspecionando a API crua, não
+// documentado. Extrai só o prefixo HH:MM(:SS), ignorando o que vier
+// depois (fuso, milissegundos, "Z" etc.) — funciona tanto pra esse
+// formato quanto pra um datetime ISO completo (usa o que vier depois
+// do "T", se tiver).
 function horaParaPg(bruto) {
   if (bruto === null || bruto === undefined || bruto === '') return null;
   const s = String(bruto);
   const idxT = s.indexOf('T');
-  if (idxT >= 0 && s.length >= idxT + 9) return s.slice(idxT + 1, idxT + 9);
-  if (/^\d{2}:\d{2}(:\d{2})?$/.test(s)) return s.length === 5 ? s + ':00' : s;
+  const alvo = idxT >= 0 ? s.slice(idxT + 1) : s;
+  const match = alvo.match(/^(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (match) return `${match[1]}:${match[2]}:${match[3] ?? '00'}`;
   if (/^\d{1,2}$/.test(s)) return s.padStart(2, '0') + ':00:00';
   return null;
 }
