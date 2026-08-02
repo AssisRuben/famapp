@@ -802,20 +802,25 @@ left join lateral (
     )
 ) realizado on true;
 
--- Comissão do mês (fechamento) — SÓ meta mensal (semana is null), a
--- régua de faixas_comissao não se aplica a semana/dia. margem_bruta_valor
--- é a margem bruta REAL do vendedor no mês inteiro (não proporcional ao
--- valor_realizado da meta — vendedor pode vender fora do que compõe a
--- meta, mas aqui usamos o mesmo período ano/mes por simplicidade e
--- porque é isso que a farmácia comissiona: o mês todo, não só o que
--- bateu meta). faixa_comissao é a de maior piso que o percentual
--- atingido alcança (100%→10%, 90%→8%, ... abaixo de 70%→3%, ver
--- faixas_comissao). security_invoker=true: respeita a RLS de `metas`
--- (via vw_metas_progresso) e de vendas/venda_itens.
--- [01/08/2026] mp.valor_realizado já É margem bruta agora (ver
--- vw_metas_progresso acima) — antes essa view recalculava margem numa
--- lateral separada porque mp.valor_realizado era faturamento; ficou
--- redundante, então passou a reaproveitar direto.
+-- Comissão do mês (estimativa "ao vivo", enquanto o mês não fecha) —
+-- SÓ meta mensal (semana is null). security_invoker=true: respeita a
+-- RLS de `metas` (via vw_metas_progresso) e de vendas/venda_itens.
+--
+-- [01/08/2026] Regra confirmada com a farmácia — NÃO é mais "1 faixa
+-- pro mês inteiro":
+--   - Se a margem bruta do mês bate ≥100% da meta MENSAL, a comissão é
+--     10% FLAT sobre a margem bruta do mês inteiro (regra_aplicada =
+--     'flat_10_mensal').
+--   - Senão, cada SEMANA (1-4) é avaliada por conta própria contra a
+--     própria meta semanal, acha a faixa em faixas_comissao (100%→10%,
+--     90%→8%, 80%→7%, 70%→5%, abaixo de 70%→3%) e aplica a taxa sobre
+--     a margem bruta DAQUELA semana; a comissão do mês é a SOMA das 4
+--     comissões semanais (regra_aplicada = 'soma_semanal').
+-- percentual_comissao aqui é a taxa EFETIVA (comissao_valor dividido
+-- pela margem do mês) — só faz sentido como número único no caso
+-- flat_10_mensal; no soma_semanal é uma média ponderada pra dar uma
+-- noção, não uma "faixa" real (a real está em detalhe_semanas).
+-- detalhe_semanas fica NULL no caso flat_10_mensal (não teve soma).
 create view vw_metas_comissao as
 select
   mp.meta_id,
@@ -827,14 +832,141 @@ select
   mp.valor_realizado,
   round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2) as percentual_atingido,
   mp.valor_realizado as margem_bruta_valor,
-  faixa.percentual_comissao,
-  round(mp.valor_realizado * faixa.percentual_comissao / 100, 2) as comissao_valor
+  round(calc.comissao_valor / nullif(mp.valor_realizado, 0) * 100, 2) as percentual_comissao,
+  calc.comissao_valor,
+  calc.regra_aplicada,
+  calc.detalhe_semanas
 from vw_metas_progresso mp
 join lateral (
-  select percentual_comissao
-  from faixas_comissao
-  where percentual_meta_min <= coalesce(round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2), 0)
-  order by percentual_meta_min desc
-  limit 1
-) faixa on true
+  select
+    case
+      when mp.valor_meta > 0 and mp.valor_realizado >= mp.valor_meta
+        then round(mp.valor_realizado * 0.10, 2)
+      else round(coalesce(semanal.total_comissao, 0), 2)
+    end as comissao_valor,
+    case
+      when mp.valor_meta > 0 and mp.valor_realizado >= mp.valor_meta then 'flat_10_mensal'
+      else 'soma_semanal'
+    end as regra_aplicada,
+    case
+      when mp.valor_meta > 0 and mp.valor_realizado >= mp.valor_meta then null
+      else semanal.detalhe
+    end as detalhe_semanas
+  from (
+    select
+      sum(s.comissao_semana) as total_comissao,
+      jsonb_agg(
+        jsonb_build_object(
+          'semana', s.semana, 'margem', s.margem, 'meta', s.meta,
+          'percentual', s.percentual, 'taxa', s.taxa, 'comissao', s.comissao_semana
+        ) order by s.semana
+      ) as detalhe
+    from (
+      select
+        mps.semana,
+        mps.valor_realizado as margem,
+        mps.valor_meta as meta,
+        round(mps.valor_realizado / nullif(mps.valor_meta, 0) * 100, 2) as percentual,
+        faixa_sem.percentual_comissao as taxa,
+        round(mps.valor_realizado * faixa_sem.percentual_comissao / 100, 2) as comissao_semana
+      from vw_metas_progresso mps
+      join lateral (
+        select percentual_comissao
+        from faixas_comissao
+        where percentual_meta_min <= coalesce(round(mps.valor_realizado / nullif(mps.valor_meta, 0) * 100, 2), 0)
+        order by percentual_meta_min desc
+        limit 1
+      ) faixa_sem on true
+      where mps.codigo_vendedor = mp.codigo_vendedor
+        and mps.ano = mp.ano
+        and mps.mes = mp.mes
+        and mps.semana is not null
+    ) s
+  ) semanal
+) calc on true
 where mp.semana is null;
+
+-- Comissão FECHADA (snapshot congelado, usado pra folha de pagamento)
+-- — preenchida só pela função fechar_comissoes_mes() abaixo, chamada
+-- pelo workflow n8n coletor/fechamento_comissao.n8n.json todo dia às
+-- 22:30 (só age de verdade se for o último dia do mês — farmácia já
+-- fechou e o último sync do dia já rodou). Depois de fechado, o valor
+-- não muda mais mesmo que role algum ajuste de sync depois — é o
+-- número oficial pra pagar o vendedor.
+create table comissoes_fechadas (
+  id bigserial primary key,
+  codigo_vendedor integer not null references vendedores(codigo),
+  ano integer not null,
+  mes integer not null check (mes between 1 and 12),
+  valor_comissao numeric(12,2) not null,
+  margem_bruta_mes numeric(12,2) not null,
+  meta_mensal numeric(12,2) not null,
+  percentual_atingido_mensal numeric(6,2),
+  regra_aplicada text not null check (regra_aplicada in ('flat_10_mensal', 'soma_semanal')),
+  detalhe_semanas jsonb,
+  fechado_em timestamptz not null default now(),
+  unique (codigo_vendedor, ano, mes)
+);
+
+alter table comissoes_fechadas enable row level security;
+
+-- Mais restrito que o resto do app de propósito — é dado de
+-- remuneração, não "resultado de venda" (diferente de vendas/metas,
+-- que foram liberadas pra todo mundo ver o resultado de todos em
+-- 01/08/2026). Vendedor só vê a própria comissão fechada; gestor vê
+-- de todos. Sem policy de insert/update/delete pra authenticated —
+-- só a função de fechamento escreve aqui, via conexão direta do n8n
+-- (mesmo padrão do coletor, que já ignora RLS assim).
+create policy "comissoes_fechadas: select proprio ou gestor"
+on comissoes_fechadas for select
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = comissoes_fechadas.codigo_vendedor)
+));
+
+-- Congela a comissão de todo mundo pro (ano, mes) dado, lendo direto
+-- de vw_metas_comissao (mesma lógica da estimativa "ao vivo" — evita
+-- duplicar a regra em dois lugares). Idempotente (ON CONFLICT).
+create or replace function fechar_comissoes_mes(p_ano integer, p_mes integer)
+returns integer as $$
+declare
+  v_total integer;
+begin
+  insert into comissoes_fechadas (
+    codigo_vendedor, ano, mes, valor_comissao, margem_bruta_mes,
+    meta_mensal, percentual_atingido_mensal, regra_aplicada, detalhe_semanas
+  )
+  select
+    codigo_vendedor, ano, mes, comissao_valor, margem_bruta_valor,
+    valor_meta, percentual_atingido, regra_aplicada, detalhe_semanas
+  from vw_metas_comissao
+  where ano = p_ano and mes = p_mes
+  on conflict (codigo_vendedor, ano, mes) do update set
+    valor_comissao = excluded.valor_comissao,
+    margem_bruta_mes = excluded.margem_bruta_mes,
+    meta_mensal = excluded.meta_mensal,
+    percentual_atingido_mensal = excluded.percentual_atingido_mensal,
+    regra_aplicada = excluded.regra_aplicada,
+    detalhe_semanas = excluded.detalhe_semanas,
+    fechado_em = now();
+  get diagnostics v_total = row_count;
+  return v_total;
+end;
+$$ language plpgsql;
+
+-- Guarda chamada pelo n8n TODO DIA às 22:30 — só executa o fechamento
+-- de verdade se hoje for o último dia do mês corrente (cron comum não
+-- sabe expressar "último dia do mês" direto, meses têm 28 a 31 dias;
+-- rodar isso toda noite e deixar o SQL decidir é a forma confiável).
+create or replace function fechar_comissoes_se_ultimo_dia_do_mes()
+returns void as $$
+declare
+  v_hoje date := current_date;
+  v_ultimo_dia date := (date_trunc('month', current_date) + interval '1 month - 1 day')::date;
+begin
+  if v_hoje = v_ultimo_dia then
+    perform fechar_comissoes_mes(extract(year from v_hoje)::int, extract(month from v_hoje)::int);
+  end if;
+end;
+$$ language plpgsql;

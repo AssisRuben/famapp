@@ -596,6 +596,8 @@ class SupabaseRepository implements DataRepository {
       margemBrutaValor: Number(r.margem_bruta_valor),
       percentualComissao: Number(r.percentual_comissao),
       comissaoValor: Number(r.comissao_valor),
+      regraAplicada: r.regra_aplicada,
+      detalheSemanas: (r.detalhe_semanas ?? null) as ComissaoMensal['detalheSemanas'],
     }));
   }
 

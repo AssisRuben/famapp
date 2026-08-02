@@ -256,13 +256,24 @@ export interface SalvarMetaInput {
 }
 
 // ============================================================
-// COMISSÃO — régua sobre margem bruta pelo percentual da meta MENSAL
-// atingido (não se aplica a semana nem a dia). Espelha
+// COMISSÃO — sobre margem bruta. Se a margem do mês bater 100% da
+// meta MENSAL, comissão = 10% flat sobre o mês inteiro. Senão, soma
+// a comissão de cada semana (cada semana na sua própria faixa,
+// contra a própria meta semanal). Espelha
 // vw_metas_comissao/faixas_comissao no Supabase real.
 // ============================================================
 export interface FaixaComissao {
   percentualMetaMin: number;
   percentualComissao: number;
+}
+
+export interface DetalheSemanaComissao {
+  semana: number;
+  margem: number;
+  meta: number;
+  percentual: number;
+  taxa: number;
+  comissao: number;
 }
 
 export interface ComissaoMensal {
@@ -276,6 +287,8 @@ export interface ComissaoMensal {
   margemBrutaValor: number;
   percentualComissao: number;
   comissaoValor: number;
+  regraAplicada: 'flat_10_mensal' | 'soma_semanal';
+  detalheSemanas: DetalheSemanaComissao[] | null;
 }
 
 // ============================================================

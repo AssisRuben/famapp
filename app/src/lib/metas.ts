@@ -1,3 +1,5 @@
+import { FaixaComissao } from '../types/domain';
+
 export const NOMES_MES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
@@ -47,4 +49,12 @@ export function diasDecorridosNaSemana(ano: number, mes: number, semana: 1 | 2 |
   if (diaAtual < inicio) return 1; // semana futura — evita divisão por 0
   if (diaAtual > fim) return fim - inicio + 1; // semana já encerrada
   return diaAtual - inicio + 1;
+}
+
+// Acha a faixa de comissão pelo % da meta batido (>=100→10%, >=90→8%,
+// >=80→7%, >=70→5%, <70→3% — ver faixas_comissao no banco). `faixas`
+// precisa vir ordenado por percentualMetaMin desc (getFaixasComissao já
+// traz assim); a menor faixa é o piso padrão.
+export function faixaComissaoPara(faixas: FaixaComissao[], percentual: number): FaixaComissao | undefined {
+  return faixas.find((f) => f.percentualMetaMin <= percentual) ?? faixas[faixas.length - 1];
 }

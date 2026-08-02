@@ -637,23 +637,42 @@ class MockRepository implements DataRepository {
     // linha, gestor todas) — mesma regra de visibilidade de vw_metas_comissao.
     const metas = await this.getMetas(profile, ano, mes);
 
+    const faixaPara = (percentual: number): FaixaComissao =>
+      faixasComissaoSeed
+        .filter((f) => f.percentualMetaMin <= percentual)
+        .sort((a, b) => b.percentualMetaMin - a.percentualMetaMin)[0]
+        ?? faixasComissaoSeed[faixasComissaoSeed.length - 1];
+
     const comissoes: ComissaoMensal[] = metas.map((meta) => {
-      const metrica = metricasSeedHoje.find((m) => m.codigoVendedor === meta.codigoVendedor);
-      // O mock só tem métricas de "hoje", não um livro-razão do mês
-      // inteiro — usamos a margem bruta % de hoje como proxy, aplicada
-      // sobre o realizado mensal já mockado (realizadoSeedPadrao).
-      const margemBrutaPct = metrica && metrica.faturamentoLiquido > 0
-        ? (metrica.faturamentoLiquido - metrica.totalCusto) / metrica.faturamentoLiquido
-        : 0.35;
-      const margemBrutaValor = meta.valorRealizadoMensal * margemBrutaPct;
+      // valorRealizadoMensal/valorRealizado de semana JÁ são margem bruta
+      // (vw_metas_progresso troca faturamento por margem) — mock espelha
+      // a mesma unidade, sem proxy de %.
+      const margemBrutaValor = meta.valorRealizadoMensal;
       const percentualAtingido = meta.valorMetaMensal > 0
         ? (meta.valorRealizadoMensal / meta.valorMetaMensal) * 100
         : 0;
 
-      const faixa = faixasComissaoSeed
-        .filter((f) => f.percentualMetaMin <= percentualAtingido)
-        .sort((a, b) => b.percentualMetaMin - a.percentualMetaMin)[0]
-        ?? faixasComissaoSeed[faixasComissaoSeed.length - 1];
+      const bateuMeta = meta.valorMetaMensal > 0 && meta.valorRealizadoMensal >= meta.valorMetaMensal;
+
+      let comissaoValor: number;
+      let regraAplicada: ComissaoMensal['regraAplicada'];
+      let detalheSemanas: ComissaoMensal['detalheSemanas'];
+
+      if (bateuMeta) {
+        comissaoValor = Math.round(margemBrutaValor * 0.10 * 100) / 100;
+        regraAplicada = 'flat_10_mensal';
+        detalheSemanas = null;
+      } else {
+        const semanas = meta.semanas.map((s) => {
+          const percentual = s.valorMeta > 0 ? (s.valorRealizado / s.valorMeta) * 100 : 0;
+          const taxa = faixaPara(percentual).percentualComissao;
+          const comissao = Math.round(s.valorRealizado * (taxa / 100) * 100) / 100;
+          return { semana: s.semana, margem: s.valorRealizado, meta: s.valorMeta, percentual: Math.round(percentual * 100) / 100, taxa, comissao };
+        });
+        comissaoValor = Math.round(semanas.reduce((sum, s) => sum + s.comissao, 0) * 100) / 100;
+        regraAplicada = 'soma_semanal';
+        detalheSemanas = semanas;
+      }
 
       return {
         codigoVendedor: meta.codigoVendedor,
@@ -664,8 +683,10 @@ class MockRepository implements DataRepository {
         valorRealizado: meta.valorRealizadoMensal,
         percentualAtingido: Math.round(percentualAtingido * 100) / 100,
         margemBrutaValor: Math.round(margemBrutaValor * 100) / 100,
-        percentualComissao: faixa.percentualComissao,
-        comissaoValor: Math.round(margemBrutaValor * (faixa.percentualComissao / 100) * 100) / 100,
+        percentualComissao: margemBrutaValor > 0 ? Math.round((comissaoValor / margemBrutaValor) * 10000) / 100 : 0,
+        comissaoValor,
+        regraAplicada,
+        detalheSemanas,
       };
     });
 

@@ -8,11 +8,13 @@ import { MetaProgressBar } from '../components/MetaProgressBar';
 import { CorridaDeVendas } from '../components/CorridaDeVendas';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
 import { formatBRL, formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
-import { diasDecorridosNaSemana, metaDiaria, semanaDoDia } from '../lib/metas';
+import { diasDecorridosNaSemana, faixaComissaoPara, metaDiaria, semanaDoDia } from '../lib/metas';
 import {
+  ComissaoMensal,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
+  FaixaComissao,
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
@@ -57,6 +59,8 @@ export function DashboardScreen() {
   const [metricasSemana, setMetricasSemana] = useState<MetricasVendedorSemanal[]>([]);
   const [desempenhoSemana, setDesempenhoSemana] = useState<DesempenhoVendedorSemanal[]>([]);
   const [metas, setMetas] = useState<MetaVendedor[]>([]);
+  const [comissoesMensal, setComissoesMensal] = useState<ComissaoMensal[]>([]);
+  const [faixasComissao, setFaixasComissao] = useState<FaixaComissao[]>([]);
   const [statusSync, setStatusSync] = useState<StatusSincronizacao[]>([]);
   const [resumoClientes, setResumoClientes] = useState<ResumoClientesInatividade>({ total: 0, inativos: 0 });
   const [periodoMeta, setPeriodoMeta] = useState<PeriodoMeta>('mes');
@@ -71,7 +75,7 @@ export function DashboardScreen() {
     if (!profile) return;
     const ano = hoje.getFullYear();
     const mes = hoje.getMonth() + 1;
-    const [m, d, mm, dm, ms, ds, mt, ss, ci] = await Promise.all([
+    const [m, d, mm, dm, ms, ds, mt, cm, fx, ss, ci] = await Promise.all([
       repository.getMetricasVendedorDiario(profile, data),
       repository.getDesempenhoVendedorDiario(profile, data),
       repository.getMetricasVendedorMensal(profile, ano, mes),
@@ -79,6 +83,8 @@ export function DashboardScreen() {
       repository.getMetricasVendedorSemanal(profile, ano, mes, semanaAtual),
       repository.getDesempenhoVendedorSemanal(profile, ano, mes, semanaAtual),
       repository.getMetas(profile, ano, mes),
+      repository.getComissoesMensal(profile, ano, mes),
+      repository.getFaixasComissao(),
       repository.getStatusSincronizacao(),
       // "Indicadores de gestão" agora aparece pra todo mundo (01/08/2026).
       repository.getResumoClientesInatividade(profile),
@@ -90,6 +96,8 @@ export function DashboardScreen() {
     setMetricasSemana(ms);
     setDesempenhoSemana(ds);
     setMetas(mt);
+    setComissoesMensal(cm);
+    setFaixasComissao(fx);
     setStatusSync(ss);
     setResumoClientes(ci);
   }, [profile, data, semanaAtual]);
@@ -116,7 +124,6 @@ export function DashboardScreen() {
   const totalFaturamento = sum(metricas, (m) => m.faturamentoLiquido);
   const totalBruto = sum(metricas, (m) => m.faturamentoBruto);
   const totalDesconto = sum(metricas, (m) => m.totalDesconto);
-  const totalComissao = sum(metricas, (m) => m.comissaoEstimada);
   const totalCusto = sum(metricas, (m) => m.totalCusto);
   const totalNotas = sum(metricas, (m) => m.qtdNotas);
   const totalItens = sum(desempenho, (d) => d.quantidadeItens);
@@ -130,6 +137,35 @@ export function DashboardScreen() {
   // "realizado" do dia precisa ser margem também (faturamento - custo
   // do dia), senão compara meta de margem contra venda bruta.
   const realizadoHojePorVendedor = new Map(metricas.map((m) => [m.codigoVendedor, m.faturamentoLiquido - m.totalCusto]));
+
+  // Comissão estimada — segue a regra real (>=100% da meta MENSAL =
+  // 10% flat sobre o mês; senão, soma por semana, cada uma na sua
+  // própria faixa). Não é mais o `comissao_estimada` de
+  // vw_metricas_vendedor_diario/semanal/mensal (quebrado: prc_comissao
+  // vem nulo pra vendas recentes da Trier).
+  // Mês: já vem pronto de vw_metas_comissao/getComissoesMensal — vira
+  // definitivo (frozen) depois do fechamento no último dia do mês.
+  const comissaoMesTotal = sum(comissoesMensal, (c) => c.comissaoValor);
+  // Semana: aproximação — cada vendedor na sua faixa pelo % batido NA
+  // SEMANA atual, sem olhar a regra flat_10_mensal (essa só se aplica
+  // no fechamento do mês inteiro).
+  const comissaoSemanaTotal = sum(metas, (m) => {
+    const semana = m.semanas.find((s) => s.semana === semanaAtual);
+    if (!semana || semana.valorMeta <= 0) return 0;
+    const percentual = (semana.valorRealizado / semana.valorMeta) * 100;
+    const taxa = faixaComissaoPara(faixasComissao, percentual)?.percentualComissao ?? 0;
+    return semana.valorRealizado * (taxa / 100);
+  });
+  // Dia: aproximação — não existe faixa "oficial" de dia na regra real,
+  // usa a meta diária (mensal / dias do mês) contra o realizado de hoje.
+  const comissaoDiaTotal = sum(metas, (m) => {
+    const metaHoje = metaDiaria(m.valorMetaMensal, m.ano, m.mes);
+    const realizadoHoje = realizadoHojePorVendedor.get(m.codigoVendedor) ?? 0;
+    if (metaHoje <= 0) return 0;
+    const percentual = (realizadoHoje / metaHoje) * 100;
+    const taxa = faixaComissaoPara(faixasComissao, percentual)?.percentualComissao ?? 0;
+    return realizadoHoje * (taxa / 100);
+  });
 
   // Projeção simples: pega o realizado do mês até hoje (já calculado de
   // verdade em vw_metas_progresso via getMetas — margem bruta, não é
@@ -151,7 +187,6 @@ export function DashboardScreen() {
   const totalFaturamentoMes = sum(metricasMes, (m) => m.faturamentoLiquido);
   const totalBrutoMes = sum(metricasMes, (m) => m.faturamentoBruto);
   const totalDescontoMes = sum(metricasMes, (m) => m.totalDesconto);
-  const totalComissaoMes = sum(metricasMes, (m) => m.comissaoEstimada);
   const totalCustoMes = sum(metricasMes, (m) => m.totalCusto);
   const totalNotasMes = sum(metricasMes, (m) => m.qtdNotas);
   const totalItensMes = sum(desempenhoMes, (d) => d.quantidadeItens);
@@ -168,7 +203,6 @@ export function DashboardScreen() {
   // usado em Metas).
   const totalFaturamentoSemana = sum(metricasSemana, (m) => m.faturamentoLiquido);
   const totalBrutoSemana = sum(metricasSemana, (m) => m.faturamentoBruto);
-  const totalComissaoSemana = sum(metricasSemana, (m) => m.comissaoEstimada);
   const totalCustoSemana = sum(metricasSemana, (m) => m.totalCusto);
   const totalNotasSemana = sum(metricasSemana, (m) => m.qtdNotas);
   const totalItensSemana = sum(desempenhoSemana, (d) => d.quantidadeItens);
@@ -194,7 +228,7 @@ export function DashboardScreen() {
           itensPorAtendimento,
           taxaDesconto,
           comissaoLabel: 'Comissão estimada',
-          comissao: totalComissao,
+          comissao: comissaoDiaTotal,
           vendasLabel: 'Vendas realizadas',
           vendasValor: String(totalNotas),
           margemBruta,
@@ -208,7 +242,7 @@ export function DashboardScreen() {
           itensPorAtendimento: itensPorAtendimentoSemana,
           taxaDesconto: taxaDescontoSemana,
           comissaoLabel: 'Comissão estimada (acum.)',
-          comissao: totalComissaoSemana,
+          comissao: comissaoSemanaTotal,
           vendasLabel: 'Vendas / dia (média)',
           vendasValor: vendasPorDiaSemana.toFixed(1),
           margemBruta: margemBrutaSemana,
@@ -221,7 +255,7 @@ export function DashboardScreen() {
           itensPorAtendimento: itensPorAtendimentoMes,
           taxaDesconto: taxaDescontoMes,
           comissaoLabel: 'Comissão estimada (acum.)',
-          comissao: totalComissaoMes,
+          comissao: comissaoMesTotal,
           vendasLabel: 'Vendas / dia (média)',
           vendasValor: vendasPorDiaMes.toFixed(1),
           margemBruta: margemBrutaMes,

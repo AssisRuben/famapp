@@ -240,17 +240,19 @@ export function MetasScreen() {
                     valorRealizado={meta.valorRealizadoMensal}
                     valorMeta={meta.valorMetaMensal}
                   />
-                  {comissao && (
+                  {comissao ? (
                     <View style={styles.comissaoRow}>
                       <Text style={styles.comissaoTexto}>
-                        💰 Faixa atual: {comissao.percentualComissao}% sobre a margem bruta
+                        💰 {comissao.regraAplicada === 'flat_10_mensal'
+                          ? 'Meta mensal batida: 10% flat'
+                          : `Taxa efetiva: ${comissao.percentualComissao}% (soma por semana)`} sobre a margem bruta
                         ({formatBRL(comissao.margemBrutaValor)})
                       </Text>
                       <Text style={styles.comissaoValor}>
                         ≈ {formatBRL(comissao.comissaoValor)} de comissão no fechamento do mês
                       </Text>
                     </View>
-                  )}
+                  ) : null}
                 </Card>
               );
             })
