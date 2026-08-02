@@ -614,11 +614,21 @@ with compras as (
     coalesce(pc.nome, 'Produto ' || vi.codigo_produto) as nome_produto,
     pc.categoria,
     pc.grupo,
+    v.id as venda_id,
     v.data_emissao
   from vendas v
   join venda_itens vi on vi.venda_id = v.id
   left join produto_catalogo pc on pc.codigo = vi.codigo_produto
   where v.codigo_vendedor is not null and v.codigo_cliente is not null
+    -- taxa de entrega/frete não é produto que o cliente "recompra" —
+    -- some entrar como recorrente/atrasado do jeito errado (é cobrada
+    -- em toda venda com entrega, não por hábito de consumo). grupo é
+    -- inconsistente pra isso (LINHA GERAL, CONVENIENCIA, USO OU
+    -- CONSUMO... também têm produto de verdade), então filtra por
+    -- categoria SERVICOS + nome — coalesce evita excluir produto sem
+    -- match em produto_catalogo (pc.nome/categoria viriam null).
+    and coalesce(pc.categoria, '') <> 'SERVICOS'
+    and coalesce(pc.nome, '') !~* 'entrega|delivery|frete'
 ),
 agregado as (
   select
@@ -628,9 +638,11 @@ agregado as (
     nome_produto,
     categoria,
     grupo,
-    count(*) as qtd_compras,
+    -- distinct venda_id: uma nota com o mesmo produto em 2+ linhas
+    -- (bonificação, lote diferente etc.) não pode contar como 2 compras.
+    count(distinct venda_id) as qtd_compras,
     max(data_emissao) as ultima_compra,
-    (max(data_emissao) - min(data_emissao))::numeric / nullif(count(*) - 1, 0) as intervalo_medio_dias
+    (max(data_emissao) - min(data_emissao))::numeric / nullif(count(distinct venda_id) - 1, 0) as intervalo_medio_dias
   from compras
   group by codigo_vendedor, codigo_cliente, codigo_produto, nome_produto, categoria, grupo
 )

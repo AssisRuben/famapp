@@ -264,12 +264,18 @@ export function ClientesVendedorScreen() {
                     {item.ultimaCompra ? ` · última compra em ${formatDateBR(item.ultimaCompra)}` : ''}
                   </Text>
                   {filtroProdutoAtivo && produtosDoCliente
-                    ? produtosDoCliente.slice(0, 2).map((p) => (
-                        <Text key={p.codigoProduto} style={styles.motivoResgate}>
-                          🔁 {p.nomeProduto} · comprava a cada ~{Math.round(p.intervaloMedioDias ?? 0)}d, já são{' '}
-                          {p.diasDesdeUltimaCompra}d
-                        </Text>
-                      ))
+                    ? produtosDoCliente
+                        .filter((p) => p.recorrente)
+                        .slice(0, 2)
+                        .map((p) => (
+                          <Text key={p.codigoProduto} style={styles.usoContinuoLinha}>
+                            🔁{' '}
+                            <Text style={[styles.usoContinuoNome, p.atrasado && styles.usoContinuoNomeAtrasado]}>
+                              {p.nomeProduto}
+                            </Text>
+                            {' '}· a cada ~{Math.round(p.intervaloMedioDias ?? 0)}d, já são {p.diasDesdeUltimaCompra}d
+                          </Text>
+                        ))
                     : null}
                 </View>
                 <View style={styles.acoes}>
@@ -389,7 +395,9 @@ const styles = StyleSheet.create({
   nome: { fontSize: 15, fontWeight: '500', color: colors.textPrimary },
   detalhe: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   detalheDestaque: { fontSize: 12, color: colors.textPrimary, fontWeight: '600', marginTop: 4 },
-  motivoResgate: { fontSize: 11, color: '#9333ea', marginTop: 3, fontWeight: '600' },
+  usoContinuoLinha: { fontSize: 11, color: colors.textSecondary, marginTop: 3 },
+  usoContinuoNome: { fontWeight: '700', color: '#9333ea' },
+  usoContinuoNomeAtrasado: { color: colors.red },
   acoes: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   painel: {
     borderTopWidth: StyleSheet.hairlineWidth,
