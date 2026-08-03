@@ -132,6 +132,8 @@ export interface HistoricoCompraCliente {
   nomeProduto: string;
   quantidade: number;
   valorTotal: number;
+  codigoVendedor: number | null;
+  nomeVendedor: string | null;
 }
 
 // Espelha vw_clientes_produtos_vendedor — base dos filtros de resgate
@@ -226,6 +228,21 @@ export interface VendaReceitaPendente {
   receitaFotoUri: string | null;
 }
 
+// Espelha vw_vendas_antimicrobiano_recente — vendas de produto
+// classificado como antimicrobiano por categoria/grupo do catálogo
+// (mais abrangente que tipo_lista='T' de VendaReceitaPendente, que
+// tem gap de cadastro real — ver comentário na view). Usado só pro
+// card "Antibiótico vendido" em Alertas (acompanhamento pós-venda),
+// NÃO é sobre retenção de receita.
+export interface VendaAntimicrobianoRecente {
+  itemId: string;
+  dataVenda: string;
+  codigoProduto: number;
+  nomeProduto: string;
+  codigoCliente: number | null;
+  nomeCliente: string;
+}
+
 // Compliance: venda de produto controlado sem identificação real do
 // comprador — sem cliente na venda, OU cliente = o próprio vendedor
 // (usado como atalho pra não pedir o CPF de quem comprou de verdade).
@@ -249,6 +266,34 @@ export interface VendaSemIdentificacaoComprador {
   numeroNota: number;
   nomeProduto: string;
   motivo: 'sem_cliente' | 'proprio_cpf';
+}
+
+// ============================================================
+// CONTATOS — registro de tentativa de contato (ligação/WhatsApp) feita
+// a partir do app, pra não insistir com o mesmo cliente pelo mesmo
+// motivo toda vez que a lista recarrega (03/08/2026). "Tentativa": o
+// app só sabe que o discador/WhatsApp abriu, não que a ligação foi
+// atendida nem que a mensagem foi lida.
+// ============================================================
+export type MotivoContato = 'resgate' | 'aniversario' | 'uso_continuo' | 'alto_valor_sumindo' | 'promocao' | 'antibiotico';
+// 'nao_contatado': não é um jeito de contato de verdade, é o registro
+// automático de "passou 1 semana e ninguém ligou/mandou msg" (só usado
+// no motivo 'antibiotico' — ver antibioticosExpirados em AlertasScreen).
+export type TipoContato = 'whatsapp' | 'ligacao' | 'nao_contatado';
+
+export interface ContatoCliente {
+  codigoCliente: number;
+  motivo: MotivoContato;
+  codigoProduto: number | null;
+  contatadoEm: string;
+}
+
+export interface RegistrarContatoInput {
+  codigoCliente: number;
+  motivo: MotivoContato;
+  tipoContato: TipoContato;
+  codigoProduto?: number | null;
+  codigoVendedor: number | null;
 }
 
 // ============================================================

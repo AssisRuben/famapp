@@ -261,15 +261,43 @@ export function DashboardScreen() {
           margemBruta: margemBrutaMes,
         };
 
-  // Ranking (corrida de vendas) — mesma fonte de dado do card
-  // "Desempenho", só que por vendedor em vez de somada, ordenada por
-  // faturamento. Segue o mesmo período selecionado (periodoDesempenho).
-  const metricasDoPeriodo =
-    periodoDesempenho === 'dia' ? metricas : periodoDesempenho === 'semana' ? metricasSemana : metricasMes;
-  const rankingAtual = metricasDoPeriodo
-    .slice()
-    .sort((a, b) => b.faturamentoLiquido - a.faturamentoLiquido)
-    .map((m) => ({ codigoVendedor: m.codigoVendedor, nomeVendedor: m.nomeVendedor, faturamentoLiquido: m.faturamentoLiquido }));
+  // Ranking (corrida de vendas) por margem bruta em R$. Segue o período
+  // do card "Metas" (periodoMeta), não o de "Desempenho" — o Ranking
+  // fica logo abaixo de Metas na tela, então precisa reagir ao seletor
+  // que está visualmente ao lado dele; antes seguia periodoDesempenho
+  // (seletor de um card diferente, mais acima), o que fazia o Ranking
+  // não mudar quando o usuário trocava Dia/Semana/Mês em Metas (achado
+  // 03/08/2026 com prints mostrando Metas em "Mês" e Ranking parado em
+  // dados diários).
+  //
+  // Pro dia, usa metricas (faturamentoLiquido - totalCusto, critério
+  // documentado em MetricasVendedorDiario). Pra semana/mês, usa a MESMA
+  // fonte que a lista de Metas (meta.semanas[].valorRealizado /
+  // meta.valorRealizadoMensal) em vez de metricasSemana/metricasMes —
+  // são contas de margem realizada diferentes (a de Metas já usa os
+  // buckets fixos de semana 1-7/8-14/15-21/22-fim, ver lib/metas.ts) e
+  // a lista de Metas é a fonte confirmada como correta.
+  //
+  // Parte de `metas` (não das metricas) pra listar TODO mundo, inclusive
+  // quem não vendeu nada no período: as views de metricas são agrupadas
+  // em cima de venda_itens/vendas, então vendedor sem venda no período
+  // simplesmente não gera linha nenhuma pra agrupar — não é filtro, é
+  // ausência de dado pra somar.
+  const metricasPorVendedorHoje = new Map(metricas.map((m) => [m.codigoVendedor, m]));
+  const rankingAtual = metas
+    .map((meta) => {
+      let valor = 0;
+      if (periodoMeta === 'dia') {
+        const m = metricasPorVendedorHoje.get(meta.codigoVendedor);
+        valor = m ? m.faturamentoLiquido - m.totalCusto : 0;
+      } else if (periodoMeta === 'semana') {
+        valor = meta.semanas.find((s) => s.semana === semanaAtual)?.valorRealizado ?? 0;
+      } else {
+        valor = meta.valorRealizadoMensal;
+      }
+      return { codigoVendedor: meta.codigoVendedor, nomeVendedor: meta.nomeVendedor, valor };
+    })
+    .sort((a, b) => b.valor - a.valor);
 
   // mostra a sincronização mais ANTIGA entre as entidades — é o pior
   // caso de "quão desatualizado" algum dado pode estar.
@@ -353,8 +381,8 @@ export function DashboardScreen() {
       <Card>
         <Text style={styles.sectionTitle}>🏆 Ranking</Text>
         <Text style={styles.rankingPeriodo}>
-          {periodoDesempenho === 'dia' ? 'Hoje' : periodoDesempenho === 'semana' ? 'Esta semana' : 'Este mês'}
-          {' · segue o período escolhido em "Desempenho" acima'}
+          {periodoMeta === 'dia' ? 'Hoje' : periodoMeta === 'semana' ? 'Esta semana' : 'Este mês'}
+          {' · segue o período escolhido em "Metas" acima'}
         </Text>
         <CorridaDeVendas ranking={rankingAtual} meuCodigoVendedor={profile?.codigoVendedor} />
       </Card>

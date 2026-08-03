@@ -71,7 +71,13 @@ join lateral (
 left join vendedores vd on vd.codigo = ultima_venda.codigo_vendedor
 where exists (
   select 1 from profiles p where p.id = auth.uid()
-);
+)
+-- Cadastro morto (última compra há 3000+ dias, ~8 anos) não entra na
+-- lista de resgate nem no tile "Clientes inativos" — não tem resgate
+-- razoável depois disso, só polui a lista (03/08/2026). Filtro, não
+-- DELETE: nenhum dado é perdido, cliente/venda continuam intactos no
+-- banco, só somem dessa consulta específica.
+and (current_date - ultima_venda.data_emissao) <= 3000;
 
 -- ============================================================
 -- RLS nas tabelas de negócio
@@ -411,6 +417,26 @@ using (exists (
   select 1 from profiles p where p.id = auth.uid()
 ));
 
+-- contatos_clientes: escrito pelo próprio app quando o vendedor clica
+-- Ligar/WhatsApp (não pelo coletor). Igual a venda_item_receitas —
+-- qualquer autenticado lê e insere (qualquer vendedor pode contatar
+-- qualquer cliente, mesma decisão de escopo do resto do app). Sem
+-- policy de update/delete: é um log de tentativa de contato, não deve
+-- ser editado depois de criado.
+alter table contatos_clientes enable row level security;
+
+create policy "contatos_clientes: usuarios autenticados leem"
+on contatos_clientes for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "contatos_clientes: usuarios autenticados inserem"
+on contatos_clientes for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
 -- ============================================================
 -- VIEWS: por padrão, views no Postgres rodam com o privilégio do
 -- dono (postgres), o que IGNORARIA a RLS das tabelas base. Forçar
@@ -421,6 +447,7 @@ alter view vw_desempenho_vendedor_diario set (security_invoker = true);
 alter view vw_metricas_vendedor_diario set (security_invoker = true);
 alter view vw_vendas_por_canal set (security_invoker = true);
 alter view vw_vendas_receita_status set (security_invoker = true);
+alter view vw_vendas_antimicrobiano_recente set (security_invoker = true);
 alter view vw_receita_identificacao_comprador set (security_invoker = true);
 alter view vw_vendas_sem_identificacao_comprador set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
@@ -434,6 +461,7 @@ alter view vw_desempenho_vendedor_semanal set (security_invoker = true);
 alter view vw_clientes_por_vendedor set (security_invoker = true);
 alter view vw_historico_compras_cliente set (security_invoker = true);
 alter view vw_clientes_produtos_vendedor set (security_invoker = true);
+alter view vw_clientes_produtos set (security_invoker = true);
 -- vw_produtos_promocao_clientes, vw_clientes_inatividade e
 -- vw_ranking_vendedores_dia ficam de propósito SEM security_invoker (ver
 -- comentário de cada uma em schema.sql) — não é esquecimento. Gap

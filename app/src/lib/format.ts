@@ -64,6 +64,43 @@ export function todayISO(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// de/da/do/das/dos não contam como um dos 2 nomes — ficam grudadas no
+// nome seguinte ("MARIA DE LOURDES" -> "Maria de Lourdes", não "Maria
+// De"), sempre minúsculas, do jeito que se escreve de verdade.
+const PREPOSICOES_NOME = new Set(['de', 'da', 'do', 'das', 'dos']);
+
+// Nome pra mensagem de WhatsApp: só os 2 primeiros nomes, Title Case
+// (a Trier manda nome em CAIXA ALTA — "MARCOS ANDRADE" — que soa
+// robótico numa mensagem) e sem hífen (vira espaço, cobre tanto nome
+// composto "ANA-MARIA" quanto sujeira de cadastro tipo "NOME -
+// FILIAL") — pra soar mais como mensagem escrita por humano.
+export function nomeCurto(nomeCompleto: string): string {
+  const palavras = nomeCompleto.replace(/-/g, ' ').trim().split(/\s+/).filter(Boolean);
+  const resultado: string[] = [];
+  let nomesReais = 0;
+
+  for (const palavraOriginal of palavras) {
+    const palavraMinuscula = palavraOriginal.toLowerCase();
+    const ehPreposicao = PREPOSICOES_NOME.has(palavraMinuscula);
+
+    if (ehPreposicao && resultado.length > 0 && nomesReais < 2) {
+      resultado.push(palavraMinuscula);
+      continue;
+    }
+    if (nomesReais >= 2) break;
+    resultado.push(palavraOriginal.charAt(0).toUpperCase() + palavraOriginal.slice(1).toLowerCase());
+    nomesReais += 1;
+  }
+
+  // preposição penduricada no fim sem nome depois (ex.: nome cortado
+  // bem em cima da preposição) fica estranha — tira.
+  while (resultado.length > 0 && PREPOSICOES_NOME.has(resultado[resultado.length - 1])) {
+    resultado.pop();
+  }
+
+  return resultado.join(' ');
+}
+
 export function formatDateHoraBR(iso: string): string {
   const d = new Date(iso);
   const data = d.toLocaleDateString('pt-BR');

@@ -362,6 +362,42 @@ create table vendas_vendedor_diario (
 );
 
 -- ============================================================
+-- CONTATOS_CLIENTES — registro de tentativa de contato (ligação ou
+-- WhatsApp) feita a partir do app pelos botões de Ligar/WhatsApp nas
+-- telas de Clientes/Alertas (03/08/2026). Usado só pra suprimir um
+-- cliente das listas de resgate/aniversário/uso contínuo/alto valor
+-- sumindo/promoção por um tempo depois de contatado, evitando insistir
+-- toda vez que a lista recarrega — ver app/src/lib/contatos.ts pra
+-- janela de supressão de cada motivo.
+--
+-- "Tentativa": sabemos que o discador/WhatsApp abriu, não que a
+-- ligação foi atendida nem que a mensagem foi lida — não dá pra saber
+-- isso de dentro do app.
+--
+-- codigo_produto só é preenchido pra 'uso_continuo'/'promocao'/
+-- 'antibiotico' (qual produto motivou o contato) — sem foreign key de
+-- propósito, mesmo motivo de venda_itens.codigo_produto (nem todo
+-- produto vendido tem linha em produto_catalogo).
+--
+-- tipo_contato = 'nao_contatado' (03/08/2026): não é um contato de
+-- verdade, é gravado sozinho pelo app (card "Antibiótico vendido" em
+-- Alertas) quando passa 1 semana da venda de um antimicrobiano sem
+-- ninguém ligar/mandar WhatsApp — fecha o item da lista e deixa
+-- registrado que a farmácia NÃO conseguiu fazer o acompanhamento.
+-- ============================================================
+create table contatos_clientes (
+  id bigserial primary key,
+  codigo_cliente integer not null references clientes(codigo),
+  motivo text not null check (motivo in ('resgate', 'aniversario', 'uso_continuo', 'alto_valor_sumindo', 'promocao', 'antibiotico')),
+  tipo_contato text not null check (tipo_contato in ('whatsapp', 'ligacao', 'nao_contatado')),
+  codigo_produto integer,
+  codigo_vendedor integer references vendedores(codigo),
+  contatado_em timestamptz not null default now()
+);
+
+create index idx_contatos_clientes_busca on contatos_clientes (codigo_cliente, motivo, contatado_em desc);
+
+-- ============================================================
 -- VIEWS ANALÍTICAS (o app consome estas, não as tabelas cruas)
 -- ============================================================
 
@@ -588,6 +624,11 @@ group by v.codigo_vendedor, c.codigo, c.nome, c.fone, c.email, c.data_nascimento
 -- "Meus clientes" (mostra os últimos 5, filtro de LIMIT fica no app).
 -- Histórico INTEIRO do cliente (qualquer vendedor que atendeu), não só
 -- com quem está vendo a tela, pra dar contexto completo.
+-- codigo_vendedor/nome_vendedor incluídos pra tela "Cliente para
+-- resgate" mostrar quem atendeu cada compra do histórico, ao lado da
+-- data (03/08/2026) — left join em vendedores porque venda pode não
+-- ter vendedor atribuído (mesma inconsistência proposital documentada
+-- em seed_data.sql).
 create view vw_historico_compras_cliente as
 select
   v.codigo_cliente,
@@ -597,10 +638,13 @@ select
   vi.codigo_produto,
   coalesce(pc.nome, 'Produto ' || vi.codigo_produto) as nome_produto,
   vi.quantidade_produtos,
-  vi.valor_total_liquido
+  vi.valor_total_liquido,
+  v.codigo_vendedor,
+  vd.nome as nome_vendedor
 from vendas v
 join venda_itens vi on vi.venda_id = v.id
 left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+left join vendedores vd on vd.codigo = v.codigo_vendedor
 where v.codigo_cliente is not null;
 
 -- Base pros filtros de resgate da tela "Meus clientes" (01/08/2026):
@@ -657,6 +701,59 @@ agregado as (
 )
 select
   codigo_vendedor,
+  codigo_cliente,
+  codigo_produto,
+  nome_produto,
+  categoria,
+  grupo,
+  qtd_compras,
+  ultima_compra,
+  round(intervalo_medio_dias, 1) as intervalo_medio_dias,
+  (current_date - ultima_compra) as dias_desde_ultima_compra,
+  (qtd_compras >= 2) as recorrente,
+  (
+    qtd_compras >= 2
+    and intervalo_medio_dias is not null
+    and (current_date - ultima_compra) > intervalo_medio_dias * 1.3
+  ) as atrasado
+from agregado;
+
+-- Mesma base de vw_clientes_produtos_vendedor, mas agregada por
+-- CLIENTE (não por vendedor) — usada pelos filtros da tela "Cliente
+-- para resgate" (03/08/2026), que mostra todo cliente pra qualquer
+-- vendedor agir, então "recorrente"/"atrasado" precisam somar a compra
+-- do cliente com QUALQUER vendedor, não só a de quem está logado.
+create view vw_clientes_produtos as
+with compras as (
+  select
+    v.codigo_cliente,
+    vi.codigo_produto,
+    coalesce(pc.nome, 'Produto ' || vi.codigo_produto) as nome_produto,
+    pc.categoria,
+    pc.grupo,
+    v.id as venda_id,
+    v.data_emissao
+  from vendas v
+  join venda_itens vi on vi.venda_id = v.id
+  left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+  where v.codigo_cliente is not null
+    and coalesce(pc.categoria, '') <> 'SERVICOS'
+    and coalesce(pc.nome, '') !~* 'entrega|delivery|frete'
+),
+agregado as (
+  select
+    codigo_cliente,
+    codigo_produto,
+    nome_produto,
+    categoria,
+    grupo,
+    count(distinct venda_id) as qtd_compras,
+    max(data_emissao) as ultima_compra,
+    (max(data_emissao) - min(data_emissao))::numeric / nullif(count(distinct venda_id) - 1, 0) as intervalo_medio_dias
+  from compras
+  group by codigo_cliente, codigo_produto, nome_produto, categoria, grupo
+)
+select
   codigo_cliente,
   codigo_produto,
   nome_produto,
@@ -761,6 +858,49 @@ left join clientes c on c.codigo = v.codigo_cliente
 left join vendedores vd on vd.codigo = v.codigo_vendedor
 left join venda_item_receitas r on r.venda_item_id = vi.id
 where v.data_emissao >= '2026-07-01';
+
+-- Vendas de antimicrobiano pra alimentar o card "Antibiótico vendido"
+-- em Alertas (03/08/2026) — acompanhamento pós-venda (ligar/WhatsApp
+-- perguntando como está o tratamento), NÃO é sobre retenção de
+-- receita. DIFERENTE de vw_vendas_receita_status de propósito:
+-- tipo_lista='T' sozinho tem gap de cadastro real (conferido com dado
+-- de produção 03/08/2026 — produto duplicado no Trier, uma entrada
+-- bem cadastrada e outra sem nada preenchido, e é a mal cadastrada que
+-- aparece na venda). categoria/grupo cobrem parte do buraco, mas não
+-- tudo: existem códigos duplicados sem categoria, grupo NEM tipo_lista
+-- preenchidos (ex.: "AZITROMICINA 500MG 5CP REV" cód. 10004 — o
+-- "irmão" cód. 7282 tem tudo certo, mas quem vende usa o 10004).
+--
+-- Por isso tem um 4º critério: nome do princípio ativo (ilike), lista
+-- MANUAL de stopgap enquanto o cadastro duplicado não é corrigido no
+-- Trier. Precisa ser mantida à mão — se aparecer produto novo mal
+-- cadastrado que não bater com nenhum destes nomes, ele continua
+-- invisível pro card até alguém adicionar aqui (ou corrigir na
+-- origem, que é o fix de verdade).
+create view vw_vendas_antimicrobiano_recente as
+select
+  vi.id as venda_item_id,
+  v.data_emissao as data_venda,
+  pc.codigo as codigo_produto,
+  pc.nome as nome_produto,
+  v.codigo_cliente,
+  c.nome as nome_cliente
+from venda_itens vi
+join vendas v on v.id = vi.venda_id
+join produto_catalogo pc on pc.codigo = vi.codigo_produto
+left join clientes c on c.codigo = v.codigo_cliente
+where v.data_emissao >= current_date - interval '30 days'
+  and (
+    pc.categoria = 'ANTIMICROBIANOS'
+    or pc.grupo ilike '%ANTIMICROBIANOS%'
+    or nullif(trim(pc.tipo_lista), '') = 'T'
+    or pc.nome ilike '%amoxicilina%' or pc.nome ilike '%azitromicina%' or pc.nome ilike '%cefalexina%'
+    or pc.nome ilike '%ciprofloxacino%' or pc.nome ilike '%doxiciclina%' or pc.nome ilike '%claritromicina%'
+    or pc.nome ilike '%penicilina%' or pc.nome ilike '%sulfametoxazol%' or pc.nome ilike '%norfloxacino%'
+    or pc.nome ilike '%metronidazol%' or pc.nome ilike '%levofloxacino%' or pc.nome ilike '%fluconazol%'
+    or pc.nome ilike '%cefadroxila%' or pc.nome ilike '%eritromicina%' or pc.nome ilike '%ampicilina%'
+    or pc.nome ilike '%cefaclor%'
+  );
 
 -- Compliance: por vendedor, quantas vendas de produto controlado (a
 -- partir de 01/07/2026, mesmo corte de vw_vendas_receita_status) não

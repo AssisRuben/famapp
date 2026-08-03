@@ -4,35 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
-import { ClienteDoVendedor, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
+import { ClienteDoVendedor, ContatoCliente, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
 import { WhatsAppButton } from '../components/WhatsAppButton';
+import { PhoneCallButton } from '../components/PhoneCallButton';
 import { colors } from '../theme/colors';
-import { formatBRL, formatDateBR } from '../lib/format';
-
-// Grupos curados da tela "Meus clientes" — produto_catalogo.grupo tem
-// ~25 valores reais da Trier, a maioria irrelevante pra resgate
-// (CHOCOLATE, REFRIGERANTES, BONIFICACAO...). Fica só o que interessa,
-// mesclando as variantes (GENERICO/GENERICO ANTIMICROBIANOS/GENERICO
-// CONTROLADOS/GENERICO ONEROSO viram um "Genérico" só, mesma lógica
-// pra Similar/Ético; FRALDAS e PRODUTOS INFANTIS viram um filtro só,
-// pedido explícito de 01/08/2026).
-interface GrupoFiltro {
-  chave: string;
-  label: string;
-  bate: (grupo: string | null) => boolean;
-}
-
-const GRUPOS_FILTRO: GrupoFiltro[] = [
-  { chave: 'generico', label: 'Genérico', bate: (g) => !!g && g.trim().toUpperCase().startsWith('GENERICO') },
-  { chave: 'similar', label: 'Similar', bate: (g) => !!g && g.trim().toUpperCase().startsWith('SIMILAR') },
-  { chave: 'etico', label: 'Ético', bate: (g) => !!g && g.trim().toUpperCase().startsWith('ETICO') },
-  {
-    chave: 'fralda_infantil',
-    label: 'Fraldas / Infantil',
-    bate: (g) => !!g && ['FRALDAS', 'PRODUTOS INFANTIS'].includes(g.trim().toUpperCase()),
-  },
-  { chave: 'orelhinha', label: 'Orelhinha', bate: (g) => !!g && g.trim().toUpperCase() === 'ORELHINHA' },
-];
+import { formatBRL, formatDateBR, nomeCurto } from '../lib/format';
+import { GRUPOS_FILTRO } from '../lib/gruposClientes';
+import { foiContatadoRecentemente } from '../lib/contatos';
 
 // Substituiu a aba "Ranking" (01/08/2026) — o ranking virou parte do
 // Painel (card "🏆 Ranking"), e essa aba passou a mostrar a carteira
@@ -47,6 +25,7 @@ export function ClientesVendedorScreen() {
   const route = useRoute<any>();
   const [clientes, setClientes] = useState<ClienteDoVendedor[]>([]);
   const [produtos, setProdutos] = useState<ProdutoRecorrenteCliente[]>([]);
+  const [contatos, setContatos] = useState<ContatoCliente[]>([]);
   const [busca, setBusca] = useState('');
   const [filtroNomeProduto, setFiltroNomeProduto] = useState('');
   const [grupoSelecionado, setGrupoSelecionado] = useState<string | null>(null);
@@ -60,12 +39,14 @@ export function ClientesVendedorScreen() {
 
   const load = useCallback(async () => {
     if (!profile) return;
-    const [c, p] = await Promise.all([
+    const [c, p, ct] = await Promise.all([
       repository.getClientesDoVendedor(profile),
       repository.getProdutosRecorrentesDoVendedor(profile),
+      repository.getContatosRecentes(profile),
     ]);
     setClientes(c);
     setProdutos(p);
+    setContatos(ct);
   }, [profile]);
 
   useEffect(() => {
@@ -106,6 +87,32 @@ export function ClientesVendedorScreen() {
     }
   };
 
+  // Só registra contato com motivo (e por tabela, com supressão) quando
+  // o filtro "Uso contínuo" está ativo — é o único caso em que o
+  // contato aqui corresponde a uma lista específica. Contato genérico
+  // (sem filtro) não tem "motivo" pra suprimir depois.
+  const registrarContatoCliente = (codigoCliente: number, tipoContato: 'whatsapp' | 'ligacao') => {
+    if (!profile || !apenasRecompra) return;
+    const produtoAtrasado = produtosPorCliente.get(codigoCliente)?.find((p) => p.atrasado);
+    if (!produtoAtrasado) return;
+    const novo: ContatoCliente = {
+      codigoCliente,
+      motivo: 'uso_continuo',
+      codigoProduto: produtoAtrasado.codigoProduto,
+      contatadoEm: new Date().toISOString(),
+    };
+    setContatos((atual) => [...atual, novo]);
+    repository
+      .registrarContato({
+        codigoCliente,
+        motivo: 'uso_continuo',
+        tipoContato,
+        codigoProduto: produtoAtrasado.codigoProduto,
+        codigoVendedor: profile.codigoVendedor,
+      })
+      .catch(() => setContatos((atual) => atual.filter((c) => c !== novo)));
+  };
+
   const grupoAtivo = GRUPOS_FILTRO.find((g) => g.chave === grupoSelecionado) ?? null;
 
   // Produtos agrupados por cliente, já filtrados por nome de produto
@@ -116,6 +123,11 @@ export function ClientesVendedorScreen() {
     const mapa = new Map<number, ProdutoRecorrenteCliente[]>();
     for (const p of produtos) {
       if (apenasRecompra && !p.atrasado) continue;
+      // já contatado sobre esse produto recentemente (filtro "Uso
+      // contínuo" é o único motivo que essa tela registra) — não
+      // insiste de novo enquanto durar a supressão, mesmo que continue
+      // "atrasado" sem ter comprado.
+      if (apenasRecompra && foiContatadoRecentemente(contatos, p.codigoCliente, 'uso_continuo', p.codigoProduto)) continue;
       if (nomeNormalizado && !p.nomeProduto.toLowerCase().includes(nomeNormalizado)) continue;
       if (grupoAtivo && !grupoAtivo.bate(p.grupo)) continue;
       const lista = mapa.get(p.codigoCliente) ?? [];
@@ -126,7 +138,7 @@ export function ClientesVendedorScreen() {
       lista.sort((a, b) => b.diasDesdeUltimaCompra - a.diasDesdeUltimaCompra);
     }
     return mapa;
-  }, [produtos, filtroNomeProduto, grupoAtivo, apenasRecompra]);
+  }, [produtos, filtroNomeProduto, grupoAtivo, apenasRecompra, contatos]);
 
   if (loading) {
     return (
@@ -280,11 +292,19 @@ export function ClientesVendedorScreen() {
                 </View>
                 <View style={styles.acoes}>
                   {item.telefone ? (
-                    <WhatsAppButton
-                      compact
-                      telefone={item.telefone}
-                      mensagem={`Olá, ${item.nome}! Aqui é ${profile?.nome ?? ''} da Farmácias Conviva 💊 Tudo bem?`}
-                    />
+                    <>
+                      <PhoneCallButton
+                        compact
+                        telefone={item.telefone}
+                        onLigar={() => registrarContatoCliente(item.codigo, 'ligacao')}
+                      />
+                      <WhatsAppButton
+                        compact
+                        telefone={item.telefone}
+                        mensagem={`Olá, ${nomeCurto(item.nome)}! Aqui é ${nomeCurto(profile?.nome ?? '')} da Farmácia Conviva Parquelândia 💊 Tudo bem?`}
+                        onEnviado={() => registrarContatoCliente(item.codigo, 'whatsapp')}
+                      />
+                    </>
                   ) : null}
                   <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
                 </View>

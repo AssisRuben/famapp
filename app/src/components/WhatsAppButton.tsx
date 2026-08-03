@@ -8,9 +8,13 @@ interface WhatsAppButtonProps {
   telefone: string;
   mensagem: string;
   compact?: boolean;
+  // Chamado só depois que o link abre com sucesso — usado pra
+  // registrar a tentativa de contato (ver lib/contatos.ts). Não
+  // dispara se o telefone for inválido ou o WhatsApp não abrir.
+  onEnviado?: () => void;
 }
 
-export function WhatsAppButton({ telefone, mensagem, compact }: WhatsAppButtonProps) {
+export function WhatsAppButton({ telefone, mensagem, compact, onEnviado }: WhatsAppButtonProps) {
   const abrir = async () => {
     const url = buildWhatsAppUrl(telefone, mensagem);
     if (!url) {
@@ -19,6 +23,7 @@ export function WhatsAppButton({ telefone, mensagem, compact }: WhatsAppButtonPr
     }
     try {
       await Linking.openURL(url);
+      onEnviado?.();
     } catch {
       // cai aqui em web sem handler de wa.me, ou celular sem o
       // WhatsApp instalado — Linking.openURL rejeita a promise.

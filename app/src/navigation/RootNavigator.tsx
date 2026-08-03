@@ -89,7 +89,7 @@ function AppTabs() {
           { label: 'Compras', emoji: '🛒', onPress: () => irPara('Compras') },
           { label: 'Precificação', emoji: '📊', onPress: () => irPara('Precificacao') },
         ]
-      : [{ label: 'Clientes', emoji: '👥', onPress: () => irPara('Clientes') }]),
+      : [{ label: 'Cliente para resgate', emoji: '👥', onPress: () => irPara('Clientes') }]),
     { label: 'Sair', emoji: '🚪', onPress: () => { setMenuAberto(false); signOut(); }, perigo: true },
   ];
 

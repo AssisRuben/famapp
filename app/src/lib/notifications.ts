@@ -86,7 +86,7 @@ export async function sincronizarNotificacoesChecklist(atividades: AtividadeChec
         await Notifications.scheduleNotificationAsync({
           identifier: idNotificacao(atividade.id, weekday),
           content: {
-            title: 'Checklist do dia — Farmácias Conviva',
+            title: 'Checklist do dia — Farmácia Conviva Parquelândia',
             body: `${atividade.horario} · ${atividade.titulo}`,
           },
           trigger: {

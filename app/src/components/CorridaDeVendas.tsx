@@ -4,12 +4,17 @@ import { formatBRL } from '../lib/format';
 import { colors } from '../theme/colors';
 
 const RUNNER_SIZE = 34;
+// Espaço reservado à direita pra bandeira + sombra do bonequinho não se
+// tocarem quando o 1º lugar chega em pct=1 (sempre acontece, não é
+// intermitente) — antes reaproveitava o valor de RUNNER_SIZE aqui, que
+// deixava só ~1px de folga real e fazia o bonequinho colidir com 🏁.
+const MARGEM_CHEGADA = 40;
 const MEDALS = ['🥇', '🥈', '🥉'];
 
 export interface ItemCorrida {
   codigoVendedor: number;
   nomeVendedor: string;
-  faturamentoLiquido: number;
+  valor: number;
 }
 
 interface CorridaDeVendasProps {
@@ -26,8 +31,8 @@ export function CorridaDeVendas({ ranking, meuCodigoVendedor, vazio = 'Sem dados
   const [trackWidth, setTrackWidth] = useState(0);
   const animsRef = useRef<Map<number, Animated.Value>>(new Map());
 
-  const maxFaturamento = useMemo(
-    () => ranking.reduce((max, r) => Math.max(max, r.faturamentoLiquido), 0),
+  const maxValor = useMemo(
+    () => ranking.reduce((max, r) => Math.max(max, r.valor), 0),
     [ranking]
   );
 
@@ -67,13 +72,13 @@ export function CorridaDeVendas({ ranking, meuCodigoVendedor, vazio = 'Sem dados
     return <Text style={styles.empty}>{vazio}</Text>;
   }
 
-  const espacoUtil = Math.max(trackWidth - RUNNER_SIZE - 34, 0);
+  const espacoUtil = Math.max(trackWidth - RUNNER_SIZE - MARGEM_CHEGADA, 0);
 
   return (
     <View>
       {ranking.map((item, index) => {
         const anim = animsRef.current.get(item.codigoVendedor) ?? new Animated.Value(0);
-        const pct = maxFaturamento ? item.faturamentoLiquido / maxFaturamento : 0;
+        const pct = maxValor ? item.valor / maxValor : 0;
         const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [0, espacoUtil * pct] });
         const isMe = meuCodigoVendedor != null && meuCodigoVendedor === item.codigoVendedor;
 
@@ -84,7 +89,7 @@ export function CorridaDeVendas({ ranking, meuCodigoVendedor, vazio = 'Sem dados
                 {MEDALS[index] ?? `${index + 1}º`} {item.nomeVendedor}
                 {isMe ? ' · você' : ''}
               </Text>
-              <Text style={styles.laneValor}>{formatBRL(item.faturamentoLiquido)}</Text>
+              <Text style={styles.laneValor}>{formatBRL(item.valor)}</Text>
             </View>
             <View style={styles.track} onLayout={onTrackLayout}>
               <Animated.View style={[styles.runner, { transform: [{ translateX }] }]}>

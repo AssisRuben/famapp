@@ -1,4 +1,5 @@
-// Paleta da marca Farmácias Conviva, extraída de assets/conviva.jpg.
+// Paleta da marca Farmácia Conviva Parquelândia, extraída de assets/conviva.jpg
+// (nome do arquivo é histórico, não precisa bater com o nome da marca).
 export const colors = {
   navy: '#003068',
   navyLight: '#0B4A8F',

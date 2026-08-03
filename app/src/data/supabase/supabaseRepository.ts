@@ -9,6 +9,7 @@ import {
   ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
+  ContatoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
@@ -28,6 +29,7 @@ import {
   ProdutoPromocaoAlerta,
   ProdutoRecorrenteCliente,
   RankingVendedorDia,
+  RegistrarContatoInput,
   ResumoClientesInatividade,
   Role,
   SalvarCampanhaInput,
@@ -36,6 +38,7 @@ import {
   SugestaoCampanhaParams,
   SugestaoCompra,
   TipoReceita,
+  VendaAntimicrobianoRecente,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
 } from '../../types/domain';
@@ -350,15 +353,16 @@ class SupabaseRepository implements DataRepository {
     }));
   }
 
-  // Só os últimos 5 (limit no app, não na view — a view fica genérica
-  // pra outros usos futuros também poderem pedir mais/menos).
-  async getHistoricoComprasCliente(_profile: Profile, codigoCliente: number): Promise<HistoricoCompraCliente[]> {
+  // Limit no app, não na view — a view fica genérica pra outros usos
+  // poderem pedir mais/menos (padrão 5 pra "Meus clientes", 7 pra
+  // "Cliente para resgate").
+  async getHistoricoComprasCliente(_profile: Profile, codigoCliente: number, limite = 5): Promise<HistoricoCompraCliente[]> {
     const { data, error } = await supabase
       .from('vw_historico_compras_cliente')
       .select('*')
       .eq('codigo_cliente', codigoCliente)
       .order('data_emissao', { ascending: false })
-      .limit(5);
+      .limit(limite);
     if (error) throw error;
     return (data ?? []).map((r) => ({
       itemId: r.item_id,
@@ -368,6 +372,8 @@ class SupabaseRepository implements DataRepository {
       nomeProduto: r.nome_produto,
       quantidade: Number(r.quantidade_produtos),
       valorTotal: Number(r.valor_total_liquido),
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
     }));
   }
 
@@ -388,6 +394,38 @@ class SupabaseRepository implements DataRepository {
         .from('vw_clientes_produtos_vendedor')
         .select('*')
         .eq('codigo_vendedor', profile.codigoVendedor)
+        .order('codigo_cliente', { ascending: true })
+        .order('codigo_produto', { ascending: true })
+        .range(inicio, inicio + TAMANHO_PAGINA - 1);
+      if (error) throw error;
+      linhas.push(...(data ?? []));
+      if (!data || data.length < TAMANHO_PAGINA) break;
+    }
+    return linhas.map((r: any) => ({
+      codigoCliente: r.codigo_cliente,
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.nome_produto,
+      categoria: r.categoria,
+      grupo: r.grupo,
+      qtdCompras: r.qtd_compras,
+      ultimaCompra: r.ultima_compra,
+      intervaloMedioDias: r.intervalo_medio_dias == null ? null : Number(r.intervalo_medio_dias),
+      diasDesdeUltimaCompra: r.dias_desde_ultima_compra,
+      recorrente: r.recorrente,
+      atrasado: r.atrasado,
+    }));
+  }
+
+  // Mesma paginação/motivo de getProdutosRecorrentesDoVendedor, mas sem
+  // filtro de codigo_vendedor — vw_clientes_produtos já agrega por
+  // cliente somando qualquer vendedor.
+  async getProdutosRecorrentesClientes(_profile: Profile): Promise<ProdutoRecorrenteCliente[]> {
+    const TAMANHO_PAGINA = 1000;
+    const linhas: Record<string, unknown>[] = [];
+    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
+      const { data, error } = await supabase
+        .from('vw_clientes_produtos')
+        .select('*')
         .order('codigo_cliente', { ascending: true })
         .order('codigo_produto', { ascending: true })
         .range(inicio, inicio + TAMANHO_PAGINA - 1);
@@ -490,6 +528,19 @@ class SupabaseRepository implements DataRepository {
     return resultado;
   }
 
+  async getVendasAntimicrobianoRecente(_profile: Profile): Promise<VendaAntimicrobianoRecente[]> {
+    const { data, error } = await supabase.from('vw_vendas_antimicrobiano_recente').select('*');
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      itemId: String(r.venda_item_id),
+      dataVenda: r.data_venda,
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.nome_produto,
+      codigoCliente: r.codigo_cliente,
+      nomeCliente: r.nome_cliente ?? '—',
+    }));
+  }
+
   async getIdentificacaoCompradorPorVendedor(_profile: Profile): Promise<IdentificacaoCompradorVendedor[]> {
     const { data, error } = await supabase.from('vw_receita_identificacao_comprador').select('*');
     if (error) throw error;
@@ -526,6 +577,34 @@ class SupabaseRepository implements DataRepository {
       nomeProduto: r.nome_produto,
       motivo: r.motivo as 'sem_cliente' | 'proprio_cpf',
     }));
+  }
+
+  // 300 dias cobre a maior janela usada (aniversário — ver
+  // lib/contatos.ts); cada tela filtra pela janela do próprio motivo.
+  async getContatosRecentes(_profile: Profile): Promise<ContatoCliente[]> {
+    const limite = new Date(Date.now() - 300 * 86400000).toISOString();
+    const { data, error } = await supabase
+      .from('contatos_clientes')
+      .select('codigo_cliente, motivo, codigo_produto, contatado_em')
+      .gte('contatado_em', limite);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      codigoCliente: r.codigo_cliente,
+      motivo: r.motivo,
+      codigoProduto: r.codigo_produto,
+      contatadoEm: r.contatado_em,
+    }));
+  }
+
+  async registrarContato(input: RegistrarContatoInput): Promise<void> {
+    const { error } = await supabase.from('contatos_clientes').insert({
+      codigo_cliente: input.codigoCliente,
+      motivo: input.motivo,
+      tipo_contato: input.tipoContato,
+      codigo_produto: input.codigoProduto ?? null,
+      codigo_vendedor: input.codigoVendedor,
+    });
+    if (error) throw error;
   }
 
   // Convenção de path fixada em storage_setup.sql: as policies do bucket

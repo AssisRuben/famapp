@@ -83,9 +83,15 @@ function dormir(ms) {
 // client por baixo pode trocar.
 function criarConexaoResiliente(databaseUrl) {
   let client = null;
+  const MAX_TENTATIVAS = 3;
 
-  async function conectar() {
-    client = new Client({ connectionString: databaseUrl });
+  async function conectarBruto() {
+    // rejectUnauthorized: false — o pooler do Supabase exige SSL; sem
+    // configurar isso aqui, o pg.Client tenta conectar sem TLS e o
+    // servidor derruba a conexão (ECONNRESET consistente, não soluço de
+    // rede). O n8n não sofre disso porque a credencial Postgres dele já
+    // negocia SSL sozinha por baixo.
+    client = new Client({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } });
     // sem isso, uma queda assíncrona (fora de uma query em andamento)
     // ainda derruba o processo — precisa de ALGUM listener em 'error'.
     client.on('error', (erro) => {
@@ -95,12 +101,16 @@ function criarConexaoResiliente(databaseUrl) {
     await client.connect();
   }
 
-  async function query(sql, params) {
-    const MAX_TENTATIVAS = 3;
+  // Mesmo retry pra "conectar pela 1a vez" e "reconectar no meio de uma
+  // query" — um ECONNRESET/timeout pode acontecer no connect inicial
+  // também (soluço transitório do pooler), não só depois. Antes só a
+  // query tinha retry; a conexão inicial (chamada 1x em main()) morria
+  // direto sem tentar de novo.
+  async function comRetentativas(fn) {
     for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
       try {
-        if (!client) await conectar();
-        return await client.query(sql, params);
+        if (!client) await conectarBruto();
+        return await fn();
       } catch (erro) {
         const transitorio = /connection terminated|econnreset|etimedout|timeout|socket hang up/i.test(erro.message || '');
         client = null;
@@ -109,6 +119,14 @@ function criarConexaoResiliente(databaseUrl) {
         await dormir(2000 * tentativa);
       }
     }
+  }
+
+  async function conectar() {
+    await comRetentativas(async () => {});
+  }
+
+  async function query(sql, params) {
+    return comRetentativas(() => client.query(sql, params));
   }
 
   async function encerrar() {

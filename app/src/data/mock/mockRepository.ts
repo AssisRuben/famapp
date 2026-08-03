@@ -8,6 +8,7 @@ import {
   ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
+  ContatoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
@@ -27,6 +28,7 @@ import {
   ProdutoPromocaoAlerta,
   ProdutoRecorrenteCliente,
   RankingVendedorDia,
+  RegistrarContatoInput,
   ResumoClientesInatividade,
   SalvarCampanhaInput,
   SalvarMetaInput,
@@ -34,6 +36,7 @@ import {
   SugestaoCampanhaParams,
   SugestaoCompra,
   TipoReceita,
+  VendaAntimicrobianoRecente,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
 } from '../../types/domain';
@@ -55,6 +58,7 @@ import {
   vendaItensDetalheSeed,
   vendaRecenteSeed,
   vendedoresSeed,
+  VendaItemDetalheSeed,
 } from './seed';
 import { diasDecorridosNaSemana, rotuloSemana, semanaDoDia } from '../../lib/metas';
 import { sugerirCandidatos } from '../../lib/campanhas';
@@ -67,6 +71,7 @@ const METAS_OVERRIDES_KEY = '@farmapp/metas_overrides';
 const CHECKLIST_ATIVIDADES_KEY = '@farmapp/checklist_atividades';
 const CHECKLIST_RESPOSTAS_KEY = '@farmapp/checklist_respostas';
 const CAMPANHAS_KEY = '@farmapp/campanhas';
+const CONTATOS_CLIENTES_KEY = '@farmapp/contatos_clientes';
 const SIMULATED_LATENCY_MS = 350;
 
 interface ReceitaOverride {
@@ -100,6 +105,46 @@ function dataDiasAtras(diasAtras: number): string {
   const data = new Date();
   data.setDate(data.getDate() - diasAtras);
   return data.toISOString().slice(0, 10);
+}
+
+// Compartilhado por getProdutosRecorrentesDoVendedor (filtra por
+// vendedor antes de chamar) e getProdutosRecorrentesClientes (passa
+// todo mundo) — só muda o subconjunto de itens agregado, a conta de
+// recorrente/atrasado é a mesma.
+function agregarProdutosRecorrentes(itens: VendaItemDetalheSeed[]) {
+  const porChave = new Map<string, { codigoCliente: number; codigoProduto: number; datas: string[] }>();
+  for (const item of itens) {
+    const chave = `${item.codigoCliente}-${item.codigoProduto}`;
+    const atual = porChave.get(chave) ?? { codigoCliente: item.codigoCliente, codigoProduto: item.codigoProduto, datas: [] };
+    atual.datas.push(dataDiasAtras(item.diasAtras));
+    porChave.set(chave, atual);
+  }
+  return Array.from(porChave.values()).map(({ codigoCliente, codigoProduto, datas }) => {
+    const produto = produtosSeed.find((p) => p.codigo === codigoProduto);
+    const ordenadas = datas.slice().sort();
+    const ultimaCompra = ordenadas[ordenadas.length - 1];
+    const qtdCompras = ordenadas.length;
+    const diasDesdeUltimaCompra = Math.round((Date.now() - new Date(ultimaCompra).getTime()) / 86400000);
+    const intervaloMedioDias =
+      qtdCompras >= 2
+        ? Math.round((new Date(ultimaCompra).getTime() - new Date(ordenadas[0]).getTime()) / 86400000 / (qtdCompras - 1))
+        : null;
+    const recorrente = qtdCompras >= 2;
+    const atrasado = recorrente && intervaloMedioDias != null && diasDesdeUltimaCompra > intervaloMedioDias * 1.3;
+    return {
+      codigoCliente,
+      codigoProduto,
+      nomeProduto: produto?.nome ?? `Produto ${codigoProduto}`,
+      categoria: null,
+      grupo: null,
+      qtdCompras,
+      ultimaCompra,
+      intervaloMedioDias,
+      diasDesdeUltimaCompra,
+      recorrente,
+      atrasado,
+    };
+  });
 }
 
 // Igual à RLS real: gestor vê tudo; vendedor só as linhas do próprio codigo_vendedor.
@@ -196,6 +241,11 @@ async function getCampanhasStore(): Promise<Campanha[]> {
 
 async function salvarCampanhasStore(campanhas: Campanha[]): Promise<void> {
   await AsyncStorage.setItem(CAMPANHAS_KEY, JSON.stringify(campanhas));
+}
+
+async function getContatosStore(): Promise<ContatoCliente[]> {
+  const raw = await AsyncStorage.getItem(CONTATOS_CLIENTES_KEY);
+  return raw ? (JSON.parse(raw) as ContatoCliente[]) : [];
 }
 
 class MockRepository implements DataRepository {
@@ -438,7 +488,7 @@ class MockRepository implements DataRepository {
     return delay(linhas);
   }
 
-  async getHistoricoComprasCliente(_profile: Profile, codigoCliente: number): Promise<HistoricoCompraCliente[]> {
+  async getHistoricoComprasCliente(_profile: Profile, codigoCliente: number, limite = 5): Promise<HistoricoCompraCliente[]> {
     const linhas = vendaItensDetalheSeed
       .filter((v) => v.codigoCliente === codigoCliente)
       .map((item, indice) => {
@@ -451,54 +501,23 @@ class MockRepository implements DataRepository {
           nomeProduto: produto?.nome ?? `Produto ${item.codigoProduto}`,
           quantidade: item.quantidade,
           valorTotal: round2((produto?.precoAtual ?? 0) * item.quantidade),
+          codigoVendedor: item.codigoVendedor,
+          nomeVendedor: nomeVendedor(item.codigoVendedor),
         };
       })
       .sort((a, b) => b.dataEmissao.localeCompare(a.dataEmissao))
-      .slice(0, 5);
+      .slice(0, limite);
     return delay(linhas);
   }
 
   async getProdutosRecorrentesDoVendedor(profile: Profile): Promise<ProdutoRecorrenteCliente[]> {
     if (profile.codigoVendedor == null) return delay([]);
     const doVendedor = vendaItensDetalheSeed.filter((v) => v.codigoVendedor === profile.codigoVendedor);
-    const porChave = new Map<string, { codigoCliente: number; codigoProduto: number; datas: string[] }>();
-    for (const item of doVendedor) {
-      const chave = `${item.codigoCliente}-${item.codigoProduto}`;
-      const atual = porChave.get(chave) ?? { codigoCliente: item.codigoCliente, codigoProduto: item.codigoProduto, datas: [] };
-      atual.datas.push(dataDiasAtras(item.diasAtras));
-      porChave.set(chave, atual);
-    }
-    const linhas = Array.from(porChave.values()).map(({ codigoCliente, codigoProduto, datas }) => {
-      const produto = produtosSeed.find((p) => p.codigo === codigoProduto);
-      const ordenadas = datas.slice().sort();
-      const ultimaCompra = ordenadas[ordenadas.length - 1];
-      const qtdCompras = ordenadas.length;
-      const diasDesdeUltimaCompra = Math.round(
-        (Date.now() - new Date(ultimaCompra).getTime()) / 86400000
-      );
-      const intervaloMedioDias =
-        qtdCompras >= 2
-          ? Math.round(
-              (new Date(ultimaCompra).getTime() - new Date(ordenadas[0]).getTime()) / 86400000 / (qtdCompras - 1)
-            )
-          : null;
-      const recorrente = qtdCompras >= 2;
-      const atrasado = recorrente && intervaloMedioDias != null && diasDesdeUltimaCompra > intervaloMedioDias * 1.3;
-      return {
-        codigoCliente,
-        codigoProduto,
-        nomeProduto: produto?.nome ?? `Produto ${codigoProduto}`,
-        categoria: null,
-        grupo: null,
-        qtdCompras,
-        ultimaCompra,
-        intervaloMedioDias,
-        diasDesdeUltimaCompra,
-        recorrente,
-        atrasado,
-      };
-    });
-    return delay(linhas);
+    return delay(agregarProdutosRecorrentes(doVendedor));
+  }
+
+  async getProdutosRecorrentesClientes(_profile: Profile): Promise<ProdutoRecorrenteCliente[]> {
+    return delay(agregarProdutosRecorrentes(vendaItensDetalheSeed));
   }
 
   async getProdutosEmPromocao(_profile: Profile): Promise<ProdutoPromocaoAlerta[]> {
@@ -575,6 +594,27 @@ class MockRepository implements DataRepository {
     return delay(visivel);
   }
 
+  // Sem visivelParaPerfil de propósito — mesma lógica de
+  // getProdutosEmPromocao, é oportunidade de contato pra qualquer
+  // vendedor, não fila pessoal (ver comentário em repository.ts).
+  async getVendasAntimicrobianoRecente(_profile: Profile): Promise<VendaAntimicrobianoRecente[]> {
+    const linhas: VendaAntimicrobianoRecente[] = vendaItensDetalheSeed
+      .filter((v) => {
+        const produto = produtosSeed.find((p) => p.codigo === v.codigoProduto);
+        return produto?.tipoReceita === 'antimicrobiano';
+      })
+      .map((v) => ({
+        itemId: v.id,
+        dataVenda: dataDiasAtras(v.diasAtras),
+        codigoProduto: v.codigoProduto,
+        nomeProduto: produtosSeed.find((p) => p.codigo === v.codigoProduto)!.nome,
+        codigoCliente: v.codigoCliente,
+        nomeCliente: nomeCliente(v.codigoCliente),
+      }));
+
+    return delay(linhas);
+  }
+
   async getIdentificacaoCompradorPorVendedor(profile: Profile): Promise<IdentificacaoCompradorVendedor[]> {
     const produtosComReceita = new Set(produtosSeed.filter((p) => p.exigeReceita).map((p) => p.codigo));
     const porVendedor = new Map<number, { nome: string; total: number; semIdentificacao: number }>();
@@ -627,6 +667,21 @@ class MockRepository implements DataRepository {
       });
 
     return delay(linhas);
+  }
+
+  async getContatosRecentes(_profile: Profile): Promise<ContatoCliente[]> {
+    return delay(await getContatosStore());
+  }
+
+  async registrarContato(input: RegistrarContatoInput): Promise<void> {
+    const contatos = await getContatosStore();
+    contatos.push({
+      codigoCliente: input.codigoCliente,
+      motivo: input.motivo,
+      codigoProduto: input.codigoProduto ?? null,
+      contatadoEm: new Date().toISOString(),
+    });
+    await AsyncStorage.setItem(CONTATOS_CLIENTES_KEY, JSON.stringify(contatos));
   }
 
   async anexarReceita(itemId: string, info: { tipo: TipoReceita; fotoUri: string | null }): Promise<void> {

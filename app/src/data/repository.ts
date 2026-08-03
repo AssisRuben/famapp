@@ -5,6 +5,7 @@ import {
   ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
+  ContatoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
@@ -22,6 +23,7 @@ import {
   ProdutoPromocaoAlerta,
   ProdutoRecorrenteCliente,
   RankingVendedorDia,
+  RegistrarContatoInput,
   ResumoClientesInatividade,
   SalvarCampanhaInput,
   SalvarMetaInput,
@@ -30,6 +32,7 @@ import {
   SugestaoCampanhaParams,
   SugestaoCompra,
   TipoReceita,
+  VendaAntimicrobianoRecente,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
 } from '../types/domain';
@@ -68,11 +71,18 @@ export interface DataRepository {
   // codigoVendedor) recebe lista vazia — tela é por vendedor mesmo.
   getClientesDoVendedor(profile: Profile): Promise<ClienteDoVendedor[]>;
   // Histórico de compra do cliente (qualquer vendedor), mostrado ao
-  // expandir um cliente na tela "Meus clientes".
-  getHistoricoComprasCliente(profile: Profile, codigoCliente: number): Promise<HistoricoCompraCliente[]>;
+  // expandir um cliente na tela "Meus clientes" (limite padrão 5) e na
+  // tela "Cliente para resgate" (limite 7, com nome do vendedor por
+  // linha).
+  getHistoricoComprasCliente(profile: Profile, codigoCliente: number, limite?: number): Promise<HistoricoCompraCliente[]>;
   // Base dos filtros de resgate ("Uso contínuo" + categoria/produto)
-  // da tela "Meus clientes" — 1 linha por (cliente, produto).
+  // da tela "Meus clientes" — 1 linha por (cliente, produto), só das
+  // vendas do vendedor logado.
   getProdutosRecorrentesDoVendedor(profile: Profile): Promise<ProdutoRecorrenteCliente[]>;
+  // Mesma base, mas agregada por cliente somando QUALQUER vendedor —
+  // usada pelos mesmos filtros na tela "Cliente para resgate", que
+  // mostra todo cliente pra qualquer vendedor agir (não só o próprio).
+  getProdutosRecorrentesClientes(profile: Profile): Promise<ProdutoRecorrenteCliente[]>;
   // Contagem agregada (total/inativos) pro tile do Painel — não sofre
   // do limite padrão de 1000 linhas por request que getClientesInatividade
   // tem quando usado só pra contar.
@@ -88,6 +98,11 @@ export interface DataRepository {
   getVendasComReceita(profile: Profile): Promise<VendaReceitaPendente[]>;
   anexarReceita(itemId: string, info: { tipo: TipoReceita; fotoUri: string | null }): Promise<void>;
 
+  // Card "Antibiótico vendido" em Alertas: assim como getProdutosEmPromocao,
+  // intencionalmente NÃO filtrado por vendedor — é oportunidade de
+  // contato (acompanhamento pós-venda), não fila pessoal.
+  getVendasAntimicrobianoRecente(profile: Profile): Promise<VendaAntimicrobianoRecente[]>;
+
   // Compliance: % de venda de controlado sem identificação real do
   // comprador, por vendedor — card "Venda controlada sem comprador" em Alertas.
   // Gestor vê todos, vendedor só a própria linha (dado sensível, ao
@@ -98,6 +113,16 @@ export interface DataRepository {
     profile: Profile,
     codigoVendedor: number
   ): Promise<VendaSemIdentificacaoComprador[]>;
+
+  // Contatos (ligação/WhatsApp) — usado pra suprimir das listas de
+  // resgate/aniversário/uso contínuo/alto valor sumindo/promoção quem
+  // já foi contatado há pouco tempo pelo mesmo motivo (ver
+  // lib/contatos.ts pra janela de supressão de cada motivo).
+  // getContatosRecentes traz os últimos ~300 dias (cobre a maior
+  // janela, de aniversário); cada tela filtra pela janela do seu
+  // motivo específico.
+  getContatosRecentes(profile: Profile): Promise<ContatoCliente[]>;
+  registrarContato(input: RegistrarContatoInput): Promise<void>;
 
   // Metas: vendedor só as próprias, gestor todas. `salvarMeta` é usado
   // pela tela de administração (gestor-only na UI).

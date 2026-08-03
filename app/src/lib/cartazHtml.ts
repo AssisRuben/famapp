@@ -72,7 +72,7 @@ function cartazHtml(grupo: GrupoCartazete): string {
         <img class="mascote" src="${MASCOTE_CONVIVA_BASE64}" alt="" />
       </div>
       <div class="marca">
-        <div class="marca-nome">Farmácia Realce Conviva</div>
+        <div class="marca-nome">Farmácia Conviva Parquelândia</div>
         <div class="marca-tagline">Perto de você, ao lado da sua saúde.</div>
       </div>
     </div>`;
