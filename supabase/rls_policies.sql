@@ -403,9 +403,10 @@ from produtos_em_falta pef
 left join profiles perfil_registro on perfil_registro.id = pef.registrado_por
 left join vendedores vd on vd.codigo = perfil_registro.codigo_vendedor;
 
--- atividades_checklist: cadastrada pelo gestor (aba "Metas" do app).
--- Vendedor só lê as ATIVAS (é o que aparece no checklist diário dele);
--- gestor lê todas (incl. inativas, pra gerenciar). Só gestor escreve.
+-- atividades_checklist: cadastrada pelo gestor (aba "Check list" do
+-- app). Vendedor só lê as ATIVAS (é o que aparece no checklist diário
+-- dele, filtrado no app por codigo_vendedor/dias_semana); gestor lê
+-- todas (incl. inativas, pra gerenciar). Só gestor escreve.
 alter table atividades_checklist enable row level security;
 
 create policy "atividades_checklist: gestor le tudo"

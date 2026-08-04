@@ -766,20 +766,40 @@ class SupabaseRepository implements DataRepository {
   // (ver "atividades_checklist: vendedor le as ativas" em
   // rls_policies.sql) — não precisa filtrar de novo aqui.
   async getAtividadesChecklist(_profile: Profile): Promise<AtividadeChecklist[]> {
-    const { data, error } = await supabase.from('atividades_checklist').select('id, titulo, horario, ativo').order('titulo');
+    const { data, error } = await supabase
+      .from('atividades_checklist')
+      .select('id, titulo, horario, ativo, codigo_vendedor, dias_semana, vendedores(nome)')
+      .order('titulo');
     if (error) throw error;
-    return (data ?? []).map((r) => ({ id: String(r.id), titulo: r.titulo, horario: r.horario, ativo: r.ativo }));
+    return (data ?? []).map((r) => ({
+      id: String(r.id),
+      titulo: r.titulo,
+      horario: r.horario,
+      ativo: r.ativo,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: (r.vendedores as unknown as { nome: string } | null)?.nome ?? null,
+      diasSemana: r.dias_semana ?? [],
+    }));
   }
 
-  async salvarAtividadeChecklist(input: { id?: string; titulo: string; horario: string | null }): Promise<void> {
+  async salvarAtividadeChecklist(input: {
+    id?: string;
+    titulo: string;
+    horario: string | null;
+    codigoVendedor: number | null;
+    diasSemana: number[];
+  }): Promise<void> {
+    const linha = {
+      titulo: input.titulo,
+      horario: input.horario,
+      codigo_vendedor: input.codigoVendedor,
+      dias_semana: input.diasSemana,
+    };
     if (input.id) {
-      const { error } = await supabase
-        .from('atividades_checklist')
-        .update({ titulo: input.titulo, horario: input.horario })
-        .eq('id', input.id);
+      const { error } = await supabase.from('atividades_checklist').update(linha).eq('id', input.id);
       if (error) throw error;
     } else {
-      const { error } = await supabase.from('atividades_checklist').insert({ titulo: input.titulo, horario: input.horario });
+      const { error } = await supabase.from('atividades_checklist').insert(linha);
       if (error) throw error;
     }
   }
@@ -791,8 +811,18 @@ class SupabaseRepository implements DataRepository {
 
   async getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]> {
     const hojeIso = todayISO();
+    // domingo=1 ... sábado=7 — mesma numeração de dias_semana (ver
+    // schema.sql) e do expo-notifications, pra não converter em nenhum
+    // dos dois lados.
+    const diaDaSemanaHoje = new Date(`${hojeIso}T00:00:00`).getDay() + 1;
     const [{ data: atividades, error: erroAtividades }, { data: respostas, error: erroRespostas }] = await Promise.all([
-      supabase.from('atividades_checklist').select('id, titulo, horario, ativo').eq('ativo', true).order('titulo'),
+      supabase
+        .from('atividades_checklist')
+        .select('id, titulo, horario, ativo, codigo_vendedor, dias_semana')
+        .eq('ativo', true)
+        .or(`codigo_vendedor.is.null,codigo_vendedor.eq.${profile.codigoVendedor}`)
+        .contains('dias_semana', [diaDaSemanaHoje])
+        .order('titulo'),
       supabase
         .from('checklist_respostas')
         .select('atividade_id, concluida')
@@ -805,7 +835,15 @@ class SupabaseRepository implements DataRepository {
     const concluidaPorAtividade = new Map<number, boolean>((respostas ?? []).map((r) => [r.atividade_id, r.concluida]));
 
     return (atividades ?? []).map((a) => ({
-      atividade: { id: String(a.id), titulo: a.titulo, horario: a.horario, ativo: a.ativo },
+      atividade: {
+        id: String(a.id),
+        titulo: a.titulo,
+        horario: a.horario,
+        ativo: a.ativo,
+        codigoVendedor: a.codigo_vendedor,
+        nomeVendedor: null,
+        diasSemana: a.dias_semana ?? [],
+      },
       concluida: concluidaPorAtividade.get(a.id) ?? false,
     }));
   }

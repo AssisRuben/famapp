@@ -150,7 +150,13 @@ export interface DataRepository {
   // Checklist diário: `getAtividadesChecklist` traz só as ativas para
   // vendedor, e todas (incl. inativas) para gestor gerenciar.
   getAtividadesChecklist(profile: Profile): Promise<AtividadeChecklist[]>;
-  salvarAtividadeChecklist(input: { id?: string; titulo: string; horario: string | null }): Promise<void>;
+  salvarAtividadeChecklist(input: {
+    id?: string;
+    titulo: string;
+    horario: string | null;
+    codigoVendedor: number | null;
+    diasSemana: number[];
+  }): Promise<void>;
   alternarAtividadeChecklist(id: string, ativo: boolean): Promise<void>;
   getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]>;
   marcarChecklistItem(profile: Profile, atividadeId: string, concluida: boolean): Promise<void>;

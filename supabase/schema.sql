@@ -222,20 +222,29 @@ insert into faixas_comissao (percentual_meta_min, percentual_comissao) values
   (0, 3);
 
 -- ============================================================
--- CHECKLIST DIÁRIO — atividades cadastradas pelo gestor (aba "Metas"
--- do app) e marcadas pelo vendedor todo dia. Hoje só existe como mock
--- local (AsyncStorage) no app; estas duas tabelas são o próximo passo
--- pra ter histórico real de conclusão no backend.
--- `horario` (HH:mm) dispara lembrete push de segunda a sábado — ver
--- src/lib/notifications.ts no app. `checklist_respostas` é uma marcação
--- por atividade/vendedor/dia (não por venda), única por dia — evita
--- duplicar/perder a marcação se o vendedor reabrir o app.
+-- CHECKLIST DIÁRIO — atividades cadastradas pelo gestor (aba "Check
+-- list" do app) e marcadas pelo vendedor todo dia. Hoje só existe como
+-- mock local (AsyncStorage) no app; estas duas tabelas são o próximo
+-- passo pra ter histórico real de conclusão no backend.
+-- `codigo_vendedor` null = atividade vale pra todo mundo; preenchido =
+-- só aparece no checklist desse vendedor específico.
+-- `dias_semana` usa a mesma numeração do expo-notifications (domingo=1
+-- ... sábado=7) pra não precisar converter na hora de agendar o
+-- lembrete — default segunda a sábado, igual o comportamento antigo
+-- (fixo, sem esse campo).
+-- `horario` (HH:00 — só a hora, minuto sempre zero) dispara lembrete
+-- push nos dias marcados — ver src/lib/notifications.ts no app.
+-- `checklist_respostas` é uma marcação por atividade/vendedor/dia (não
+-- por venda), única por dia — evita duplicar/perder a marcação se o
+-- vendedor reabrir o app.
 -- ============================================================
 create table atividades_checklist (
   id bigserial primary key,
   titulo text not null,
   horario time,
   ativo boolean not null default true,
+  codigo_vendedor integer references vendedores(codigo),
+  dias_semana integer[] not null default '{2,3,4,5,6,7}',
   created_at timestamptz default now()
 );
 

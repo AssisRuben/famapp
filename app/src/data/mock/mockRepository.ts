@@ -218,14 +218,22 @@ async function getAtividadesStore(): Promise<AtividadeChecklist[]> {
   const raw = await AsyncStorage.getItem(CHECKLIST_ATIVIDADES_KEY);
   if (raw) {
     const armazenadas = JSON.parse(raw) as AtividadeChecklist[];
-    // migra registros salvos numa versão anterior a existir o campo
-    // horario (senão fica "preso" sem horário até apagar o app).
+    // migra registros salvos numa versão anterior a existirem os campos
+    // horario/codigoVendedor/nomeVendedor/diasSemana (senão fica "preso"
+    // sem essa informação, ou quebra ao ler diasSemana undefined, até
+    // apagar o app).
     let precisaMigrar = false;
     const migradas = armazenadas.map((a) => {
-      if (a.horario !== undefined) return a;
+      if (a.horario !== undefined && a.diasSemana !== undefined) return a;
       precisaMigrar = true;
       const doSeed = atividadesChecklistSeed.find((s) => s.id === a.id);
-      return { ...a, horario: doSeed?.horario ?? null };
+      return {
+        ...a,
+        horario: a.horario ?? doSeed?.horario ?? null,
+        codigoVendedor: a.codigoVendedor ?? doSeed?.codigoVendedor ?? null,
+        nomeVendedor: a.nomeVendedor ?? doSeed?.nomeVendedor ?? null,
+        diasSemana: a.diasSemana ?? doSeed?.diasSemana ?? [2, 3, 4, 5, 6, 7],
+      };
     });
     if (precisaMigrar) {
       await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(migradas));
@@ -848,16 +856,34 @@ class MockRepository implements DataRepository {
     return delay(atividades.filter((a) => a.ativo));
   }
 
-  async salvarAtividadeChecklist(input: { id?: string; titulo: string; horario: string | null }): Promise<void> {
+  async salvarAtividadeChecklist(input: {
+    id?: string;
+    titulo: string;
+    horario: string | null;
+    codigoVendedor: number | null;
+    diasSemana: number[];
+  }): Promise<void> {
     const atividades = await getAtividadesStore();
+    const nome = input.codigoVendedor != null ? nomeVendedor(input.codigoVendedor) : null;
     if (input.id) {
       const existente = atividades.find((a) => a.id === input.id);
       if (existente) {
         existente.titulo = input.titulo;
         existente.horario = input.horario;
+        existente.codigoVendedor = input.codigoVendedor;
+        existente.nomeVendedor = nome;
+        existente.diasSemana = input.diasSemana;
       }
     } else {
-      atividades.push({ id: `chk-${Date.now()}`, titulo: input.titulo, horario: input.horario, ativo: true });
+      atividades.push({
+        id: `chk-${Date.now()}`,
+        titulo: input.titulo,
+        horario: input.horario,
+        ativo: true,
+        codigoVendedor: input.codigoVendedor,
+        nomeVendedor: nome,
+        diasSemana: input.diasSemana,
+      });
     }
     await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(atividades));
   }
@@ -870,7 +896,14 @@ class MockRepository implements DataRepository {
   }
 
   async getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]> {
-    const atividades = (await getAtividadesStore()).filter((a) => a.ativo);
+    // domingo=1 ... sábado=7 — mesma numeração de diasSemana.
+    const diaDaSemanaHoje = new Date().getDay() + 1;
+    const atividades = (await getAtividadesStore()).filter(
+      (a) =>
+        a.ativo &&
+        (a.codigoVendedor == null || a.codigoVendedor === profile.codigoVendedor) &&
+        a.diasSemana.includes(diaDaSemanaHoje)
+    );
     const respostas = await getRespostasStore();
     const hojeIso = new Date().toISOString().slice(0, 10);
 

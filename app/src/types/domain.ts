@@ -371,14 +371,20 @@ export interface ComissaoMensal {
 
 // ============================================================
 // CHECKLIST DIÁRIO — atividades cadastradas pelo gestor, marcadas
-// pelo vendedor todo dia. `horario` (HH:mm) dispara um lembrete
-// push de segunda a sábado nesse horário.
+// pelo vendedor todo dia. `horario` (HH:00 — só a hora, minuto sempre
+// zero) dispara um lembrete push nos dias marcados em `diasSemana`.
+// `diasSemana` usa a numeração do expo-notifications (domingo=1 ...
+// sábado=7). `codigoVendedor` null = atividade vale pra todo mundo;
+// preenchido = só aparece no checklist desse vendedor.
 // ============================================================
 export interface AtividadeChecklist {
   id: string;
   titulo: string;
   horario: string | null;
   ativo: boolean;
+  codigoVendedor: number | null;
+  nomeVendedor: string | null;
+  diasSemana: number[];
 }
 
 export interface ChecklistItemStatus {
