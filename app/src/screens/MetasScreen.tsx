@@ -354,7 +354,7 @@ export function MetasScreen() {
             })
           )}
 
-          <Text style={[styles.sectionTitulo, styles.loteTitulo]}>Lançar meta mensal (todos os vendedores)</Text>
+          <Text style={[styles.sectionTitulo, styles.loteTitulo]}>Lançar meta mensal</Text>
           <Card>
             <View style={styles.mesSeletor}>
               <Pressable onPress={() => mudarMesLote(-1)} style={styles.mesBotao} hitSlop={8}>
@@ -384,11 +384,6 @@ export function MetasScreen() {
                 </View>
               ))
             )}
-
-            <Text style={styles.hint}>
-              Meta mensal (margem bruta) — divide igual entre as 4 semanas. Deixa em branco pra pular quem não
-              for atualizado agora.
-            </Text>
 
             <Pressable style={styles.salvarButton} onPress={salvarLote} disabled={salvandoLote || loadingLote}>
               {salvandoLote ? (

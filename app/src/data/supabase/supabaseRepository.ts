@@ -726,7 +726,7 @@ class SupabaseRepository implements DataRepository {
   }
 
   async getVendedoresAtivos(_profile: Profile): Promise<VendedorAtivo[]> {
-    const { data, error } = await supabase.from('vendedores').select('codigo, nome').eq('ativo', true).order('nome');
+    const { data, error } = await supabase.from('vw_vendedores_ativos').select('codigo, nome').order('nome');
     if (error) throw error;
     return (data ?? []).map((r) => ({ codigo: r.codigo, nome: r.nome }));
   }
