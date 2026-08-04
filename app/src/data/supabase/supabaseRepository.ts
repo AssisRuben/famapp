@@ -46,6 +46,7 @@ import {
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
   VendaVendaAdicional,
+  VendedorAtivo,
 } from '../../types/domain';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
@@ -722,6 +723,12 @@ class SupabaseRepository implements DataRepository {
       const { error: insertError } = await supabase.from('metas').insert(linha);
       if (insertError) throw insertError;
     }
+  }
+
+  async getVendedoresAtivos(_profile: Profile): Promise<VendedorAtivo[]> {
+    const { data, error } = await supabase.from('vendedores').select('codigo, nome').eq('ativo', true).order('nome');
+    if (error) throw error;
+    return (data ?? []).map((r) => ({ codigo: r.codigo, nome: r.nome }));
   }
 
   async getComissoesMensal(_profile: Profile, ano: number, mes: number): Promise<ComissaoMensal[]> {

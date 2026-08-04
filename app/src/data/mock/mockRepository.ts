@@ -44,6 +44,7 @@ import {
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
   VendaVendaAdicional,
+  VendedorAtivo,
 } from '../../types/domain';
 import {
   GESTOR_EMAIL,
@@ -766,6 +767,14 @@ class MockRepository implements DataRepository {
       valoresMetaSemanal: input.valoresMetaSemanal,
     };
     await AsyncStorage.setItem(METAS_OVERRIDES_KEY, JSON.stringify(overrides));
+  }
+
+  async getVendedoresAtivos(_profile: Profile): Promise<VendedorAtivo[]> {
+    return delay(
+      vendedoresSeed
+        .map((v) => ({ codigo: v.codigo, nome: v.nome }))
+        .sort((a, b) => a.nome.localeCompare(b.nome))
+    );
   }
 
   async getComissoesMensal(profile: Profile, ano: number, mes: number): Promise<ComissaoMensal[]> {

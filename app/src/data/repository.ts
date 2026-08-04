@@ -40,6 +40,7 @@ import {
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
   VendaVendaAdicional,
+  VendedorAtivo,
 } from '../types/domain';
 
 /**
@@ -133,6 +134,11 @@ export interface DataRepository {
   // pela tela de administração (gestor-only na UI).
   getMetas(profile: Profile, ano: number, mes: number): Promise<MetaVendedor[]>;
   salvarMeta(input: SalvarMetaInput): Promise<void>;
+
+  // Lista de vendedores ativos pra lançamento em massa de meta mensal
+  // (tela Metas do gestor) — ao contrário de getMetas, traz todo mundo
+  // mesmo quem ainda não tem meta lançada no período selecionado.
+  getVendedoresAtivos(profile: Profile): Promise<VendedorAtivo[]>;
 
   // Comissão: só fechamento MENSAL (semana/dia não geram comissão própria
   // — ver vw_metas_comissao). Vendedor só a própria linha, gestor todas.

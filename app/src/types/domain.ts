@@ -325,6 +325,14 @@ export interface SalvarMetaInput {
   valoresMetaSemanal: [number, number, number, number];
 }
 
+// Lista enxuta de vendedores ativos (código + nome), pra seletores e
+// telas de lançamento em massa — diferente de MetaVendedor, não
+// depende de já existir meta lançada pro período.
+export interface VendedorAtivo {
+  codigo: number;
+  nome: string;
+}
+
 // ============================================================
 // COMISSÃO — sobre margem bruta. Se a margem do mês bater 100% da
 // meta MENSAL, comissão = 10% flat sobre o mês inteiro. Senão, soma
