@@ -1,4 +1,5 @@
-import { FaixaComissao } from '../types/domain';
+import { FaixaComissao, MetaVendedor } from '../types/domain';
+import { PeriodoMeta } from '../components/PeriodoMetaSelector';
 
 export const NOMES_MES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -51,10 +52,65 @@ export function diasDecorridosNaSemana(ano: number, mes: number, semana: 1 | 2 |
   return diaAtual - inicio + 1;
 }
 
+// Total de dias dentro de um bucket de semana (ver semanaDoDia) —
+// diferente de diasDecorridosNaSemana, que para no dia de hoje; este
+// conta o bucket inteiro, usado pra dividir "quanto falta" pelos dias
+// que ainda restam.
+export function diasNoBucketSemana(semana: 1 | 2 | 3 | 4, ano: number, mes: number): number {
+  const inicio = semana === 1 ? 1 : semana === 2 ? 8 : semana === 3 ? 15 : 22;
+  const fim = semana === 4 ? diasNoMes(ano, mes) : semana * 7;
+  return fim - inicio + 1;
+}
+
 // Acha a faixa de comissão pelo % da meta batido (>=100→10%, >=90→8%,
 // >=80→7%, >=70→5%, <70→3% — ver faixas_comissao no banco). `faixas`
 // precisa vir ordenado por percentualMetaMin desc (getFaixasComissao já
 // traz assim); a menor faixa é o piso padrão.
 export function faixaComissaoPara(faixas: FaixaComissao[], percentual: number): FaixaComissao | undefined {
   return faixas.find((f) => f.percentualMetaMin <= percentual) ?? faixas[faixas.length - 1];
+}
+
+// Meta é de margem bruta em R$, não faturamento (01/08/2026) — label
+// deixa isso explícito pra não confundir com meta de venda. Usado no
+// card "Metas" do Dashboard e na aba "Meta" (dia/semana/mês + comissão).
+export function valoresDaMeta(
+  meta: MetaVendedor,
+  periodo: PeriodoMeta,
+  realizadoHoje: number,
+  semanaAtual: number
+): { label: string; valorMeta: number; valorRealizado: number } {
+  if (periodo === 'dia') {
+    return {
+      label: 'Meta de margem do dia',
+      valorMeta: metaDiaria(meta.valorMetaMensal, meta.ano, meta.mes),
+      valorRealizado: realizadoHoje,
+    };
+  }
+  if (periodo === 'semana') {
+    const semana = meta.semanas.find((s) => s.semana === semanaAtual);
+    return {
+      label: `Meta de margem da semana (${semana?.rotulo ?? ''})`,
+      valorMeta: semana?.valorMeta ?? 0,
+      valorRealizado: semana?.valorRealizado ?? 0,
+    };
+  }
+  return { label: 'Meta de margem do mês', valorMeta: meta.valorMetaMensal, valorRealizado: meta.valorRealizadoMensal };
+}
+
+// Comissão de dia/semana é sempre APROXIMAÇÃO (só o fechamento MENSAL é
+// oficial/congelado — ver vw_metas_comissao no schema.sql): pega a
+// faixa batida pelo % da meta do período e aplica sobre o realizado.
+// Não considera a regra flat_10_mensal (só vale pro mês fechado
+// inteiro), então dia/semana podem "prometer" uma comissão que o
+// fechamento do mês depois substitui por 10% flat se a meta mensal for
+// batida — por isso o rótulo "aproximado" é sempre exibido junto.
+export function comissaoAproximada(
+  valorRealizado: number,
+  valorMeta: number,
+  faixas: FaixaComissao[]
+): { percentual: number; taxa: number; comissaoValor: number } {
+  if (valorMeta <= 0) return { percentual: 0, taxa: 0, comissaoValor: 0 };
+  const percentual = (valorRealizado / valorMeta) * 100;
+  const taxa = faixaComissaoPara(faixas, percentual)?.percentualComissao ?? 0;
+  return { percentual, taxa, comissaoValor: valorRealizado * (taxa / 100) };
 }

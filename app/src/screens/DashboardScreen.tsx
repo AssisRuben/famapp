@@ -7,8 +7,8 @@ import { MetricTile } from '../components/MetricTile';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { CorridaDeVendas } from '../components/CorridaDeVendas';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
-import { formatBRL, formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
-import { diasDecorridosNaSemana, faixaComissaoPara, metaDiaria, semanaDoDia } from '../lib/metas';
+import { formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
+import { diasDecorridosNaSemana, faixaComissaoPara, metaDiaria, semanaDoDia, valoresDaMeta } from '../lib/metas';
 import {
   ComissaoMensal,
   DesempenhoVendedorDiario,
@@ -23,32 +23,6 @@ import {
   StatusSincronizacao,
 } from '../types/domain';
 import { colors } from '../theme/colors';
-
-function valoresDaMeta(
-  meta: MetaVendedor,
-  periodo: PeriodoMeta,
-  realizadoHoje: number,
-  semanaAtual: number
-): { label: string; valorMeta: number; valorRealizado: number } {
-  // Meta é de margem bruta em R$, não faturamento (01/08/2026) — label
-  // deixa isso explícito pra não confundir com meta de venda.
-  if (periodo === 'dia') {
-    return {
-      label: 'Meta de margem do dia',
-      valorMeta: metaDiaria(meta.valorMetaMensal, meta.ano, meta.mes),
-      valorRealizado: realizadoHoje,
-    };
-  }
-  if (periodo === 'semana') {
-    const semana = meta.semanas.find((s) => s.semana === semanaAtual);
-    return {
-      label: `Meta de margem da semana (${semana?.rotulo ?? ''})`,
-      valorMeta: semana?.valorMeta ?? 0,
-      valorRealizado: semana?.valorRealizado ?? 0,
-    };
-  }
-  return { label: 'Meta de margem do mês', valorMeta: meta.valorMetaMensal, valorRealizado: meta.valorRealizadoMensal };
-}
 
 export function DashboardScreen() {
   const { profile } = useAuth();
@@ -222,7 +196,7 @@ export function DashboardScreen() {
     periodoDesempenho === 'dia'
       ? {
           vazio: metricas.length === 0,
-          faturamentoLabel: 'Faturamento líquido',
+          faturamentoLabel: 'Venda líquida',
           faturamento: totalFaturamento,
           ticketMedio,
           itensPorAtendimento,
@@ -232,11 +206,12 @@ export function DashboardScreen() {
           vendasLabel: 'Vendas realizadas',
           vendasValor: String(totalNotas),
           margemBruta,
+          margemBrutaValor: totalFaturamento - totalCusto,
         }
       : periodoDesempenho === 'semana'
       ? {
           vazio: metricasSemana.length === 0,
-          faturamentoLabel: 'Faturamento líquido (acum.)',
+          faturamentoLabel: 'Venda líquida (acum.)',
           faturamento: totalFaturamentoSemana,
           ticketMedio: ticketMedioSemana,
           itensPorAtendimento: itensPorAtendimentoSemana,
@@ -246,10 +221,11 @@ export function DashboardScreen() {
           vendasLabel: 'Vendas / dia (média)',
           vendasValor: vendasPorDiaSemana.toFixed(1),
           margemBruta: margemBrutaSemana,
+          margemBrutaValor: totalFaturamentoSemana - totalCustoSemana,
         }
       : {
           vazio: metricasMes.length === 0,
-          faturamentoLabel: 'Faturamento líquido (acum.)',
+          faturamentoLabel: 'Venda líquida (acum.)',
           faturamento: totalFaturamentoMes,
           ticketMedio: ticketMedioMes,
           itensPorAtendimento: itensPorAtendimentoMes,
@@ -259,6 +235,7 @@ export function DashboardScreen() {
           vendasLabel: 'Vendas / dia (média)',
           vendasValor: vendasPorDiaMes.toFixed(1),
           margemBruta: margemBrutaMes,
+          margemBrutaValor: totalFaturamentoMes - totalCustoMes,
         };
 
   // Ranking (corrida de vendas) por margem bruta em R$. Segue o período
@@ -324,17 +301,22 @@ export function DashboardScreen() {
           <Text style={styles.empty}>Sem vendas registradas nesse período.</Text>
         ) : (
           <View style={styles.tileRow}>
-            <MetricTile label={desempenho7.faturamentoLabel} value={formatBRL(desempenho7.faturamento)} accentColor={colors.success} />
-            <MetricTile label="Ticket médio" value={formatBRL(desempenho7.ticketMedio)} accentColor={colors.navy} />
-            <MetricTile label="Itens / atendimento" value={desempenho7.itensPorAtendimento.toFixed(2)} accentColor="#9333ea" />
-            <MetricTile label="Taxa de desconto" value={`${desempenho7.taxaDesconto.toFixed(2)}%`} accentColor={colors.red} />
-            <MetricTile label={desempenho7.comissaoLabel} value={formatBRL(desempenho7.comissao)} accentColor="#0891b2" />
-            <MetricTile label={desempenho7.vendasLabel} value={desempenho7.vendasValor} accentColor={colors.textSecondary} />
+            <MetricTile label={desempenho7.faturamentoLabel} value={formatBRLSemCentavos(desempenho7.faturamento)} accentColor={colors.success} />
             <MetricTile
               label="Margem bruta"
               value={`${desempenho7.margemBruta.toFixed(2)}%`}
               accentColor={desempenho7.margemBruta < 30 ? colors.red : colors.success}
             />
+            <MetricTile
+              label="Margem bruta (R$)"
+              value={formatBRLSemCentavos(desempenho7.margemBrutaValor)}
+              accentColor={desempenho7.margemBruta < 30 ? colors.red : colors.success}
+            />
+            <MetricTile label="Ticket médio" value={formatBRLSemCentavos(desempenho7.ticketMedio)} accentColor={colors.navy} />
+            <MetricTile label="Itens / atendimento" value={desempenho7.itensPorAtendimento.toFixed(2)} accentColor="#9333ea" />
+            <MetricTile label="Taxa de desconto" value={`${desempenho7.taxaDesconto.toFixed(2)}%`} accentColor={colors.red} />
+            <MetricTile label={desempenho7.comissaoLabel} value={formatBRLSemCentavos(desempenho7.comissao)} accentColor="#0891b2" />
+            <MetricTile label={desempenho7.vendasLabel} value={desempenho7.vendasValor} accentColor={colors.textSecondary} />
           </View>
         )}
       </Card>

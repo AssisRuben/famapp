@@ -1,6 +1,7 @@
 import {
   AtividadeChecklist,
   Campanha,
+  CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteDoVendedor,
   ClienteInatividade,
@@ -20,13 +21,16 @@ import {
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
+  ProdutoEmFalta,
   ProdutoPromocaoAlerta,
   ProdutoRecorrenteCliente,
   RankingVendedorDia,
   RegistrarContatoInput,
   ResumoClientesInatividade,
   SalvarCampanhaInput,
+  SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
+  SalvarProdutoEmFaltaInput,
   StatusSincronizacao,
   IdentificacaoCompradorVendedor,
   SugestaoCampanhaParams,
@@ -35,6 +39,7 @@ import {
   VendaAntimicrobianoRecente,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
+  VendaVendaAdicional,
 } from '../types/domain';
 
 /**
@@ -158,6 +163,21 @@ export interface DataRepository {
   getCampanhas(profile: Profile): Promise<Campanha[]>;
   salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha>;
   excluirCampanha(id: string): Promise<void>;
+
+  // Venda adicional — gestor cria/edita (aba "Venda adicional"), todo
+  // vendedor lê (card em Alertas). Prêmio é só informativo, não entra
+  // no fechamento de comissão.
+  getCampanhasVendaAdicional(profile: Profile): Promise<CampanhaVendaAdicional[]>;
+  salvarCampanhaVendaAdicional(input: SalvarCampanhaVendaAdicionalInput): Promise<void>;
+  excluirCampanhaVendaAdicional(id: string): Promise<void>;
+  getVendasVendaAdicional(profile: Profile, campanhaId: string): Promise<VendaVendaAdicional[]>;
+
+  // Produto em falta — lista compartilhada, qualquer autenticado
+  // reporta/edita/apaga (não é gestor-only, é registro rápido de
+  // balcão). getProdutosEmFalta traz tudo, a tela filtra pro mês.
+  getProdutosEmFalta(profile: Profile): Promise<ProdutoEmFalta[]>;
+  salvarProdutoEmFalta(input: SalvarProdutoEmFaltaInput): Promise<void>;
+  excluirProdutoEmFalta(id: string): Promise<void>;
 
   // Compras (Dose Certa) — gestor-only na UI. Fornecedor sugerido e
   // fator de compra vêm da compra mais recente de cada produto

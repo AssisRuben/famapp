@@ -5,6 +5,7 @@ import { DataRepository } from '../repository';
 import {
   AtividadeChecklist,
   Campanha,
+  CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteDoVendedor,
   ClienteInatividade,
@@ -26,6 +27,7 @@ import {
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
+  ProdutoEmFalta,
   ProdutoPromocaoAlerta,
   ProdutoRecorrenteCliente,
   RankingVendedorDia,
@@ -33,7 +35,9 @@ import {
   ResumoClientesInatividade,
   Role,
   SalvarCampanhaInput,
+  SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
+  SalvarProdutoEmFaltaInput,
   StatusSincronizacao,
   SugestaoCampanhaParams,
   SugestaoCompra,
@@ -41,6 +45,7 @@ import {
   VendaAntimicrobianoRecente,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
+  VendaVendaAdicional,
 } from '../../types/domain';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
@@ -823,9 +828,26 @@ class SupabaseRepository implements DataRepository {
   }
 
   async getCatalogoProdutos(_profile: Profile): Promise<ProdutoCatalogo[]> {
-    const { data, error } = await supabase.from('produto_catalogo').select('*').order('nome');
-    if (error) throw error;
-    return (data ?? []).map(mapearProdutoCatalogo);
+    // produto_catalogo passa de 1000 linhas fácil (catálogo cheio da
+    // farmácia) — sem paginar, o limite padrão do PostgREST cortava
+    // silenciosamente o resultado, e como vem ordenado por nome,
+    // produto que caísse depois da linha 1000 alfabeticamente (ex.:
+    // "Dipirona") nunca aparecia na busca de nenhuma tela (achado
+    // 03/08/2026 — mesmo bug já corrigido antes em getClientesDoVendedor).
+    const TAMANHO_PAGINA = 1000;
+    const linhas: Record<string, unknown>[] = [];
+    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
+      const { data, error } = await supabase
+        .from('produto_catalogo')
+        .select('*')
+        .order('nome', { ascending: true })
+        .order('codigo', { ascending: true })
+        .range(inicio, inicio + TAMANHO_PAGINA - 1);
+      if (error) throw error;
+      linhas.push(...(data ?? []));
+      if (!data || data.length < TAMANHO_PAGINA) break;
+    }
+    return linhas.map((r: any) => mapearProdutoCatalogo(r));
   }
 
   async sugerirProdutosCampanha(profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]> {
@@ -950,6 +972,161 @@ class SupabaseRepository implements DataRepository {
 
   async excluirCampanha(id: string): Promise<void> {
     const { error } = await supabase.from('campanhas').delete().eq('id', Number(id));
+    if (error) throw error;
+  }
+
+  private async carregarCampanhasVendaAdicional(filtroId?: number): Promise<CampanhaVendaAdicional[]> {
+    let query = supabase
+      .from('campanhas_venda_adicional')
+      .select(
+        'id, nome, data_inicio, data_fim, tipo_premiacao, criterio_quantidade, meta_quantidade, premiacao_meta_valor, premiacao_ranking, minimo_para_concorrer, horario_lembrete, campanha_venda_adicional_produtos(codigo_produto)'
+      )
+      .order('criada_em', { ascending: false });
+    if (filtroId !== undefined) query = query.eq('id', filtroId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const { data: catalogo, error: catalogoError } = await supabase.from('produto_catalogo').select('codigo, nome');
+    if (catalogoError) throw catalogoError;
+    const nomePorCodigo = new Map((catalogo ?? []).map((p) => [p.codigo, p.nome]));
+
+    return (data ?? []).map((c: any) => ({
+      id: String(c.id),
+      nome: c.nome,
+      dataInicio: c.data_inicio,
+      dataFim: c.data_fim,
+      tipoPremiacao: c.tipo_premiacao,
+      criterioQuantidade: c.criterio_quantidade,
+      metaQuantidade: c.meta_quantidade,
+      premiacaoMetaValor: c.premiacao_meta_valor != null ? Number(c.premiacao_meta_valor) : null,
+      premiacaoRanking: c.premiacao_ranking,
+      minimoParaConcorrer: c.minimo_para_concorrer,
+      horarioLembrete: c.horario_lembrete,
+      produtos: (c.campanha_venda_adicional_produtos ?? []).map((p: any) => ({
+        codigoProduto: p.codigo_produto,
+        nomeProduto: nomePorCodigo.get(p.codigo_produto) ?? `Produto ${p.codigo_produto}`,
+      })),
+    }));
+  }
+
+  async getCampanhasVendaAdicional(_profile: Profile): Promise<CampanhaVendaAdicional[]> {
+    return this.carregarCampanhasVendaAdicional();
+  }
+
+  async salvarCampanhaVendaAdicional(input: SalvarCampanhaVendaAdicionalInput): Promise<void> {
+    let campanhaId: number;
+
+    const payload = {
+      nome: input.nome,
+      data_inicio: input.dataInicio,
+      data_fim: input.dataFim,
+      tipo_premiacao: input.tipoPremiacao,
+      criterio_quantidade: input.criterioQuantidade,
+      meta_quantidade: input.metaQuantidade,
+      premiacao_meta_valor: input.premiacaoMetaValor,
+      premiacao_ranking: input.premiacaoRanking,
+      minimo_para_concorrer: input.minimoParaConcorrer,
+      horario_lembrete: input.horarioLembrete,
+    };
+
+    if (input.id) {
+      campanhaId = Number(input.id);
+      const { error } = await supabase.from('campanhas_venda_adicional').update(payload).eq('id', campanhaId);
+      if (error) throw error;
+
+      // substitui a lista de produtos por completo — mais simples do
+      // que diffar item a item (a tela já manda a lista inteira).
+      const { error: deleteError } = await supabase
+        .from('campanha_venda_adicional_produtos')
+        .delete()
+        .eq('campanha_id', campanhaId);
+      if (deleteError) throw deleteError;
+    } else {
+      const { data, error } = await supabase.from('campanhas_venda_adicional').insert(payload).select('id').single();
+      if (error || !data) throw error ?? new Error('Falha ao criar campanha de venda adicional.');
+      campanhaId = data.id;
+    }
+
+    if (input.codigosProduto.length > 0) {
+      const { error } = await supabase
+        .from('campanha_venda_adicional_produtos')
+        .insert(input.codigosProduto.map((codigoProduto) => ({ campanha_id: campanhaId, codigo_produto: codigoProduto })));
+      if (error) throw error;
+    }
+  }
+
+  async excluirCampanhaVendaAdicional(id: string): Promise<void> {
+    const { error } = await supabase.from('campanhas_venda_adicional').delete().eq('id', Number(id));
+    if (error) throw error;
+  }
+
+  async getVendasVendaAdicional(_profile: Profile, campanhaId: string): Promise<VendaVendaAdicional[]> {
+    const { data, error } = await supabase
+      .from('vw_venda_adicional_vendas')
+      .select('*')
+      .eq('campanha_id', Number(campanhaId));
+    if (error) throw error;
+
+    return (data ?? []).map((r) => ({
+      itemId: String(r.venda_item_id),
+      vendaId: String(r.venda_id),
+      numeroNota: r.numero_nota,
+      campanhaId: String(r.campanha_id),
+      dataVenda: r.data_emissao,
+      horaVenda: r.hora_emissao,
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.nome_produto,
+      quantidade: Number(r.quantidade),
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      codigoCliente: r.codigo_cliente,
+      nomeCliente: r.nome_cliente,
+      qtdItensNaVenda: Number(r.qtd_itens_na_venda),
+      outrosProdutosNaVenda: r.outros_produtos_na_venda,
+    }));
+  }
+
+  async getProdutosEmFalta(_profile: Profile): Promise<ProdutoEmFalta[]> {
+    // vw_produtos_em_falta (não a tabela direto): resolve quem
+    // registrou, mas só devolve nome_registrado_por pra quem está
+    // logado como gestor — decidido dentro da própria view.
+    const { data, error } = await supabase
+      .from('vw_produtos_em_falta')
+      .select('id, nome_produto, codigo_produto, data, nome_registrado_por')
+      .order('data', { ascending: false });
+    if (error) throw error;
+
+    return (data ?? []).map((r) => ({
+      id: String(r.id),
+      nomeProduto: r.nome_produto,
+      codigoProduto: r.codigo_produto,
+      data: r.data,
+      nomeRegistradoPor: r.nome_registrado_por,
+    }));
+  }
+
+  async salvarProdutoEmFalta(input: SalvarProdutoEmFaltaInput): Promise<void> {
+    if (input.id) {
+      const { error } = await supabase
+        .from('produtos_em_falta')
+        .update({ nome_produto: input.nomeProduto, codigo_produto: input.codigoProduto, data: input.data })
+        .eq('id', Number(input.id));
+      if (error) throw error;
+    } else {
+      const { data: sessao } = await supabase.auth.getUser();
+      const { error } = await supabase.from('produtos_em_falta').insert({
+        nome_produto: input.nomeProduto,
+        codigo_produto: input.codigoProduto,
+        data: input.data,
+        registrado_por: sessao.user?.id ?? null,
+      });
+      if (error) throw error;
+    }
+  }
+
+  async excluirProdutoEmFalta(id: string): Promise<void> {
+    const { error } = await supabase.from('produtos_em_falta').delete().eq('id', Number(id));
     if (error) throw error;
   }
 

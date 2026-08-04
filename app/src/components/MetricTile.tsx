@@ -23,12 +23,18 @@ interface MetricTileProps {
 }
 
 const FONTE_MAX = 18;
-const FONTE_MIN = 11;
+const FONTE_MIN = 13;
 // Largura média de um caractere em fonte bold, como fração do
 // font-size — aproximação (não é medição real de glyph), calibrada
 // visualmente pra valores tipo "R$ 15.660,00". Suficiente pra evitar
 // quebra de linha sem precisar de uma lib de medição de texto.
-const FATOR_LARGURA_CARACTERE = 0.58;
+//
+// Recalibrado 03/08/2026: 0.58 estava encolhendo "R$ 1.351,76" (11
+// caracteres) visivelmente mais que "R$ 371,50" (9 caracteres) no
+// mesmo tile de 48% — a fileira tem espaço de sobra (dá pra ver o
+// respiro em volta dos valores curtos), então o fator era conservador
+// demais pra diferença de só 2 dígitos.
+const FATOR_LARGURA_CARACTERE = 0.44;
 
 // adjustsFontSizeToFit não é confiável no React Native Web (testado:
 // trunca o texto em "..." em vez de encolher a fonte) — por isso o

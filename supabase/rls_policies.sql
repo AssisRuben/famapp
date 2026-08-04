@@ -295,6 +295,114 @@ with check (exists (
   select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
 ));
 
+-- campanhas_venda_adicional/produtos: DIFERENTE de campanhas acima —
+-- aqui todo vendedor precisa LER (card em Alertas, pra todo mundo),
+-- só o gestor escreve (aba "Venda adicional").
+alter table campanhas_venda_adicional enable row level security;
+alter table campanha_venda_adicional_produtos enable row level security;
+
+create policy "campanhas_venda_adicional: autenticados leem"
+on campanhas_venda_adicional for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "campanhas_venda_adicional: gestor insere"
+on campanhas_venda_adicional for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "campanhas_venda_adicional: gestor atualiza"
+on campanhas_venda_adicional for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "campanhas_venda_adicional: gestor apaga"
+on campanhas_venda_adicional for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "campanha_venda_adicional_produtos: autenticados leem"
+on campanha_venda_adicional_produtos for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "campanha_venda_adicional_produtos: gestor insere"
+on campanha_venda_adicional_produtos for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "campanha_venda_adicional_produtos: gestor apaga"
+on campanha_venda_adicional_produtos for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+-- produtos_em_falta: lista compartilhada, não é log de auditoria — CRUD
+-- aberto pra qualquer autenticado, inclusive editar/apagar registro de
+-- outra pessoa (o objetivo é o time manter a lista do mês limpa).
+alter table produtos_em_falta enable row level security;
+
+create policy "produtos_em_falta: autenticados leem"
+on produtos_em_falta for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "produtos_em_falta: autenticados inserem"
+on produtos_em_falta for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "produtos_em_falta: autenticados atualizam"
+on produtos_em_falta for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "produtos_em_falta: autenticados apagam"
+on produtos_em_falta for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+-- vw_produtos_em_falta (03/08/2026) — resolve quem registrou cada
+-- falta, mas só devolve o nome pra quem está logado como GESTOR;
+-- vendedor recebe null nessa coluna, mesmo lendo a mesma view (pedido
+-- explícito: "apenas na aba do gestor"). Precisa ser SEM
+-- security_invoker de propósito — profiles só deixa cada um ler o
+-- PRÓPRIO perfil (RLS restritiva), então rodando como invoker o
+-- vendedor não conseguiria nem resolver o nome de quem quer que seja;
+-- a view roda com privilégio de dono e decide sozinha o que devolver,
+-- checando auth.uid() por dentro (mesmo padrão de
+-- vw_receita_identificacao_comprador acima).
+create view vw_produtos_em_falta as
+select
+  pef.id,
+  pef.nome_produto,
+  pef.codigo_produto,
+  pef.data,
+  case
+    when exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor')
+    then coalesce(vd.nome, 'Gestor(a) da Farmácia')
+    else null
+  end as nome_registrado_por
+from produtos_em_falta pef
+left join profiles perfil_registro on perfil_registro.id = pef.registrado_por
+left join vendedores vd on vd.codigo = perfil_registro.codigo_vendedor;
+
 -- atividades_checklist: cadastrada pelo gestor (aba "Metas" do app).
 -- Vendedor só lê as ATIVAS (é o que aparece no checklist diário dele);
 -- gestor lê todas (incl. inativas, pra gerenciar). Só gestor escreve.
@@ -448,6 +556,7 @@ alter view vw_metricas_vendedor_diario set (security_invoker = true);
 alter view vw_vendas_por_canal set (security_invoker = true);
 alter view vw_vendas_receita_status set (security_invoker = true);
 alter view vw_vendas_antimicrobiano_recente set (security_invoker = true);
+alter view vw_venda_adicional_vendas set (security_invoker = true);
 alter view vw_receita_identificacao_comprador set (security_invoker = true);
 alter view vw_vendas_sem_identificacao_comprador set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);

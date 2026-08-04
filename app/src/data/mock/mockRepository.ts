@@ -3,6 +3,7 @@ import { DataRepository } from '../repository';
 import {
   AtividadeChecklist,
   Campanha,
+  CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteCompradorPromocao,
   ClienteDoVendedor,
@@ -25,13 +26,16 @@ import {
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
+  ProdutoEmFalta,
   ProdutoPromocaoAlerta,
   ProdutoRecorrenteCliente,
   RankingVendedorDia,
   RegistrarContatoInput,
   ResumoClientesInatividade,
   SalvarCampanhaInput,
+  SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
+  SalvarProdutoEmFaltaInput,
   StatusSincronizacao,
   SugestaoCampanhaParams,
   SugestaoCompra,
@@ -39,6 +43,7 @@ import {
   VendaAntimicrobianoRecente,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
+  VendaVendaAdicional,
 } from '../../types/domain';
 import {
   GESTOR_EMAIL,
@@ -71,7 +76,9 @@ const METAS_OVERRIDES_KEY = '@farmapp/metas_overrides';
 const CHECKLIST_ATIVIDADES_KEY = '@farmapp/checklist_atividades';
 const CHECKLIST_RESPOSTAS_KEY = '@farmapp/checklist_respostas';
 const CAMPANHAS_KEY = '@farmapp/campanhas';
+const CAMPANHAS_VENDA_ADICIONAL_KEY = '@farmapp/campanhas_venda_adicional';
 const CONTATOS_CLIENTES_KEY = '@farmapp/contatos_clientes';
+const PRODUTOS_EM_FALTA_KEY = '@farmapp/produtos_em_falta';
 const SIMULATED_LATENCY_MS = 350;
 
 interface ReceitaOverride {
@@ -243,9 +250,27 @@ async function salvarCampanhasStore(campanhas: Campanha[]): Promise<void> {
   await AsyncStorage.setItem(CAMPANHAS_KEY, JSON.stringify(campanhas));
 }
 
+async function getCampanhasVendaAdicionalStore(): Promise<CampanhaVendaAdicional[]> {
+  const raw = await AsyncStorage.getItem(CAMPANHAS_VENDA_ADICIONAL_KEY);
+  return raw ? (JSON.parse(raw) as CampanhaVendaAdicional[]) : [];
+}
+
+async function salvarCampanhasVendaAdicionalStore(campanhas: CampanhaVendaAdicional[]): Promise<void> {
+  await AsyncStorage.setItem(CAMPANHAS_VENDA_ADICIONAL_KEY, JSON.stringify(campanhas));
+}
+
 async function getContatosStore(): Promise<ContatoCliente[]> {
   const raw = await AsyncStorage.getItem(CONTATOS_CLIENTES_KEY);
   return raw ? (JSON.parse(raw) as ContatoCliente[]) : [];
+}
+
+async function getProdutosEmFaltaStore(): Promise<ProdutoEmFalta[]> {
+  const raw = await AsyncStorage.getItem(PRODUTOS_EM_FALTA_KEY);
+  return raw ? (JSON.parse(raw) as ProdutoEmFalta[]) : [];
+}
+
+async function salvarProdutosEmFaltaStore(itens: ProdutoEmFalta[]): Promise<void> {
+  await AsyncStorage.setItem(PRODUTOS_EM_FALTA_KEY, JSON.stringify(itens));
 }
 
 class MockRepository implements DataRepository {
@@ -954,6 +979,127 @@ class MockRepository implements DataRepository {
   async excluirCampanha(id: string): Promise<void> {
     const campanhas = await getCampanhasStore();
     await salvarCampanhasStore(campanhas.filter((c) => c.id !== id));
+  }
+
+  async getCampanhasVendaAdicional(_profile: Profile): Promise<CampanhaVendaAdicional[]> {
+    const campanhas = await getCampanhasVendaAdicionalStore();
+    return delay([...campanhas].sort((a, b) => b.dataInicio.localeCompare(a.dataInicio)));
+  }
+
+  async salvarCampanhaVendaAdicional(input: SalvarCampanhaVendaAdicionalInput): Promise<void> {
+    const campanhas = await getCampanhasVendaAdicionalStore();
+    const produtos = input.codigosProduto.map((codigoProduto) => ({
+      codigoProduto,
+      nomeProduto: catalogoProdutosSeed.find((p) => p.codigo === codigoProduto)?.nome ?? `Produto ${codigoProduto}`,
+    }));
+
+    if (input.id) {
+      const existente = campanhas.find((c) => c.id === input.id);
+      if (!existente) throw new Error('Campanha não encontrada.');
+      existente.nome = input.nome;
+      existente.dataInicio = input.dataInicio;
+      existente.dataFim = input.dataFim;
+      existente.tipoPremiacao = input.tipoPremiacao;
+      existente.criterioQuantidade = input.criterioQuantidade;
+      existente.metaQuantidade = input.metaQuantidade;
+      existente.premiacaoMetaValor = input.premiacaoMetaValor;
+      existente.premiacaoRanking = input.premiacaoRanking;
+      existente.minimoParaConcorrer = input.minimoParaConcorrer;
+      existente.horarioLembrete = input.horarioLembrete;
+      existente.produtos = produtos;
+    } else {
+      campanhas.push({
+        id: `venda-adicional-${Date.now()}`,
+        nome: input.nome,
+        dataInicio: input.dataInicio,
+        dataFim: input.dataFim,
+        tipoPremiacao: input.tipoPremiacao,
+        criterioQuantidade: input.criterioQuantidade,
+        metaQuantidade: input.metaQuantidade,
+        premiacaoMetaValor: input.premiacaoMetaValor,
+        premiacaoRanking: input.premiacaoRanking,
+        minimoParaConcorrer: input.minimoParaConcorrer,
+        horarioLembrete: input.horarioLembrete,
+        produtos,
+      });
+    }
+
+    await salvarCampanhasVendaAdicionalStore(campanhas);
+  }
+
+  async excluirCampanhaVendaAdicional(id: string): Promise<void> {
+    const campanhas = await getCampanhasVendaAdicionalStore();
+    await salvarCampanhasVendaAdicionalStore(campanhas.filter((c) => c.id !== id));
+  }
+
+  async getVendasVendaAdicional(_profile: Profile, campanhaId: string): Promise<VendaVendaAdicional[]> {
+    const campanhas = await getCampanhasVendaAdicionalStore();
+    const campanha = campanhas.find((c) => c.id === campanhaId);
+    if (!campanha) return delay([]);
+
+    const codigosProduto = new Set(campanha.produtos.map((p) => p.codigoProduto));
+    const linhas: VendaVendaAdicional[] = vendaItensDetalheSeed
+      .filter((v) => codigosProduto.has(v.codigoProduto))
+      .map((v) => ({ v, dataVenda: dataDiasAtras(v.diasAtras) }))
+      .filter(({ dataVenda }) => dataVenda >= campanha.dataInicio && dataVenda <= campanha.dataFim)
+      .map(({ v, dataVenda }) => ({
+        itemId: v.id,
+        // seed mock não modela nota com múltiplos itens — cada linha é
+        // sua própria "venda" pra fins do critério 'mesma_venda'.
+        vendaId: v.id,
+        numeroNota: null,
+        campanhaId,
+        dataVenda,
+        horaVenda: null,
+        codigoProduto: v.codigoProduto,
+        nomeProduto: catalogoProdutosSeed.find((p) => p.codigo === v.codigoProduto)?.nome ?? `Produto ${v.codigoProduto}`,
+        quantidade: v.quantidade,
+        codigoVendedor: v.codigoVendedor,
+        nomeVendedor: nomeVendedor(v.codigoVendedor),
+        codigoCliente: v.codigoCliente,
+        nomeCliente: nomeCliente(v.codigoCliente),
+        // idem — seed não modela outros itens na mesma nota, então
+        // 'venda_com_outros_itens' não tem como ser testado no mock.
+        qtdItensNaVenda: 1,
+        outrosProdutosNaVenda: null,
+      }));
+
+    return delay(linhas);
+  }
+
+  async getProdutosEmFalta(_profile: Profile): Promise<ProdutoEmFalta[]> {
+    // Mock não tem sessão real de quem salvou (salvarProdutoEmFalta não
+    // recebe profile) — nomeRegistradoPor fica sempre null aqui; no
+    // real (supabaseRepository) vem resolvido por vw_produtos_em_falta.
+    const itens = await getProdutosEmFaltaStore();
+    return delay([...itens].sort((a, b) => b.data.localeCompare(a.data)));
+  }
+
+  async salvarProdutoEmFalta(input: SalvarProdutoEmFaltaInput): Promise<void> {
+    const itens = await getProdutosEmFaltaStore();
+
+    if (input.id) {
+      const existente = itens.find((i) => i.id === input.id);
+      if (!existente) throw new Error('Registro não encontrado.');
+      existente.codigoProduto = input.codigoProduto;
+      existente.nomeProduto = input.nomeProduto;
+      existente.data = input.data;
+    } else {
+      itens.push({
+        id: `falta-${Date.now()}`,
+        codigoProduto: input.codigoProduto,
+        nomeProduto: input.nomeProduto,
+        data: input.data,
+        nomeRegistradoPor: null,
+      });
+    }
+
+    await salvarProdutosEmFaltaStore(itens);
+  }
+
+  async excluirProdutoEmFalta(id: string): Promise<void> {
+    const itens = await getProdutosEmFaltaStore();
+    await salvarProdutosEmFaltaStore(itens.filter((i) => i.id !== id));
   }
 }
 

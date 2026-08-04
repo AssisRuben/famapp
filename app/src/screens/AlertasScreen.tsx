@@ -8,9 +8,17 @@ import { Card } from '../components/Card';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PhoneCallButton } from '../components/PhoneCallButton';
 import { colors } from '../theme/colors';
-import { formatBRL, formatDateBR, nomeCurto } from '../lib/format';
+import { formatBRL, formatDateBR, nomeCurto, todayISO } from '../lib/format';
 import { existeRegistroContato, foiContatadoRecentemente } from '../lib/contatos';
 import {
+  agruparPorVendedor,
+  campanhaAtiva,
+  calcularMetaIndividualVendaAdicional,
+  calcularRankingVendaAdicional,
+  filtrarVendasQualificadas,
+} from '../lib/vendaAdicional';
+import {
+  CampanhaVendaAdicional,
   ClienteDoVendedor,
   ContatoCliente,
   HistoricoCompraCliente,
@@ -23,6 +31,7 @@ import {
   VendaAntimicrobianoRecente,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
+  VendaVendaAdicional,
 } from '../types/domain';
 
 const MOTIVO_LABEL: Record<VendaSemIdentificacaoComprador['motivo'], string> = {
@@ -246,6 +255,8 @@ export function AlertasScreen() {
   const [identificacaoComprador, setIdentificacaoComprador] = useState<IdentificacaoCompradorVendedor[]>([]);
   const [metas, setMetas] = useState<MetaVendedor[]>([]);
   const [contatos, setContatos] = useState<ContatoCliente[]>([]);
+  const [campanhasVendaAdicionalAtivas, setCampanhasVendaAdicionalAtivas] = useState<CampanhaVendaAdicional[]>([]);
+  const [vendasVendaAdicionalPorCampanha, setVendasVendaAdicionalPorCampanha] = useState<Record<string, VendaVendaAdicional[]>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
@@ -277,6 +288,22 @@ export function AlertasScreen() {
     setIdentificacaoComprador(ident);
     setMetas(met);
     setContatos(cont);
+
+    // Venda adicional: só as campanhas ativas hoje interessam pro card
+    // de Alertas — busca as vendas de cada uma já aqui (não é lazy
+    // como o histórico de cliente, porque o número do card precisa da
+    // soma antes mesmo de expandir).
+    const todasCampanhasVA = await repository.getCampanhasVendaAdicional(profile);
+    const hojeIso = todayISO();
+    const ativasVA = todasCampanhasVA.filter((c) => campanhaAtiva(c, hojeIso));
+    const vendasPorCampanhaVA: Record<string, VendaVendaAdicional[]> = {};
+    await Promise.all(
+      ativasVA.map(async (c) => {
+        vendasPorCampanhaVA[c.id] = await repository.getVendasVendaAdicional(profile, c.id);
+      })
+    );
+    setCampanhasVendaAdicionalAtivas(ativasVA);
+    setVendasVendaAdicionalPorCampanha(vendasPorCampanhaVA);
   }, [profile]);
 
   // Registra a tentativa de contato e já suprime da lista na hora
@@ -481,6 +508,33 @@ export function AlertasScreen() {
     },
     { chave: 'alto_valor_sumindo', emoji: '💸', titulo: 'Cliente de alto valor sumindo', contagem: clientesAltoValorSumindo.length, cor: colors.navy },
     { chave: 'promocao', emoji: '🔔', titulo: 'Produto em promoção', contagem: alertasPromocao.length, cor: colors.success },
+    {
+      chave: 'venda_adicional',
+      emoji: '🎁',
+      titulo: 'Venda adicional',
+      // Gestor vê o total de todo mundo (soma bruta). Vendedor vê só o
+      // próprio número — mas precisa ser o MESMO número que aparece no
+      // ranking/meta ao abrir (agruparPorVendedor, que respeita o
+      // criterio_quantidade da campanha: em 'mesma_venda' o "total" é
+      // o maior cupom, não a soma bruta). Somar a quantidade crua
+      // direto (sem passar por agruparPorVendedor) batia diferente do
+      // que a lista expandida mostrava (achado 03/08/2026: card 169,
+      // lista mostrando 123 pra mesma vendedora).
+      contagem:
+        profile?.role === 'gestor'
+          ? Object.values(vendasVendaAdicionalPorCampanha).reduce(
+              (soma, vendas) => soma + vendas.reduce((s, v) => s + v.quantidade, 0),
+              0
+            )
+          : campanhasVendaAdicionalAtivas.reduce((soma, campanha) => {
+              const vendas = vendasVendaAdicionalPorCampanha[campanha.id] ?? [];
+              const meu = agruparPorVendedor(vendas, campanha.criterioQuantidade).find(
+                (x) => x.codigoVendedor === profile?.codigoVendedor
+              );
+              return soma + (meu?.quantidadeTotal ?? 0);
+            }, 0),
+      cor: '#DB2777',
+    },
   ];
 
   const aoClicarCard = (chave: string) => {
@@ -674,6 +728,107 @@ export function AlertasScreen() {
                 )}
               </Card>
             ))
+          )}
+        </>
+      )}
+
+      {expandido === 'venda_adicional' && (
+        <>
+          {campanhasVendaAdicionalAtivas.length === 0 ? (
+            <Card>
+              <Text style={styles.empty}>Nenhuma campanha de venda adicional ativa no momento.</Text>
+            </Card>
+          ) : (
+            campanhasVendaAdicionalAtivas.map((campanha) => {
+              const vendas = (vendasVendaAdicionalPorCampanha[campanha.id] ?? []).slice().sort((a, b) => b.dataVenda.localeCompare(a.dataVenda));
+              const parciais =
+                campanha.tipoPremiacao === 'ranking'
+                  ? calcularRankingVendaAdicional(vendas, campanha)
+                  : calcularMetaIndividualVendaAdicional(vendas, campanha);
+              // Soma em cima do que já saiu filtrado/agrupado (parciais),
+              // não da lista crua — senão "Total vendido" não bate com a
+              // soma do ranking abaixo em critérios que excluem linha
+              // (ex.: 'venda_com_outros_itens' tira venda que veio
+              // sozinha, achado 03/08/2026 com dado real: total mostrava
+              // 357 bruto enquanto o ranking somava 236 já filtrado).
+              const totalQuantidade = parciais.reduce((s, item) => s + item.quantidadeTotal, 0);
+              // Lista só mostra venda que REALMENTE conta pro critério
+              // (filtrarVendasQualificadas) — senão aparecia venda de 1
+              // unidade numa campanha "mesma_venda" (compre 2) e parecia
+              // que ela estava contando, quando nunca contou (achado
+              // 03/08/2026). Ranking/parciais acima continua mostrando
+              // todo mundo (é o ponto de ter ranking) — só a lista de
+              // vendas em si (quem comprou o quê, quando) que só mostra
+              // a do próprio vendedor logado; gestor vê a de todo mundo.
+              const vendasQualificadas = filtrarVendasQualificadas(vendas, campanha);
+              const minhasVendas =
+                profile?.role === 'gestor'
+                  ? vendasQualificadas
+                  : vendasQualificadas.filter((v) => v.codigoVendedor === profile?.codigoVendedor);
+
+              return (
+                <Card key={campanha.id}>
+                  <Text style={styles.produtoNome}>{campanha.nome}</Text>
+                  <Text style={styles.listaSubtitulo}>
+                    {campanha.produtos.map((p) => p.nomeProduto).join(', ')} · até {formatDateBR(campanha.dataFim)}
+                  </Text>
+                  <Text style={styles.itemDetalhe}>
+                    {campanha.tipoPremiacao === 'ranking'
+                      ? `Prêmio: ${(campanha.premiacaoRanking ?? []).map((p) => `${p.posicao}º ${formatBRL(p.valor)}`).join(' · ')}`
+                      : `Prêmio: vendeu ${campanha.metaQuantidade}, ganha ${formatBRL(campanha.premiacaoMetaValor ?? 0)}`}
+                    {campanha.criterioQuantidade === 'mesma_venda' ? ' · precisa sair junto na mesma venda' : ''}
+                    {campanha.criterioQuantidade === 'venda_com_outros_itens' ? ' · só conta com outro item na venda' : ''}
+                  </Text>
+
+                  <View style={styles.clientesSection}>
+                    <Text style={styles.clientesTitle}>Total vendido: {totalQuantidade} un.</Text>
+                    {parciais.length > 0 &&
+                      parciais.map((item) => (
+                        <View key={item.codigoVendedor} style={styles.itemRow}>
+                          <Text style={styles.itemNome}>
+                            {'posicao' in item ? `${item.posicao}º ` : item.bateu ? '✅ ' : '▫️ '}
+                            {item.nomeVendedor}
+                          </Text>
+                          <Text style={styles.itemDetalhe}>
+                            {item.quantidadeTotal} un.{item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
+                          </Text>
+                        </View>
+                      ))}
+                  </View>
+
+                  <View style={styles.clientesSection}>
+                    <Text style={styles.clientesTitle}>
+                      {profile?.role === 'gestor' ? `Vendas (${minhasVendas.length})` : `Suas vendas (${minhasVendas.length})`}
+                    </Text>
+                    {minhasVendas.length === 0 ? (
+                      <Text style={styles.empty}>Nenhuma venda registrada ainda.</Text>
+                    ) : (
+                      minhasVendas.map((v) => (
+                        <View key={v.itemId} style={styles.historicoRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.historicoProduto} numberOfLines={1}>
+                              {v.quantidade > 1 ? `${v.quantidade}x ` : ''}
+                              {v.nomeProduto}
+                              {profile?.role === 'gestor' && v.nomeVendedor ? ` · ${v.nomeVendedor}` : ''}
+                            </Text>
+                            {v.nomeCliente && <Text style={styles.itemDetalhe}>{v.nomeCliente}</Text>}
+                            {v.outrosProdutosNaVenda && (
+                              <Text style={styles.itemDetalhe} numberOfLines={1}>
+                                + {v.outrosProdutosNaVenda}
+                              </Text>
+                            )}
+                          </View>
+                          <Text style={styles.historicoData}>
+                            {formatDateBR(v.dataVenda)}
+                            {v.horaVenda ? ` ${v.horaVenda.slice(0, 5)}` : ''}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                </Card>
+              );
+            })
           )}
         </>
       )}

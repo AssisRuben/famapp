@@ -9,6 +9,7 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ClientesVendedorScreen } from '../screens/ClientesVendedorScreen';
 import { MetasScreen } from '../screens/MetasScreen';
+import { MetaScreen } from '../screens/MetaScreen';
 import { ChecklistScreen } from '../screens/ChecklistScreen';
 import { ClientesScreen } from '../screens/ClientesScreen';
 import { AlertasScreen } from '../screens/AlertasScreen';
@@ -16,6 +17,8 @@ import { ReceitasScreen } from '../screens/ReceitasScreen';
 import { CampanhasScreen } from '../screens/CampanhasScreen';
 import { CartazetesScreen } from '../screens/CartazetesScreen';
 import { ComprasScreen } from '../screens/ComprasScreen';
+import { VendaAdicionalScreen } from '../screens/VendaAdicionalScreen';
+import { ProdutoEmFaltaScreen } from '../screens/ProdutoEmFaltaScreen';
 import { PrecificacaoScreen } from '../screens/PrecificacaoScreen';
 import { SideDrawer } from '../components/SideDrawer';
 import { colors } from '../theme/colors';
@@ -81,9 +84,12 @@ function AppTabs() {
   };
 
   const itensDrawer = [
+    { label: 'Meta', emoji: '🎯', onPress: () => irPara('Meta') },
+    { label: 'Produto em falta', emoji: '📦', onPress: () => irPara('ProdutoEmFalta') },
     ...(ehGestor
       ? [
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
+          { label: 'Venda adicional', emoji: '🎁', onPress: () => irPara('VendaAdicional') },
           { label: 'Campanhas', emoji: '📢', onPress: () => irPara('Campanhas') },
           { label: 'Cartazetes', emoji: '🖨️', onPress: () => irPara('Cartazetes') },
           { label: 'Compras', emoji: '🛒', onPress: () => irPara('Compras') },
@@ -155,6 +161,33 @@ function AppTabs() {
             title: ehGestor ? 'Metas' : 'Checklist',
             tabBarIcon: ({ focused }) => <TabIcon emoji={ehGestor ? '🎯' : '✅'} focused={focused} />,
             ...abaOculta(ehGestor),
+          }}
+        />
+        <Tab.Screen
+          name="Meta"
+          component={MetaScreen}
+          options={{
+            title: 'Meta',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🎯" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="ProdutoEmFalta"
+          component={ProdutoEmFaltaScreen}
+          options={{
+            title: 'Produto em falta',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="📦" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="VendaAdicional"
+          component={VendaAdicionalScreen}
+          options={{
+            title: 'Venda adicional',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🎁" focused={focused} />,
+            ...abaOculta(true),
           }}
         />
         <Tab.Screen

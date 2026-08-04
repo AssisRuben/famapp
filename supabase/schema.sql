@@ -351,6 +351,148 @@ create table campanha_produtos (
 );
 
 -- ============================================================
+-- CAMPANHAS DE VENDA ADICIONAL (03/08/2026) — incentivo pontual pra
+-- vendedor empurrar produto(s) específico(s) num período (ex.: "venda
+-- protetor solar até dia 20, os 3 primeiros ganham prêmio"). DIFERENTE
+-- de `campanhas`/`campanha_produtos` acima (aquilo é decisão de PREÇO
+-- pra cartazete impresso) — aqui não mexe em preço nenhum, é só
+-- incentivo/premiação de venda. Gestor cadastra (aba "Venda
+-- adicional"), todo vendedor vê e acompanha (card em Alertas).
+--
+-- tipo_premiacao:
+--   'ranking'         — os N primeiros por quantidade vendida ganham,
+--                        valor por posição em premiacao_ranking (jsonb,
+--                        ex.: [{"posicao":1,"valor":200}, ...]) — array
+--                        em vez de tabela à parte, só pra exibir, não
+--                        precisa de query relacional.
+--   'meta_individual'  — todo vendedor que bater meta_quantidade ganha
+--                        premiacao_meta_valor (mesmo prêmio pra todo
+--                        mundo que bater, sem ranking).
+--
+-- horario_lembrete (HH:mm, opcional) — preparado pra reaproveitar o
+-- mesmo mecanismo de notificação local do Checklist
+-- (sincronizarNotificacoesChecklist em app/src/lib/notifications.ts),
+-- ainda não implementado pra venda adicional.
+--
+-- Prêmio é só informativo — não entra no fechamento de comissão
+-- (regra própria, mais delicada, não foi pedido misturar).
+-- ============================================================
+create table campanhas_venda_adicional (
+  id bigserial primary key,
+  nome text not null,
+  data_inicio date not null,
+  data_fim date not null,
+  tipo_premiacao text not null check (tipo_premiacao in ('ranking', 'meta_individual')),
+  meta_quantidade integer check (meta_quantidade > 0),
+  premiacao_meta_valor numeric(12,2) check (premiacao_meta_valor > 0),
+  premiacao_ranking jsonb,
+  -- Só pro tipo 'ranking': piso mínimo pra entrar na disputa (ex.:
+  -- "concorre a partir de 5" — vendedor que vendeu menos que isso nem
+  -- aparece no ranking, mesmo tendo vendido alguma coisa). Editável na
+  -- aba do gestor. Null = sem piso, todo mundo que vendeu 1+ concorre
+  -- (03/08/2026).
+  minimo_para_concorrer integer check (minimo_para_concorrer > 0),
+  -- 'acumulado_periodo': soma tudo que o vendedor vendeu no período
+  -- inteiro (padrão).
+  -- 'mesma_venda': só conta o MAIOR cupom individual de cada vendedor
+  -- — pra premiar "vendeu 2 [do mesmo produto] juntas na mesma venda"
+  -- (campanha de produto único, tipo "compre 2").
+  -- 'venda_com_outros_itens': só conta a venda se ela tiver OUTRO item
+  -- além do(s) produto(s) da campanha (qtd_itens_na_venda > 1 na view)
+  -- — pra campanha de vários produtos tipo "adicional bebê" (pomada,
+  -- lenço, chupeta): conta como venda adicional só se não veio
+  -- SOZINHO na nota, senão é venda normal, não upsell. Diferente de
+  -- 'mesma_venda': aqui não importa quantidade do mesmo produto, e sim
+  -- se tinha ALGO MAIS na venda (03/08/2026).
+  criterio_quantidade text not null default 'acumulado_periodo'
+    check (criterio_quantidade in ('acumulado_periodo', 'mesma_venda', 'venda_com_outros_itens')),
+  horario_lembrete text,
+  criado_por uuid references auth.users(id),
+  criada_em timestamptz not null default now(),
+  constraint venda_adicional_datas_coerentes check (data_fim >= data_inicio)
+);
+
+create table campanha_venda_adicional_produtos (
+  id bigserial primary key,
+  campanha_id bigint not null references campanhas_venda_adicional(id) on delete cascade,
+  codigo_produto integer not null references produto_catalogo(codigo),
+  unique (campanha_id, codigo_produto)
+);
+
+create index idx_cva_produtos_campanha on campanha_venda_adicional_produtos (campanha_id);
+
+-- Vendas dos produtos de cada campanha, já filtradas pelo período
+-- dela — alimenta a lista do card em Alertas (produto, cliente, data,
+-- horário) e o cálculo de ranking/meta batida (feito no app, em cima
+-- dessas linhas).
+create view vw_venda_adicional_vendas as
+select
+  cvap.campanha_id,
+  vi.id as venda_item_id,
+  v.data_emissao,
+  v.hora_emissao,
+  vi.codigo_produto,
+  pc.nome as nome_produto,
+  vi.quantidade_produtos as quantidade,
+  v.codigo_vendedor,
+  vd.nome as nome_vendedor,
+  v.codigo_cliente,
+  c.nome as nome_cliente,
+  v.id as venda_id,
+  v.numero_nota,
+  -- Total de LINHAS (produtos distintos) na nota inteira, não só dos
+  -- produtos da campanha — precisa pro critério
+  -- 'venda_com_outros_itens' saber se veio sozinho ou junto com algo
+  -- mais. Subquery, não join direto: contar teria que somar depois de
+  -- juntar com vi (linha da campanha), o que dobraria a contagem se a
+  -- nota tivesse mais de 1 produto da campanha.
+  (select count(*) from venda_itens vi2 where vi2.venda_id = vi.venda_id) as qtd_itens_na_venda,
+  -- Nomes dos OUTROS produtos na mesma nota (excluindo esse mesmo
+  -- item) — pra mostrar na lista "com o que ele veio junto", já que
+  -- 'venda_com_outros_itens' não rastreia esses outros produtos como
+  -- parte da campanha, só precisa saber que existem (03/08/2026).
+  (
+    select string_agg(distinct coalesce(pc2.nome, 'Produto ' || vi2.codigo_produto), ', ')
+    from venda_itens vi2
+    left join produto_catalogo pc2 on pc2.codigo = vi2.codigo_produto
+    where vi2.venda_id = vi.venda_id and vi2.id <> vi.id
+  ) as outros_produtos_na_venda
+from campanha_venda_adicional_produtos cvap
+join campanhas_venda_adicional camp on camp.id = cvap.campanha_id
+join venda_itens vi on vi.codigo_produto = cvap.codigo_produto
+join vendas v on v.id = vi.venda_id and v.data_emissao between camp.data_inicio and camp.data_fim
+left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+left join vendedores vd on vd.codigo = v.codigo_vendedor
+left join clientes c on c.codigo = v.codigo_cliente;
+
+-- ============================================================
+-- PRODUTOS EM FALTA (03/08/2026) — registro manual e rápido de "esse
+-- produto está em falta hoje", feito por qualquer vendedor no balcão.
+-- DIFERENTE de Compras/Dose Certa (sugestão automática por demanda e
+-- estoque, calculada) — aqui é o vendedor reportando na hora que
+-- percebeu que faltou, sem cálculo nenhum por trás. Lista
+-- compartilhada (não é log de auditoria): todo mundo lê, edita e
+-- apaga, inclusive registro de outra pessoa — o objetivo é o time
+-- inteiro manter a lista do mês limpa e atualizada.
+--
+-- nome_produto é texto livre, de propósito (03/08/2026, achado com
+-- caso real: produto novo no mercado que ainda não está no catálogo
+-- não tinha como ser reportado) — codigo_produto é OPCIONAL, só
+-- preenchido quando o nome bate com algo já cadastrado em
+-- produto_catalogo (busca assistida na tela, não obrigatória).
+-- ============================================================
+create table produtos_em_falta (
+  id bigserial primary key,
+  nome_produto text not null,
+  codigo_produto integer references produto_catalogo(codigo),
+  data date not null,
+  registrado_por uuid references auth.users(id),
+  criado_em timestamptz not null default now()
+);
+
+create index idx_produtos_em_falta_data on produtos_em_falta (data desc);
+
+-- ============================================================
 -- ATENDIMENTOS DIÁRIOS POR VENDEDOR (VendasVendedorIntegracaoDto)
 -- ============================================================
 create table vendas_vendedor_diario (

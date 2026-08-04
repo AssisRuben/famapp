@@ -470,6 +470,131 @@ export interface GrupoCartazete {
 }
 
 // ============================================================
+// VENDA ADICIONAL — incentivo pontual pra vendedor empurrar produto(s)
+// específico(s) num período (03/08/2026). DIFERENTE de Campanha acima
+// (aquilo é preço de cartazete impresso) — aqui não mexe em preço,
+// é só premiação de venda. Prêmio é informativo (não entra no
+// fechamento de comissão). Gestor cadastra na aba "Venda adicional",
+// todo vendedor vê no card de Alertas.
+// ============================================================
+export type TipoPremiacaoVendaAdicional = 'ranking' | 'meta_individual';
+// 'acumulado_periodo': soma tudo que o vendedor vendeu no período
+// inteiro (padrão).
+// 'mesma_venda': só conta o MAIOR cupom individual de cada vendedor —
+// pra campanha de produto único tipo "compre 2" (vendeu 2 do MESMO
+// produto juntas na mesma venda).
+// 'venda_com_outros_itens': só conta a venda se ela tiver outro item
+// além do(s) produto(s) da campanha — pra campanha de vários produtos
+// tipo "adicional bebê" (pomada, lenço, chupeta): quem levou só a
+// chupeta sozinha não conta, quem já estava comprando outra coisa e
+// levou junto conta. Não olha quantidade do produto da campanha, só
+// se veio acompanhado de algo mais na nota (03/08/2026).
+export type CriterioQuantidadeVendaAdicional = 'acumulado_periodo' | 'mesma_venda' | 'venda_com_outros_itens';
+
+export interface PremiacaoRankingItem {
+  posicao: number;
+  valor: number;
+}
+
+export interface CampanhaVendaAdicional {
+  id: string;
+  nome: string;
+  dataInicio: string;
+  dataFim: string;
+  tipoPremiacao: TipoPremiacaoVendaAdicional;
+  criterioQuantidade: CriterioQuantidadeVendaAdicional;
+  // Só preenchido pro tipo 'meta_individual'.
+  metaQuantidade: number | null;
+  premiacaoMetaValor: number | null;
+  // Só preenchido pro tipo 'ranking' — ex.: [{posicao:1,valor:200}, ...].
+  premiacaoRanking: PremiacaoRankingItem[] | null;
+  // Só faz sentido pro tipo 'ranking': piso mínimo pra entrar na
+  // disputa (ex.: "concorre a partir de 5") — vendedor abaixo disso
+  // nem aparece no ranking, mesmo tendo vendido algo. Null = sem piso.
+  minimoParaConcorrer: number | null;
+  // HH:mm opcional — preparado pra reaproveitar o mecanismo de
+  // notificação local do Checklist (lib/notifications.ts), ainda não
+  // implementado pra venda adicional.
+  horarioLembrete: string | null;
+  produtos: { codigoProduto: number; nomeProduto: string }[];
+}
+
+export interface SalvarCampanhaVendaAdicionalInput {
+  id?: string;
+  nome: string;
+  dataInicio: string;
+  dataFim: string;
+  tipoPremiacao: TipoPremiacaoVendaAdicional;
+  criterioQuantidade: CriterioQuantidadeVendaAdicional;
+  metaQuantidade: number | null;
+  premiacaoMetaValor: number | null;
+  premiacaoRanking: PremiacaoRankingItem[] | null;
+  minimoParaConcorrer: number | null;
+  horarioLembrete: string | null;
+  codigosProduto: number[];
+}
+
+// Espelha vw_venda_adicional_vendas — uma linha por venda de produto
+// de uma campanha, já dentro do período dela. Alimenta a lista do card
+// em Alertas (produto, cliente, data, horário) e o cálculo de
+// ranking/meta batida (feito no app, agrupando por vendedor). vendaId
+// (não confundir com itemId) é o que agrupa "mesmo cupom" no critério
+// 'mesma_venda' — duas linhas de produtos diferentes na mesma nota têm
+// itemId diferente mas vendaId igual.
+export interface VendaVendaAdicional {
+  itemId: string;
+  vendaId: string;
+  numeroNota: number | null;
+  campanhaId: string;
+  dataVenda: string;
+  horaVenda: string | null;
+  codigoProduto: number;
+  nomeProduto: string;
+  quantidade: number;
+  codigoVendedor: number | null;
+  nomeVendedor: string | null;
+  codigoCliente: number | null;
+  nomeCliente: string | null;
+  // Total de itens (linhas) na nota inteira, não só os da campanha —
+  // usado pelo critério 'venda_com_outros_itens' pra saber se o
+  // produto veio sozinho na venda ou acompanhado de algo mais.
+  qtdItensNaVenda: number;
+  // Nomes dos outros produtos que vieram na mesma nota (fora os da
+  // campanha), separados por vírgula — null se veio sozinho. Mostra
+  // "com o que" a venda contou no critério 'venda_com_outros_itens'.
+  outrosProdutosNaVenda: string | null;
+}
+
+// ============================================================
+// PRODUTOS EM FALTA (03/08/2026) — registro manual e rápido de "esse
+// produto está em falta hoje", feito por qualquer vendedor no balcão.
+// DIFERENTE de SugestaoCompra (calculada por demanda/estoque) — aqui
+// não tem cálculo nenhum, é só o vendedor reportando na hora. Lista
+// compartilhada do mês, editável/apagável por qualquer um.
+// ============================================================
+export interface ProdutoEmFalta {
+  id: string;
+  // Texto livre — não precisa existir em produto_catalogo (pode ser
+  // produto novo no mercado). codigoProduto só vem preenchido quando
+  // o nome bateu com um item já cadastrado (busca assistida na tela).
+  nomeProduto: string;
+  codigoProduto: number | null;
+  data: string;
+  // Resolvido no banco (vw_produtos_em_falta) — só vem preenchido pra
+  // quem está logado como gestor; vendedor sempre recebe null aqui,
+  // mesmo sendo o mesmo registro (não é filtro de UI, é a própria view
+  // que decide o que devolver).
+  nomeRegistradoPor: string | null;
+}
+
+export interface SalvarProdutoEmFaltaInput {
+  id?: string;
+  nomeProduto: string;
+  codigoProduto: number | null;
+  data: string;
+}
+
+// ============================================================
 // COMPRAS (Dose Certa) — lista de compras sugerida por
 // demanda/estoque. Estratégia "estoque de segurança": calcula a
 // demanda média diária a partir da venda recente (mesma janela usada
