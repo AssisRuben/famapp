@@ -11,6 +11,7 @@ import { ClientesVendedorScreen } from '../screens/ClientesVendedorScreen';
 import { MetasScreen } from '../screens/MetasScreen';
 import { MetaScreen } from '../screens/MetaScreen';
 import { ChecklistScreen } from '../screens/ChecklistScreen';
+import { ChecklistGerenciarScreen } from '../screens/ChecklistGerenciarScreen';
 import { ClientesScreen } from '../screens/ClientesScreen';
 import { AlertasScreen } from '../screens/AlertasScreen';
 import { ReceitasScreen } from '../screens/ReceitasScreen';
@@ -84,7 +85,7 @@ function AppTabs() {
   };
 
   const itensDrawer = [
-    { label: 'Meta', emoji: '🎯', onPress: () => irPara('Meta') },
+    { label: ehGestor ? 'Check list' : 'Meta', emoji: ehGestor ? '✅' : '🎯', onPress: () => irPara('Meta') },
     { label: 'Produto em falta', emoji: '📦', onPress: () => irPara('ProdutoEmFalta') },
     ...(ehGestor
       ? [
@@ -165,10 +166,10 @@ function AppTabs() {
         />
         <Tab.Screen
           name="Meta"
-          component={MetaScreen}
+          component={ehGestor ? ChecklistGerenciarScreen : MetaScreen}
           options={{
-            title: 'Meta',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="🎯" focused={focused} />,
+            title: ehGestor ? 'Check list' : 'Meta',
+            tabBarIcon: ({ focused }) => <TabIcon emoji={ehGestor ? '✅' : '🎯'} focused={focused} />,
             ...abaOculta(true),
           }}
         />

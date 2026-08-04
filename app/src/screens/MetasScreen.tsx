@@ -1,14 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
@@ -18,9 +9,7 @@ import { colors } from '../theme/colors';
 import { formatBRL } from '../lib/format';
 import { mesAnoLabel, rotuloSemana } from '../lib/metas';
 import { alertar } from '../lib/alert';
-import { AtividadeChecklist, ComissaoMensal, MetaVendedor, VendedorAtivo } from '../types/domain';
-
-type Segmento = 'metas' | 'atividades';
+import { ComissaoMensal, MetaVendedor, VendedorAtivo } from '../types/domain';
 
 function hojeAnoMes(): { ano: number; mes: number } {
   const hoje = new Date();
@@ -29,7 +18,6 @@ function hojeAnoMes(): { ano: number; mes: number } {
 
 export function MetasScreen() {
   const { profile } = useAuth();
-  const [segmento, setSegmento] = useState<Segmento>('metas');
 
   const [{ ano, mes }, setAnoMes] = useState(hojeAnoMes());
   const [vendedores, setVendedores] = useState<VendedorAtivo[]>([]);
@@ -42,11 +30,6 @@ export function MetasScreen() {
 
   const [valorMensal, setValorMensal] = useState('');
   const [valoresSemana, setValoresSemana] = useState(['', '', '', '']);
-
-  const [atividades, setAtividades] = useState<AtividadeChecklist[]>([]);
-  const [loadingAtividades, setLoadingAtividades] = useState(true);
-  const [novaAtividade, setNovaAtividade] = useState('');
-  const [novoHorario, setNovoHorario] = useState('');
 
   // Lançamento em massa da meta mensal — seção própria no fim da tela,
   // com seletor de mês independente do formulário de cima (não afeta
@@ -68,13 +51,6 @@ export function MetasScreen() {
     setComissoes(await repository.getComissoesMensal(profile, ano, mes));
   }, [profile, ano, mes]);
 
-  const carregarAtividades = useCallback(async () => {
-    if (!profile) return;
-    setLoadingAtividades(true);
-    setAtividades(await repository.getAtividadesChecklist(profile));
-    setLoadingAtividades(false);
-  }, [profile]);
-
   const carregarLote = useCallback(async () => {
     if (!profile) return;
     setLoadingLote(true);
@@ -85,10 +61,6 @@ export function MetasScreen() {
   useEffect(() => {
     carregarMetas();
   }, [carregarMetas]);
-
-  useEffect(() => {
-    carregarAtividades();
-  }, [carregarAtividades]);
 
   useEffect(() => {
     carregarLote();
@@ -218,245 +190,141 @@ export function MetasScreen() {
     }
   };
 
-  const adicionarAtividade = async () => {
-    const titulo = novaAtividade.trim();
-    if (!titulo) return;
-
-    const horario = novoHorario.trim();
-    if (horario && !/^([01]\d|2[0-3]):[0-5]\d$/.test(horario)) {
-      alertar('Horário inválido', 'Use o formato HH:mm, por exemplo 08:30.');
-      return;
-    }
-
-    await repository.salvarAtividadeChecklist({ titulo, horario: horario || null });
-    setNovaAtividade('');
-    setNovoHorario('');
-    await carregarAtividades();
-  };
-
-  const alternarAtividade = async (atividade: AtividadeChecklist) => {
-    await repository.alternarAtividadeChecklist(atividade.id, !atividade.ativo);
-    await carregarAtividades();
-  };
-
   const rotulos = useMemo(() => ([1, 2, 3, 4] as const).map((s) => rotuloSemana(s, ano, mes)), [ano, mes]);
 
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>🎯 Gestão da equipe</Text>
 
-      <View style={styles.segmentedWrap}>
-        <Pressable
-          style={[styles.segmentButton, segmento === 'metas' && styles.segmentButtonAtivo]}
-          onPress={() => setSegmento('metas')}
-        >
-          <Text style={[styles.segmentText, segmento === 'metas' && styles.segmentTextAtivo]}>Metas</Text>
+      <View style={styles.mesSeletor}>
+        <Pressable onPress={() => mudarMes(-1)} style={styles.mesBotao} hitSlop={8}>
+          <Ionicons name="chevron-back" size={20} color={colors.navy} />
         </Pressable>
-        <Pressable
-          style={[styles.segmentButton, segmento === 'atividades' && styles.segmentButtonAtivo]}
-          onPress={() => setSegmento('atividades')}
-        >
-          <Text style={[styles.segmentText, segmento === 'atividades' && styles.segmentTextAtivo]}>
-            Checklist diário
-          </Text>
+        <Text style={styles.mesLabel}>{mesAnoLabel(ano, mes)}</Text>
+        <Pressable onPress={() => mudarMes(1)} style={styles.mesBotao} hitSlop={8}>
+          <Ionicons name="chevron-forward" size={20} color={colors.navy} />
         </Pressable>
       </View>
 
-      {segmento === 'metas' ? (
-        <>
-          <View style={styles.mesSeletor}>
-            <Pressable onPress={() => mudarMes(-1)} style={styles.mesBotao} hitSlop={8}>
-              <Ionicons name="chevron-back" size={20} color={colors.navy} />
-            </Pressable>
-            <Text style={styles.mesLabel}>{mesAnoLabel(ano, mes)}</Text>
-            <Pressable onPress={() => mudarMes(1)} style={styles.mesBotao} hitSlop={8}>
-              <Ionicons name="chevron-forward" size={20} color={colors.navy} />
-            </Pressable>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {vendedores.map((v) => (
-              <Pressable
-                key={v.codigo}
-                style={[styles.chip, vendedorSelecionado === v.codigo && styles.chipAtivo]}
-                onPress={() => setVendedorSelecionado(v.codigo)}
-              >
-                <Text style={[styles.chipTexto, vendedorSelecionado === v.codigo && styles.chipTextoAtivo]}>
-                  {v.nome}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          <Card>
-            <Text style={styles.cardTitulo}>Meta mensal (margem bruta)</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={valorMensal}
-              onChangeText={setValorMensal}
-              placeholder="Valor em R$"
-            />
-
-            <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Metas semanais (margem bruta)</Text>
-            {rotulos.map((rotulo, index) => (
-              <View key={rotulo} style={styles.semanaInputRow}>
-                <Text style={styles.semanaRotulo}>{rotulo}</Text>
-                <TextInput
-                  style={[styles.input, styles.inputSemana]}
-                  keyboardType="numeric"
-                  value={valoresSemana[index]}
-                  onChangeText={(texto) =>
-                    setValoresSemana((atual) => atual.map((v, i) => (i === index ? texto : v)))
-                  }
-                  placeholder="R$"
-                />
-              </View>
-            ))}
-
-            <Pressable style={styles.salvarButton} onPress={salvar} disabled={salvando}>
-              {salvando ? (
-                <ActivityIndicator color={colors.white} size="small" />
-              ) : (
-                <Text style={styles.salvarTexto}>Salvar meta</Text>
-              )}
-            </Pressable>
-          </Card>
-
-          <Text style={styles.sectionTitulo}>Panorama da equipe — {mesAnoLabel(ano, mes)}</Text>
-          {loadingMetas ? (
-            <ActivityIndicator style={{ marginTop: 12 }} />
-          ) : (
-            metas.map((meta) => {
-              const comissao = comissoes.find((c) => c.codigoVendedor === meta.codigoVendedor);
-              return (
-                <Card key={meta.codigoVendedor}>
-                  <MetaProgressBar
-                    label={`${meta.nomeVendedor} — mensal`}
-                    valorRealizado={meta.valorRealizadoMensal}
-                    valorMeta={meta.valorMetaMensal}
-                  />
-                  {comissao ? (
-                    <View style={styles.comissaoRow}>
-                      <Text style={styles.comissaoTexto}>
-                        💰 {comissao.regraAplicada === 'flat_10_mensal'
-                          ? 'Meta mensal batida: 10% flat'
-                          : `Taxa efetiva: ${comissao.percentualComissao}% (soma por semana)`} sobre a margem bruta
-                        ({formatBRL(comissao.margemBrutaValor)})
-                      </Text>
-                      <Text style={styles.comissaoValor}>
-                        ≈ {formatBRL(comissao.comissaoValor)} de comissão no fechamento do mês
-                      </Text>
-                    </View>
-                  ) : null}
-                </Card>
-              );
-            })
-          )}
-
-          <Text style={[styles.sectionTitulo, styles.loteTitulo]}>Lançar meta mensal</Text>
-          <Card>
-            <View style={styles.mesSeletor}>
-              <Pressable onPress={() => mudarMesLote(-1)} style={styles.mesBotao} hitSlop={8}>
-                <Ionicons name="chevron-back" size={20} color={colors.navy} />
-              </Pressable>
-              <Text style={styles.mesLabel}>{mesAnoLabel(anoLote, mesLote)}</Text>
-              <Pressable onPress={() => mudarMesLote(1)} style={styles.mesBotao} hitSlop={8}>
-                <Ionicons name="chevron-forward" size={20} color={colors.navy} />
-              </Pressable>
-            </View>
-
-            {loadingLote ? (
-              <ActivityIndicator style={{ marginTop: 12 }} />
-            ) : (
-              vendedores.map((v) => (
-                <View key={v.codigo} style={styles.loteRow}>
-                  <Text style={styles.loteNome} numberOfLines={1}>
-                    {v.nome}
-                  </Text>
-                  <TextInput
-                    style={[styles.input, styles.inputLote]}
-                    keyboardType="numeric"
-                    value={valoresLote[v.codigo] ?? ''}
-                    onChangeText={(texto) => setValoresLote((atual) => ({ ...atual, [v.codigo]: texto }))}
-                    placeholder="R$"
-                  />
-                </View>
-              ))
-            )}
-
-            <Pressable style={styles.salvarButton} onPress={salvarLote} disabled={salvandoLote || loadingLote}>
-              {salvandoLote ? (
-                <ActivityIndicator color={colors.white} size="small" />
-              ) : (
-                <Text style={styles.salvarTexto}>Salvar</Text>
-              )}
-            </Pressable>
-          </Card>
-        </>
-      ) : (
-        <>
-          <Card>
-            <Text style={styles.cardTitulo}>Nova atividade</Text>
-            <View style={styles.novaAtividadeRow}>
-              <TextInput
-                style={[styles.input, styles.inputAtividade]}
-                value={novaAtividade}
-                onChangeText={setNovaAtividade}
-                placeholder="Ex.: Conferir vitrine da entrada"
-              />
-              <TextInput
-                style={[styles.input, styles.inputHorario]}
-                value={novoHorario}
-                onChangeText={setNovoHorario}
-                placeholder="HH:mm"
-                keyboardType="numbers-and-punctuation"
-                maxLength={5}
-              />
-              <Pressable style={styles.addButton} onPress={adicionarAtividade}>
-                <Ionicons name="add" size={20} color={colors.white} />
-              </Pressable>
-            </View>
-            <Text style={styles.hint}>
-              O horário (opcional) dispara um lembrete push de segunda a sábado.
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+        {vendedores.map((v) => (
+          <Pressable
+            key={v.codigo}
+            style={[styles.chip, vendedorSelecionado === v.codigo && styles.chipAtivo]}
+            onPress={() => setVendedorSelecionado(v.codigo)}
+          >
+            <Text style={[styles.chipTexto, vendedorSelecionado === v.codigo && styles.chipTextoAtivo]}>
+              {v.nome}
             </Text>
-          </Card>
+          </Pressable>
+        ))}
+      </ScrollView>
 
-          <Text style={styles.sectionTitulo}>Atividades cadastradas</Text>
-          {loadingAtividades ? (
-            <ActivityIndicator style={{ marginTop: 12 }} />
+      <Card>
+        <Text style={styles.cardTitulo}>Meta mensal (margem bruta)</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="numeric"
+          value={valorMensal}
+          onChangeText={setValorMensal}
+          placeholder="Valor em R$"
+        />
+
+        <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Metas semanais (margem bruta)</Text>
+        {rotulos.map((rotulo, index) => (
+          <View key={rotulo} style={styles.semanaInputRow}>
+            <Text style={styles.semanaRotulo}>{rotulo}</Text>
+            <TextInput
+              style={[styles.input, styles.inputSemana]}
+              keyboardType="numeric"
+              value={valoresSemana[index]}
+              onChangeText={(texto) =>
+                setValoresSemana((atual) => atual.map((v, i) => (i === index ? texto : v)))
+              }
+              placeholder="R$"
+            />
+          </View>
+        ))}
+
+        <Pressable style={styles.salvarButton} onPress={salvar} disabled={salvando}>
+          {salvando ? (
+            <ActivityIndicator color={colors.white} size="small" />
           ) : (
-            atividades.map((atividade) => (
-              <Card key={atividade.id}>
-                <View style={styles.atividadeRow}>
-                  <View style={styles.atividadeInfo}>
-                    <Text
-                      style={[styles.atividadeTexto, !atividade.ativo && styles.atividadeTextoInativo]}
-                      numberOfLines={2}
-                    >
-                      {atividade.titulo}
-                    </Text>
-                    {atividade.horario ? (
-                      <Text style={styles.atividadeHorario}>
-                        🔔 {atividade.horario} · seg a sáb
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Switch
-                    value={atividade.ativo}
-                    onValueChange={() => alternarAtividade(atividade)}
-                    trackColor={{ true: colors.navy, false: colors.border }}
-                  />
-                </View>
-              </Card>
-            ))
+            <Text style={styles.salvarTexto}>Salvar meta</Text>
           )}
-          <Text style={styles.hint}>
-            Ativa/inativa quais atividades aparecem no checklist diário dos vendedores — sem apagar o
-            histórico já registrado.
-          </Text>
-        </>
+        </Pressable>
+      </Card>
+
+      <Text style={styles.sectionTitulo}>Panorama da equipe — {mesAnoLabel(ano, mes)}</Text>
+      {loadingMetas ? (
+        <ActivityIndicator style={{ marginTop: 12 }} />
+      ) : (
+        metas.map((meta) => {
+          const comissao = comissoes.find((c) => c.codigoVendedor === meta.codigoVendedor);
+          return (
+            <Card key={meta.codigoVendedor}>
+              <MetaProgressBar
+                label={`${meta.nomeVendedor} — mensal`}
+                valorRealizado={meta.valorRealizadoMensal}
+                valorMeta={meta.valorMetaMensal}
+              />
+              {comissao ? (
+                <View style={styles.comissaoRow}>
+                  <Text style={styles.comissaoTexto}>
+                    💰 {comissao.regraAplicada === 'flat_10_mensal'
+                      ? 'Meta mensal batida: 10% flat'
+                      : `Taxa efetiva: ${comissao.percentualComissao}% (soma por semana)`} sobre a margem bruta
+                    ({formatBRL(comissao.margemBrutaValor)})
+                  </Text>
+                  <Text style={styles.comissaoValor}>
+                    ≈ {formatBRL(comissao.comissaoValor)} de comissão no fechamento do mês
+                  </Text>
+                </View>
+              ) : null}
+            </Card>
+          );
+        })
       )}
+
+      <Text style={[styles.sectionTitulo, styles.loteTitulo]}>Lançar meta mensal</Text>
+      <Card>
+        <View style={styles.mesSeletor}>
+          <Pressable onPress={() => mudarMesLote(-1)} style={styles.mesBotao} hitSlop={8}>
+            <Ionicons name="chevron-back" size={20} color={colors.navy} />
+          </Pressable>
+          <Text style={styles.mesLabel}>{mesAnoLabel(anoLote, mesLote)}</Text>
+          <Pressable onPress={() => mudarMesLote(1)} style={styles.mesBotao} hitSlop={8}>
+            <Ionicons name="chevron-forward" size={20} color={colors.navy} />
+          </Pressable>
+        </View>
+
+        {loadingLote ? (
+          <ActivityIndicator style={{ marginTop: 12 }} />
+        ) : (
+          vendedores.map((v) => (
+            <View key={v.codigo} style={styles.loteRow}>
+              <Text style={styles.loteNome} numberOfLines={1}>
+                {v.nome}
+              </Text>
+              <TextInput
+                style={[styles.input, styles.inputLote]}
+                keyboardType="numeric"
+                value={valoresLote[v.codigo] ?? ''}
+                onChangeText={(texto) => setValoresLote((atual) => ({ ...atual, [v.codigo]: texto }))}
+                placeholder="R$"
+              />
+            </View>
+          ))
+        )}
+
+        <Pressable style={styles.salvarButton} onPress={salvarLote} disabled={salvandoLote || loadingLote}>
+          {salvandoLote ? (
+            <ActivityIndicator color={colors.white} size="small" />
+          ) : (
+            <Text style={styles.salvarTexto}>Salvar</Text>
+          )}
+        </Pressable>
+      </Card>
     </ScrollView>
   );
 }
@@ -464,17 +332,6 @@ export function MetasScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 12 },
-  segmentedWrap: {
-    flexDirection: 'row',
-    backgroundColor: colors.white,
-    borderRadius: 10,
-    padding: 4,
-    marginBottom: 16,
-  },
-  segmentButton: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
-  segmentButtonAtivo: { backgroundColor: colors.navy },
-  segmentText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  segmentTextAtivo: { color: colors.white },
   mesSeletor: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -527,20 +384,4 @@ const styles = StyleSheet.create({
   loteRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 10 },
   loteNome: { flex: 1, fontSize: 13, color: colors.textPrimary },
   inputLote: { width: 130 },
-  novaAtividadeRow: { flexDirection: 'row', gap: 8 },
-  inputAtividade: { flex: 1 },
-  inputHorario: { width: 72, textAlign: 'center' },
-  addButton: {
-    backgroundColor: colors.navy,
-    borderRadius: 8,
-    width: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  atividadeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  atividadeInfo: { flex: 1 },
-  atividadeTexto: { fontSize: 14, color: colors.textPrimary },
-  atividadeTextoInativo: { color: colors.textMuted, textDecorationLine: 'line-through' },
-  atividadeHorario: { fontSize: 11, color: colors.textMuted, marginTop: 3 },
-  hint: { fontSize: 11, color: colors.textMuted, marginTop: 4, marginBottom: 20, lineHeight: 16 },
 });
