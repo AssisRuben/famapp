@@ -22,6 +22,17 @@ const DIAS_SEMANA: { valor: number; rotulo: string }[] = [
 const DIAS_SEGUNDA_A_SABADO = [2, 3, 4, 5, 6, 7];
 const HORAS = Array.from({ length: 24 }, (_, h) => h);
 
+// Atividades padrão — atalho pra preencher o título sem digitar do
+// zero. Não impede atividade avulsa: o campo de título continua livre,
+// isso só sugere um ponto de partida.
+const ATIVIDADES_PADRAO = [
+  'Varrer o chão',
+  'Fazer contato com clientes que não compram',
+  'Fazer contato com clientes que compraram antibióticos',
+  'Fazer contato com clientes que compraram medicamentos contínuos',
+  'Conferir a sua prateleira',
+];
+
 function rotulosDias(dias: number[]): string {
   if (dias.length === 7) return 'Todo dia';
   return DIAS_SEMANA.filter((d) => dias.includes(d.valor))
@@ -98,11 +109,22 @@ export function ChecklistGerenciarScreen() {
 
       <Card>
         <Text style={styles.cardTitulo}>Nova atividade</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          {ATIVIDADES_PADRAO.map((padrao) => (
+            <Pressable
+              key={padrao}
+              style={[styles.chip, novaAtividade === padrao && styles.chipAtivo]}
+              onPress={() => setNovaAtividade(padrao)}
+            >
+              <Text style={[styles.chipTexto, novaAtividade === padrao && styles.chipTextoAtivo]}>{padrao}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
         <TextInput
           style={styles.input}
           value={novaAtividade}
           onChangeText={setNovaAtividade}
-          placeholder="Ex.: Conferir vitrine da entrada"
+          placeholder="Ou digite uma atividade avulsa"
         />
 
         <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Vendedor</Text>
@@ -240,7 +262,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textPrimary,
   },
-  chipRow: { gap: 8, paddingBottom: 2 },
+  chipRow: { gap: 8, paddingBottom: 8 },
   chip: {
     backgroundColor: colors.white,
     borderRadius: 999,
