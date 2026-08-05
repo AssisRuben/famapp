@@ -44,7 +44,7 @@ function rotulosDias(dias: number[]): string {
 interface EdicaoAtividade {
   id: string;
   titulo: string;
-  codigoVendedor: number | null;
+  codigosVendedor: number[];
   diasSemana: number[];
   hora: number | null;
 }
@@ -61,7 +61,7 @@ export function ChecklistGerenciarScreen() {
   const [vendedores, setVendedores] = useState<VendedorAtivo[]>([]);
 
   const [novaAtividade, setNovaAtividade] = useState('');
-  const [codigoVendedorNovo, setCodigoVendedorNovo] = useState<number | null>(null);
+  const [codigosVendedorNovo, setCodigosVendedorNovo] = useState<number[]>([]);
   const [diasSemanaNovo, setDiasSemanaNovo] = useState<number[]>(DIAS_SEGUNDA_A_SABADO);
   const [horaNovo, setHoraNovo] = useState<number | null>(null);
 
@@ -97,6 +97,12 @@ export function ChecklistGerenciarScreen() {
     );
   };
 
+  // Mesmo padrão de toggle dos dias da semana: toque seleciona, toque
+  // de novo tira a seleção — dá pra marcar 2+ vendedores de uma vez.
+  const alternarVendedorNovo = (codigo: number) => {
+    setCodigosVendedorNovo((atual) => (atual.includes(codigo) ? atual.filter((c) => c !== codigo) : [...atual, codigo]));
+  };
+
   const adicionarAtividade = async () => {
     const titulo = novaAtividade.trim();
     if (!titulo) return;
@@ -111,11 +117,11 @@ export function ChecklistGerenciarScreen() {
     await repository.salvarAtividadeChecklist({
       titulo,
       horario,
-      codigoVendedor: codigoVendedorNovo,
+      codigosVendedor: codigosVendedorNovo,
       diasSemana: diasSemanaNovo,
     });
     setNovaAtividade('');
-    setCodigoVendedorNovo(null);
+    setCodigosVendedorNovo([]);
     setDiasSemanaNovo(DIAS_SEGUNDA_A_SABADO);
     setHoraNovo(null);
     await carregarAtividades();
@@ -130,7 +136,7 @@ export function ChecklistGerenciarScreen() {
     setEdicao({
       id: atividade.id,
       titulo: atividade.titulo,
-      codigoVendedor: atividade.codigoVendedor,
+      codigosVendedor: atividade.codigosVendedor,
       diasSemana: atividade.diasSemana,
       hora: atividade.horario ? Number(atividade.horario.slice(0, 2)) : null,
     });
@@ -144,6 +150,18 @@ export function ChecklistGerenciarScreen() {
           ? atual.diasSemana.filter((d) => d !== valor)
           : [...atual.diasSemana, valor].sort((a, b) => a - b),
       }
+    );
+  };
+
+  const alternarVendedorEdicao = (codigo: number) => {
+    setEdicao(
+      (atual) =>
+        atual && {
+          ...atual,
+          codigosVendedor: atual.codigosVendedor.includes(codigo)
+            ? atual.codigosVendedor.filter((c) => c !== codigo)
+            : [...atual.codigosVendedor, codigo],
+        }
     );
   };
 
@@ -165,7 +183,7 @@ export function ChecklistGerenciarScreen() {
         id: edicao.id,
         titulo,
         horario: edicao.hora != null ? `${String(edicao.hora).padStart(2, '0')}:00` : null,
-        codigoVendedor: edicao.codigoVendedor,
+        codigosVendedor: edicao.codigosVendedor,
         diasSemana: edicao.diasSemana,
       });
       setEdicao(null);
@@ -191,8 +209,6 @@ export function ChecklistGerenciarScreen() {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>✅ Check list</Text>
-
       <Card>
         <Text style={styles.cardTitulo}>Nova atividade</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
@@ -214,25 +230,28 @@ export function ChecklistGerenciarScreen() {
         />
 
         <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Vendedor</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+        <Text style={styles.vendedorHint}>
+          Toque pra selecionar, toque de novo pra tirar — dá pra marcar mais de um. Nenhum selecionado = todos.
+        </Text>
+        <View style={styles.vendedorGrid}>
           <Pressable
-            style={[styles.chip, codigoVendedorNovo === null && styles.chipAtivo]}
-            onPress={() => setCodigoVendedorNovo(null)}
+            style={[styles.chip, codigosVendedorNovo.length === 0 && styles.chipAtivo]}
+            onPress={() => setCodigosVendedorNovo([])}
           >
-            <Text style={[styles.chipTexto, codigoVendedorNovo === null && styles.chipTextoAtivo]}>Todos</Text>
+            <Text style={[styles.chipTexto, codigosVendedorNovo.length === 0 && styles.chipTextoAtivo]}>Todos</Text>
           </Pressable>
           {vendedores.map((v) => (
             <Pressable
               key={v.codigo}
-              style={[styles.chip, codigoVendedorNovo === v.codigo && styles.chipAtivo]}
-              onPress={() => setCodigoVendedorNovo(v.codigo)}
+              style={[styles.chip, codigosVendedorNovo.includes(v.codigo) && styles.chipAtivo]}
+              onPress={() => alternarVendedorNovo(v.codigo)}
             >
-              <Text style={[styles.chipTexto, codigoVendedorNovo === v.codigo && styles.chipTextoAtivo]}>
+              <Text style={[styles.chipTexto, codigosVendedorNovo.includes(v.codigo) && styles.chipTextoAtivo]}>
                 {v.nome}
               </Text>
             </Pressable>
           ))}
-        </ScrollView>
+        </View>
 
         <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Dias da semana</Text>
         <View style={styles.diasRow}>
@@ -277,7 +296,8 @@ export function ChecklistGerenciarScreen() {
                   {atividade.titulo}
                 </Text>
                 <Text style={styles.atividadeDetalhe}>
-                  👤 {atividade.nomeVendedor ?? 'Todos'} · 📅 {rotulosDias(atividade.diasSemana)}
+                  👤 {atividade.nomesVendedores.length > 0 ? atividade.nomesVendedores.join(', ') : 'Todos'} · 📅{' '}
+                  {rotulosDias(atividade.diasSemana)}
                   {atividade.horario ? ` · 🔔 ${atividade.horario.slice(0, 5)}` : ''}
                 </Text>
               </Pressable>
@@ -342,29 +362,32 @@ export function ChecklistGerenciarScreen() {
                 />
 
                 <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Vendedor</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                <Text style={styles.vendedorHint}>
+                  Toque pra selecionar, toque de novo pra tirar — dá pra marcar mais de um. Nenhum selecionado = todos.
+                </Text>
+                <View style={styles.vendedorGrid}>
                   <Pressable
-                    style={[styles.chip, edicao.codigoVendedor === null && styles.chipAtivo]}
-                    onPress={() => setEdicao((atual) => atual && { ...atual, codigoVendedor: null })}
+                    style={[styles.chip, edicao.codigosVendedor.length === 0 && styles.chipAtivo]}
+                    onPress={() => setEdicao((atual) => atual && { ...atual, codigosVendedor: [] })}
                   >
-                    <Text style={[styles.chipTexto, edicao.codigoVendedor === null && styles.chipTextoAtivo]}>
+                    <Text style={[styles.chipTexto, edicao.codigosVendedor.length === 0 && styles.chipTextoAtivo]}>
                       Todos
                     </Text>
                   </Pressable>
                   {vendedores.map((v) => (
                     <Pressable
                       key={v.codigo}
-                      style={[styles.chip, edicao.codigoVendedor === v.codigo && styles.chipAtivo]}
-                      onPress={() => setEdicao((atual) => atual && { ...atual, codigoVendedor: v.codigo })}
+                      style={[styles.chip, edicao.codigosVendedor.includes(v.codigo) && styles.chipAtivo]}
+                      onPress={() => alternarVendedorEdicao(v.codigo)}
                     >
                       <Text
-                        style={[styles.chipTexto, edicao.codigoVendedor === v.codigo && styles.chipTextoAtivo]}
+                        style={[styles.chipTexto, edicao.codigosVendedor.includes(v.codigo) && styles.chipTextoAtivo]}
                       >
                         {v.nome}
                       </Text>
                     </Pressable>
                   ))}
-                </ScrollView>
+                </View>
 
                 <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Dias da semana</Text>
                 <View style={styles.diasRow}>
@@ -417,7 +440,6 @@ export function ChecklistGerenciarScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
-  title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 12 },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
   cardTituloEspacado: { marginTop: 14 },
   input: {
@@ -442,6 +464,8 @@ const styles = StyleSheet.create({
   chipAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
   chipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
   chipTextoAtivo: { color: colors.white },
+  vendedorHint: { fontSize: 11, color: colors.textMuted, marginBottom: 8, lineHeight: 15 },
+  vendedorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   diasRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   diaChip: {
     backgroundColor: colors.white,

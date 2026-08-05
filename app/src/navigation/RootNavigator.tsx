@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,34 +35,37 @@ function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
   );
 }
 
-// Abas acessadas só pelo drawer não têm nenhum item próprio na barra
-// (abaixo) pra tocar de volta — sem isso, dava pra "ir fundo" no
-// drawer e não sobrar nenhuma pista visual de como voltar, mesmo a
-// barra inferior continuando funcional por baixo dos panos.
-function BotaoVoltar() {
+// Ícone de menu virou aba própria na barra debaixo (05/08/2026) — antes
+// ficava fixo no header, ocupando uma "tarja" de cima só pra isso. Mesmo
+// wrap visual do TabIcon, só troca o emoji por ícone de verdade.
+function TabIconMenu({ focused }: { focused: boolean }) {
   return (
-    <Pressable
-      onPress={() => navigationRef.navigate('Dashboard' as never)}
-      style={styles.voltarButton}
-      hitSlop={8}
-    >
-      <Ionicons name="arrow-back" size={24} color={colors.white} />
-    </Pressable>
+    <View style={[styles.tabIconWrap, focused && styles.tabIconWrapFocused]}>
+      <Ionicons name="menu" size={22} color={focused ? colors.navy : colors.textMuted} />
+    </View>
   );
+}
+
+// Tab "Menu" não navega pra lugar nenhum — abre o drawer e cancela a
+// navegação (tabPress abaixo), então o component nunca é de fato
+// renderizado. React Navigation exige um component mesmo assim.
+function MenuPlaceholder() {
+  return null;
 }
 
 // tabBarButton: () => null só esconde o CONTEÚDO — o item continua
 // reservando flex:1 na barra (é assim que a lib desenha cada aba), o
 // que deixava buracos e as abas visíveis desalinhadas. Zerar o
 // tabBarItemStyle junto colapsa o espaço de verdade.
-// headerLeft: como essas abas não aparecem na barra, ganham um botão
-// de voltar explícito no header pra Dashboard (ver BotaoVoltar acima).
+// [06/08/2026] Sem seta de voltar no header nem header nenhum pra essas
+// abas — a barra debaixo (com a aba "Menu" e as outras principais)
+// continua visível e funcional por baixo dos panos mesmo aqui, então já
+// é o "jeito de sair" sem precisar de outro botão redundante.
 function abaOculta(oculta: boolean) {
   return oculta
     ? {
         tabBarButton: () => null,
         tabBarItemStyle: { flex: 0, width: 0, padding: 0, margin: 0 },
-        headerLeft: () => <BotaoVoltar />,
       }
     : {};
 }
@@ -70,9 +73,10 @@ function abaOculta(oculta: boolean) {
 // Barra principal fica só com as abas fixas de cada papel (Alertas
 // virou fixa pros dois em 01/08/2026, reaproveitando a mesma tela do
 // gestor — a lista de produto em promoção já não era filtrada por
-// vendedor) — o resto mora no drawer lateral, aberto pelo ícone de
-// menu no header (no lugar de onde ficava o botão "Sair", que agora é
-// um item do drawer).
+// vendedor) — o resto mora no drawer lateral, aberto pela aba "Menu"
+// na própria barra debaixo (05/08/2026 — antes era um ícone fixo no
+// header; virou aba pra tirar a "tarja" de cima e ficar consistente
+// com o resto da navegação, que já é toda pela barra debaixo).
 function AppTabs() {
   const { profile, signOut } = useAuth();
   const ehGestor = profile?.role === 'gestor';
@@ -104,11 +108,7 @@ function AppTabs() {
     <>
       <Tab.Navigator
         screenOptions={{
-          headerRight: () => (
-            <Pressable onPress={() => setMenuAberto(true)} style={styles.menuButton} hitSlop={8}>
-              <Ionicons name="menu" size={26} color={colors.white} />
-            </Pressable>
-          ),
+          headerShown: false,
           headerStyle: { backgroundColor: colors.navy },
           headerTitleStyle: { color: colors.white },
           headerTintColor: colors.white,
@@ -117,6 +117,10 @@ function AppTabs() {
           tabBarLabelStyle: { fontSize: 10 },
           tabBarStyle: { height: 58 + insets.bottom, paddingTop: 6, paddingBottom: insets.bottom + 8 },
           tabBarItemStyle: { flex: 1 },
+          // sem header em nenhuma tela, o conteúdo começa em y=0 — sem
+          // esse respiro, ficaria embaixo da status bar do celular
+          // (hora, bateria).
+          sceneStyle: { paddingTop: insets.top },
         }}
       >
         <Tab.Screen
@@ -162,6 +166,20 @@ function AppTabs() {
             title: ehGestor ? 'Metas' : 'Checklist',
             tabBarIcon: ({ focused }) => <TabIcon emoji={ehGestor ? '🎯' : '✅'} focused={focused} />,
             ...abaOculta(ehGestor),
+          }}
+        />
+        <Tab.Screen
+          name="Menu"
+          component={MenuPlaceholder}
+          options={{
+            title: 'Menu',
+            tabBarIcon: ({ focused }) => <TabIconMenu focused={focused} />,
+          }}
+          listeners={{
+            tabPress: (e) => {
+              e.preventDefault();
+              setMenuAberto(true);
+            },
           }}
         />
         <Tab.Screen
@@ -254,8 +272,6 @@ export function RootNavigator() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  menuButton: { marginRight: 16, padding: 4 },
-  voltarButton: { marginLeft: 12, padding: 4 },
   tabIconWrap: {
     width: 44,
     height: 34,

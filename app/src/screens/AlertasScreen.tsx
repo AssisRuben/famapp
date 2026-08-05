@@ -124,12 +124,29 @@ function LinhaClienteComHistorico({
   );
 }
 
+type ModoFiltroSemComprador = 'todas' | 'controladas' | 'proprio_cpf';
+
+// Contagem "sem identificação" certa pro modo ativo — usada tanto pra
+// filtrar quem aparece na lista quanto (dentro de LinhaVendedorSemComprador)
+// pro número mostrado no card de cada vendedor.
+function contagemSemIdentificacao(v: IdentificacaoCompradorVendedor, modo: ModoFiltroSemComprador): number {
+  if (modo === 'controladas') return v.vendasControladasSemIdentificacao;
+  if (modo === 'proprio_cpf') return v.vendasProprioCpf;
+  return v.vendasSemIdentificacao;
+}
+
 // Drill-down do card "Venda controlada sem comprador": clica no
 // vendedor, expande as vendas específicas (nota, data, produto,
 // motivo) — mesmo padrão de LinhaClienteComHistorico acima, mas sem
 // ação de WhatsApp (não faz sentido aqui, é autoconferência/cobrança
 // interna, não contato com cliente).
-function LinhaVendedorSemComprador({ vendedor }: { vendedor: IdentificacaoCompradorVendedor }) {
+function LinhaVendedorSemComprador({
+  vendedor,
+  modo,
+}: {
+  vendedor: IdentificacaoCompradorVendedor;
+  modo: ModoFiltroSemComprador;
+}) {
   const { profile } = useAuth();
   const [aberto, setAberto] = useState(false);
   const [vendas, setVendas] = useState<VendaSemIdentificacaoComprador[]>([]);
@@ -150,17 +167,39 @@ function LinhaVendedorSemComprador({ vendedor }: { vendedor: IdentificacaoCompra
     }
   };
 
+  // Uma busca só (cacheada em `vendas`, todo tipo de venda) — trocar o
+  // filtro reaplica em cima do que já veio, sem buscar de novo.
+  // "proprio_cpf" usa o mesmo total de "todas" (não é recortado por
+  // tipo de produto, é recortado por motivo).
+  const total = modo === 'controladas' ? vendedor.totalVendasControladas : vendedor.totalVendas;
+  const semIdentificacao = contagemSemIdentificacao(vendedor, modo);
+  const percentual =
+    modo === 'controladas'
+      ? vendedor.percentualControladasSemIdentificacao
+      : modo === 'proprio_cpf'
+        ? vendedor.percentualProprioCpf
+        : vendedor.percentualSemIdentificacao;
+  const vendasVisiveis =
+    modo === 'controladas'
+      ? vendas.filter((v) => v.controlado)
+      : modo === 'proprio_cpf'
+        ? vendas.filter((v) => v.motivo === 'proprio_cpf')
+        : vendas;
+
+  const sufixoDetalhe =
+    modo === 'controladas' ? ' de controlado' : modo === 'proprio_cpf' ? ' com CPF próprio' : '';
+
   return (
     <View>
       <Pressable style={styles.itemRow} onPress={alternar}>
         <View style={styles.itemInfo}>
           <Text style={styles.itemNome}>{vendedor.nomeVendedor}</Text>
           <Text style={styles.itemDetalhe}>
-            {vendedor.vendasSemIdentificacao} de {vendedor.totalVendasControladas} vendas de controlado
+            {semIdentificacao} de {total} vendas{sufixoDetalhe}
           </Text>
         </View>
         <View style={styles.itemAcoes}>
-          <Text style={styles.percentualDestaque}>{vendedor.percentualSemIdentificacao.toFixed(0)}%</Text>
+          <Text style={styles.percentualDestaque}>{percentual.toFixed(0)}%</Text>
           <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
         </View>
       </Pressable>
@@ -168,14 +207,15 @@ function LinhaVendedorSemComprador({ vendedor }: { vendedor: IdentificacaoCompra
         <View style={styles.historicoPainel}>
           {carregando ? (
             <ActivityIndicator style={{ marginTop: 6 }} />
-          ) : vendas.length === 0 ? (
+          ) : vendasVisiveis.length === 0 ? (
             <Text style={styles.empty}>Nenhuma venda encontrada.</Text>
           ) : (
-            vendas.map((v) => (
+            vendasVisiveis.map((v) => (
               <View key={v.itemId} style={styles.historicoRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.historicoProduto} numberOfLines={1}>
                     Nota {v.numeroNota} · {v.nomeProduto}
+                    {v.controlado ? ' 🔒' : ''}
                   </Text>
                   <Text style={styles.historicoMotivo}>{MOTIVO_LABEL[v.motivo]}</Text>
                 </View>
@@ -253,6 +293,7 @@ export function AlertasScreen() {
   const [receitas, setReceitas] = useState<VendaReceitaPendente[]>([]);
   const [antimicrobianos, setAntimicrobianos] = useState<VendaAntimicrobianoRecente[]>([]);
   const [identificacaoComprador, setIdentificacaoComprador] = useState<IdentificacaoCompradorVendedor[]>([]);
+  const [filtroSemComprador, setFiltroSemComprador] = useState<ModoFiltroSemComprador>('todas');
   const [metas, setMetas] = useState<MetaVendedor[]>([]);
   const [contatos, setContatos] = useState<ContatoCliente[]>([]);
   const [campanhasVendaAdicionalAtivas, setCampanhasVendaAdicionalAtivas] = useState<CampanhaVendaAdicional[]>([]);
@@ -502,7 +543,7 @@ export function AlertasScreen() {
     {
       chave: 'sem_comprador',
       emoji: '🪪',
-      titulo: 'Venda controlada sem comprador',
+      titulo: 'Venda sem comprador',
       contagem: identificacaoComprador.reduce((soma, v) => soma + v.vendasSemIdentificacao, 0),
       cor: colors.red,
     },
@@ -557,7 +598,6 @@ export function AlertasScreen() {
       contentContainerStyle={expandido ? styles.containerContentComFab : undefined}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <Text style={styles.title}>🔔 Alertas</Text>
       <Text style={styles.subtitle}>Oportunidades de contato e pontos de atenção, atualizados a cada dado novo.</Text>
 
       <View style={styles.grid}>
@@ -622,18 +662,46 @@ export function AlertasScreen() {
 
       {expandido === 'sem_comprador' && (
         <Card>
-          <Text style={styles.listaTitulo}>
-            Venda de produto controlado sem identificação real do comprador (desde julho/2026)
-          </Text>
+          <Text style={styles.listaTitulo}>Venda sem identificação real do comprador (desde julho/2026)</Text>
           <Text style={styles.listaSubtitulo}>
             Sem cliente na venda, ou cliente cadastrado é o próprio vendedor.
           </Text>
-          {identificacaoComprador.filter((v) => v.vendasSemIdentificacao > 0).length === 0 ? (
+          <View style={styles.filtroRow}>
+            <Pressable
+              style={[styles.filtroChip, filtroSemComprador === 'todas' && styles.filtroChipAtivo]}
+              onPress={() => setFiltroSemComprador('todas')}
+            >
+              <Text style={[styles.filtroChipTexto, filtroSemComprador === 'todas' && styles.filtroChipTextoAtivo]}>
+                Todas as vendas
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.filtroChip, filtroSemComprador === 'controladas' && styles.filtroChipAtivo]}
+              onPress={() => setFiltroSemComprador('controladas')}
+            >
+              <Text
+                style={[styles.filtroChipTexto, filtroSemComprador === 'controladas' && styles.filtroChipTextoAtivo]}
+              >
+                🔒 Só controlados
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.filtroChip, filtroSemComprador === 'proprio_cpf' && styles.filtroChipAtivo]}
+              onPress={() => setFiltroSemComprador('proprio_cpf')}
+            >
+              <Text
+                style={[styles.filtroChipTexto, filtroSemComprador === 'proprio_cpf' && styles.filtroChipTextoAtivo]}
+              >
+                🪪 Só próprio CPF
+              </Text>
+            </Pressable>
+          </View>
+          {identificacaoComprador.filter((v) => contagemSemIdentificacao(v, filtroSemComprador) > 0).length === 0 ? (
             <Text style={styles.empty}>Nenhuma pendência — todo mundo identificando o comprador certinho.</Text>
           ) : (
             identificacaoComprador
-              .filter((v) => v.vendasSemIdentificacao > 0)
-              .map((v) => <LinhaVendedorSemComprador key={v.codigoVendedor} vendedor={v} />)
+              .filter((v) => contagemSemIdentificacao(v, filtroSemComprador) > 0)
+              .map((v) => <LinhaVendedorSemComprador key={v.codigoVendedor} vendedor={v} modo={filtroSemComprador} />)
           )}
         </Card>
       )}
@@ -866,7 +934,6 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   fabTexto: { color: colors.white, fontWeight: '700', fontSize: 13 },
-  title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },
   empty: { color: colors.textSecondary },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
@@ -875,9 +942,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '48%',
     backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    minHeight: 84,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 4,
@@ -885,12 +953,24 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   cardAlertaAtivo: { borderWidth: 1.5, borderColor: colors.navy },
-  cardAccent: { width: 4, alignSelf: 'stretch', borderRadius: 2, marginRight: 10 },
+  cardAccent: { width: 5, alignSelf: 'stretch', borderRadius: 2, marginRight: 12 },
   cardTextos: { flexShrink: 1 },
-  cardContagem: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
-  cardTitulo: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
+  cardContagem: { fontSize: 24, fontWeight: '700', color: colors.textPrimary },
+  cardTitulo: { fontSize: 12.5, color: colors.textSecondary, marginTop: 3, lineHeight: 16 },
   listaTitulo: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: 4 },
   listaSubtitulo: { fontSize: 11, color: colors.textMuted, marginBottom: 10 },
+  filtroRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  filtroChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  filtroChipAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
+  filtroChipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+  filtroChipTextoAtivo: { color: colors.white },
   percentualDestaque: { fontSize: 16, fontWeight: '700', color: colors.red },
   itemRow: {
     flexDirection: 'row',

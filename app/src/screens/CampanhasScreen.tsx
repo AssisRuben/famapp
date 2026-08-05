@@ -15,9 +15,24 @@ import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
-import { Campanha, CampanhaProduto, ProdutoElegibilidade } from '../types/domain';
+import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroGrupo';
+import { Campanha, CampanhaProduto, ModoSugestaoCampanha, ProdutoElegibilidade } from '../types/domain';
 
 type Modo = 'lista' | 'nova';
+const TODOS_OS_GRUPOS = '__todos__';
+
+const OPCOES_MODO_SUGESTAO: { chave: ModoSugestaoCampanha; label: string; descricao: string }[] = [
+  {
+    chave: 'popularidade',
+    label: '🔥 Populares',
+    descricao: 'Prioriza quem já vende bem e sustenta desconto sem perder margem.',
+  },
+  {
+    chave: 'liquidacao',
+    label: '📦 Estoque parado',
+    descricao: 'Busca produto sem venda recente mas ainda em estoque, priorizando quem tem mais capital parado.',
+  },
+];
 
 function somarDias(iso: string, dias: number): string {
   const data = new Date(`${iso}T00:00:00`);
@@ -41,6 +56,9 @@ export function CampanhasScreen() {
   const [gerando, setGerando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [itens, setItens] = useState<CampanhaProduto[]>([]);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [modoSugestao, setModoSugestao] = useState<ModoSugestaoCampanha>('popularidade');
+  const [macroGrupoFiltro, setMacroGrupoFiltro] = useState<MacroGrupo | typeof TODOS_OS_GRUPOS>(TODOS_OS_GRUPOS);
 
   const carregarLista = useCallback(async () => {
     if (!profile) return;
@@ -59,6 +77,8 @@ export function CampanhasScreen() {
       margemMinimaPct: Number(margemMinima.replace(',', '.')) || 0,
       descontoAlvoPct: Number(descontoAlvo.replace(',', '.')) || 0,
       quantidadeMaxima: Number(quantidadeMaxima) || 10,
+      modo: modoSugestao,
+      macroGrupo: macroGrupoFiltro === TODOS_OS_GRUPOS ? undefined : macroGrupoFiltro,
     };
     setGerando(true);
     try {
@@ -85,6 +105,30 @@ export function CampanhasScreen() {
     );
   };
 
+  const resetFormulario = () => {
+    setEditandoId(null);
+    setNome('');
+    setDataInicio(todayISO());
+    setDataFim(somarDias(todayISO(), 7));
+    setItens([]);
+    setModoSugestao('popularidade');
+    setMacroGrupoFiltro(TODOS_OS_GRUPOS);
+  };
+
+  const abrirNova = () => {
+    resetFormulario();
+    setModo('nova');
+  };
+
+  const abrirEdicao = (campanha: Campanha) => {
+    setEditandoId(campanha.id);
+    setNome(campanha.nome);
+    setDataInicio(campanha.dataInicio);
+    setDataFim(campanha.dataFim);
+    setItens(campanha.produtos);
+    setModo('nova');
+  };
+
   const salvar = async () => {
     if (!nome.trim()) {
       alertar('Nome obrigatório', 'Dê um nome pra campanha antes de salvar.');
@@ -101,10 +145,9 @@ export function CampanhasScreen() {
 
     setSalvando(true);
     try {
-      await repository.salvarCampanha({ nome: nome.trim(), dataInicio, dataFim, produtos: itens });
+      await repository.salvarCampanha({ id: editandoId ?? undefined, nome: nome.trim(), dataInicio, dataFim, produtos: itens });
       setModo('lista');
-      setNome('');
-      setItens([]);
+      resetFormulario();
       await carregarLista();
     } catch (erro) {
       alertar('Erro ao salvar campanha', erro instanceof Error ? erro.message : 'Tente novamente.');
@@ -137,7 +180,7 @@ export function CampanhasScreen() {
           <Text style={styles.voltarTexto}>Campanhas</Text>
         </Pressable>
 
-        <Text style={styles.title}>Nova campanha</Text>
+        <Text style={styles.title}>{editandoId ? 'Editar campanha' : 'Nova campanha'}</Text>
 
         <Card>
           <Text style={styles.cardTitulo}>Cabeçalho</Text>
@@ -154,23 +197,73 @@ export function CampanhasScreen() {
           </View>
         </Card>
 
-        <Card>
-          <Text style={styles.cardTitulo}>Critérios de sugestão</Text>
-          <Text style={styles.rotulo}>Margem mínima (%)</Text>
-          <TextInput style={styles.input} keyboardType="numeric" value={margemMinima} onChangeText={setMargemMinima} />
-          <Text style={[styles.rotulo, styles.espacado]}>Desconto alvo (%)</Text>
-          <TextInput style={styles.input} keyboardType="numeric" value={descontoAlvo} onChangeText={setDescontoAlvo} />
-          <Text style={[styles.rotulo, styles.espacado]}>Quantidade máxima de produtos</Text>
-          <TextInput style={styles.input} keyboardType="numeric" value={quantidadeMaxima} onChangeText={setQuantidadeMaxima} />
+        {!editandoId && (
+          <Card>
+            <Text style={styles.cardTitulo}>Critérios de sugestão</Text>
 
-          <Pressable style={styles.botaoGerar} onPress={gerarSugestao} disabled={gerando}>
-            {gerando ? <ActivityIndicator color={colors.white} /> : <Text style={styles.botaoGerarTexto}>Gerar sugestão</Text>}
-          </Pressable>
-        </Card>
+            <Text style={styles.rotulo}>Tipo de sugestão</Text>
+            <View style={styles.filtroRow}>
+              {OPCOES_MODO_SUGESTAO.map((opcao) => (
+                <Pressable
+                  key={opcao.chave}
+                  style={[styles.filtroChip, modoSugestao === opcao.chave && styles.filtroChipAtivo]}
+                  onPress={() => setModoSugestao(opcao.chave)}
+                >
+                  <Text style={[styles.filtroChipTexto, modoSugestao === opcao.chave && styles.filtroChipTextoAtivo]}>
+                    {opcao.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.explicacaoModo}>
+              {OPCOES_MODO_SUGESTAO.find((o) => o.chave === modoSugestao)?.descricao}
+            </Text>
 
-        {itens.length > 0 && (
+            <Text style={[styles.rotulo, styles.espacado]}>Grupo (opcional — campanha temática)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.filtroRow}>
+                <Pressable
+                  style={[styles.filtroChip, macroGrupoFiltro === TODOS_OS_GRUPOS && styles.filtroChipAtivo]}
+                  onPress={() => setMacroGrupoFiltro(TODOS_OS_GRUPOS)}
+                >
+                  <Text
+                    style={[styles.filtroChipTexto, macroGrupoFiltro === TODOS_OS_GRUPOS && styles.filtroChipTextoAtivo]}
+                  >
+                    Todos os grupos
+                  </Text>
+                </Pressable>
+                {ORDEM_MACRO_GRUPOS.map((macro) => (
+                  <Pressable
+                    key={macro}
+                    style={[styles.filtroChip, macroGrupoFiltro === macro && styles.filtroChipAtivo]}
+                    onPress={() => setMacroGrupoFiltro(macro)}
+                  >
+                    <Text style={[styles.filtroChipTexto, macroGrupoFiltro === macro && styles.filtroChipTextoAtivo]}>
+                      {MACRO_GRUPO_LABEL[macro]}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Text style={[styles.rotulo, styles.espacado]}>Margem mínima (%)</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={margemMinima} onChangeText={setMargemMinima} />
+            <Text style={[styles.rotulo, styles.espacado]}>Desconto alvo (%)</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={descontoAlvo} onChangeText={setDescontoAlvo} />
+            <Text style={[styles.rotulo, styles.espacado]}>Quantidade máxima de produtos</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={quantidadeMaxima} onChangeText={setQuantidadeMaxima} />
+
+            <Pressable style={styles.botaoGerar} onPress={gerarSugestao} disabled={gerando}>
+              {gerando ? <ActivityIndicator color={colors.white} /> : <Text style={styles.botaoGerarTexto}>Gerar sugestão</Text>}
+            </Pressable>
+          </Card>
+        )}
+
+        {(itens.length > 0 || editandoId) && (
           <>
-            <Text style={styles.sectionTitulo}>Produtos sugeridos ({itens.length})</Text>
+            <Text style={styles.sectionTitulo}>
+              {editandoId ? `Produtos da campanha (${itens.length})` : `Produtos sugeridos (${itens.length})`}
+            </Text>
             {itens.map((item) => (
               <Card key={item.codigoProduto}>
                 <View style={styles.itemHeader}>
@@ -200,7 +293,11 @@ export function CampanhasScreen() {
             ))}
 
             <Pressable style={styles.botaoSalvar} onPress={salvar} disabled={salvando}>
-              {salvando ? <ActivityIndicator color={colors.white} /> : <Text style={styles.botaoGerarTexto}>Salvar campanha</Text>}
+              {salvando ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.botaoGerarTexto}>{editandoId ? 'Salvar alterações' : 'Salvar campanha'}</Text>
+              )}
             </Pressable>
           </>
         )}
@@ -215,7 +312,7 @@ export function CampanhasScreen() {
         Promoções avulsas fora do encarte — sugeridas por margem, estoque e venda recente.
       </Text>
 
-      <Pressable style={styles.botaoNova} onPress={() => setModo('nova')}>
+      <Pressable style={styles.botaoNova} onPress={abrirNova}>
         <Ionicons name="add" size={18} color={colors.white} />
         <Text style={styles.botaoGerarTexto}>Nova campanha</Text>
       </Pressable>
@@ -233,9 +330,14 @@ export function CampanhasScreen() {
             <Card key={campanha.id}>
               <View style={styles.itemHeader}>
                 <Text style={styles.itemNome}>{campanha.nome}</Text>
-                <Pressable onPress={() => excluir(campanha)} hitSlop={8}>
-                  <Ionicons name="trash-outline" size={18} color={colors.red} />
-                </Pressable>
+                <View style={styles.acoes}>
+                  <Pressable onPress={() => abrirEdicao(campanha)} hitSlop={8}>
+                    <Ionicons name="pencil-outline" size={18} color={colors.navy} />
+                  </Pressable>
+                  <Pressable onPress={() => excluir(campanha)} hitSlop={8}>
+                    <Ionicons name="trash-outline" size={18} color={colors.red} />
+                  </Pressable>
+                </View>
               </View>
               <Text style={styles.campanhaPeriodo}>
                 {formatDateBR(campanha.dataInicio)} a {formatDateBR(campanha.dataFim)}
@@ -284,12 +386,26 @@ const styles = StyleSheet.create({
   botaoGerarTexto: { color: colors.white, fontWeight: '700', fontSize: 14 },
   empty: { color: colors.textSecondary },
   itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8 },
+  acoes: { flexDirection: 'row', gap: 14 },
   itemNome: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   campanhaPeriodo: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
   campanhaResumo: { fontSize: 12, color: colors.textMuted },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
   rotulo: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
   espacado: { marginTop: 10 },
+  filtroRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  filtroChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  filtroChipAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
+  filtroChipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+  filtroChipTextoAtivo: { color: colors.white },
+  explicacaoModo: { fontSize: 11, color: colors.textMuted, marginTop: 6, lineHeight: 15 },
   input: {
     backgroundColor: colors.background,
     borderRadius: 8,

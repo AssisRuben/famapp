@@ -243,22 +243,33 @@ export interface VendaAntimicrobianoRecente {
   nomeCliente: string;
 }
 
-// Compliance: venda de produto controlado sem identificação real do
-// comprador — sem cliente na venda, OU cliente = o próprio vendedor
-// (usado como atalho pra não pedir o CPF de quem comprou de verdade).
-// Alimenta o card "Venda controlada sem comprador" em Alertas
-// (02/08/2026, achado analisando os dados reais com o usuário).
+// Compliance: venda sem identificação real do comprador — sem cliente
+// na venda, OU cliente = o próprio vendedor (usado como atalho pra não
+// pedir o CPF de quem comprou de verdade). Alimenta o card "Venda sem
+// comprador" em Alertas (02/08/2026, achado analisando os dados reais
+// com o usuário). [06/08/2026] Ampliado de "só produto controlado" pra
+// todo tipo de venda — os campos *Controladas continuam existindo pro
+// filtro "só controlados" da tela, os sem sufixo são o total geral.
 export interface IdentificacaoCompradorVendedor {
   codigoVendedor: number;
   nomeVendedor: string;
-  totalVendasControladas: number;
+  totalVendas: number;
   vendasSemIdentificacao: number;
   percentualSemIdentificacao: number;
+  totalVendasControladas: number;
+  vendasControladasSemIdentificacao: number;
+  percentualControladasSemIdentificacao: number;
+  // Subconjunto de vendasSemIdentificacao onde o cliente cadastrado é o
+  // próprio vendedor (padrão mais suspeito que só "esqueceu de
+  // cadastrar" — filtro à parte na tela).
+  vendasProprioCpf: number;
+  percentualProprioCpf: number;
 }
 
 // Drill-down de IdentificacaoCompradorVendedor: a venda específica
 // por trás do número (clicar no vendedor no card de Alertas mostra
-// essa lista — nota, data, produto, motivo).
+// essa lista — nota, data, produto, motivo). `controlado` deixa a tela
+// filtrar a lista já carregada sem buscar de novo.
 export interface VendaSemIdentificacaoComprador {
   itemId: string;
   dataVenda: string;
@@ -266,6 +277,7 @@ export interface VendaSemIdentificacaoComprador {
   numeroNota: number;
   nomeProduto: string;
   motivo: 'sem_cliente' | 'proprio_cpf';
+  controlado: boolean;
 }
 
 // ============================================================
@@ -374,16 +386,17 @@ export interface ComissaoMensal {
 // pelo vendedor todo dia. `horario` (HH:00 — só a hora, minuto sempre
 // zero) dispara um lembrete push nos dias marcados em `diasSemana`.
 // `diasSemana` usa a numeração do expo-notifications (domingo=1 ...
-// sábado=7). `codigoVendedor` null = atividade vale pra todo mundo;
-// preenchido = só aparece no checklist desse vendedor.
+// sábado=7). `codigosVendedor` vazio = atividade vale pra todo mundo;
+// preenchido = só aparece no checklist desses vendedores específicos
+// (pode ser mais de um).
 // ============================================================
 export interface AtividadeChecklist {
   id: string;
   titulo: string;
   horario: string | null;
   ativo: boolean;
-  codigoVendedor: number | null;
-  nomeVendedor: string | null;
+  codigosVendedor: number[];
+  nomesVendedores: string[];
   diasSemana: number[];
 }
 
@@ -412,7 +425,13 @@ export interface ProdutoCatalogo {
   codigo: number;
   codigoBarras: string;
   nome: string;
+  // categoria = nomeCategoria do Trier ("tipo de uso", ex. "Uso Adulto") —
+  // inconsistente e com muito null no catálogo real. grupo = nomeGrupo,
+  // a categoria de produto de fato (ex. "ETICO", "PERFUMARIA") — é o
+  // campo confiável pra qualquer classificação de negócio. Opcional
+  // porque o seed mock não tem essa distinção.
   categoria: string;
+  grupo?: string;
   marca: string;
   precoVenda: number;
   custoMedio: number;
@@ -429,10 +448,21 @@ export interface ProdutoElegibilidade {
   margemResultantePct: number;
 }
 
+export type ModoSugestaoCampanha = 'popularidade' | 'liquidacao';
+
 export interface SugestaoCampanhaParams {
   margemMinimaPct: number;
   descontoAlvoPct: number;
   quantidadeMaxima: number;
+  // 'popularidade' (padrão, se omitido): prioriza quem já vende bem.
+  // 'liquidacao': busca estoque parado (sem venda recente, ainda em
+  // estoque) pra desencalhar, priorizando quem tem mais capital parado.
+  modo?: ModoSugestaoCampanha;
+  // id de MacroGrupo (lib/macroGrupo.ts, ex. "genericos") — filtra a
+  // sugestão só pra essa macro-categoria (campanha temática, ex. "Dia
+  // do Genérico"). String (não o tipo MacroGrupo) porque domain.ts não
+  // importa de lib/ — validado no lado de quem consome (lib/campanhas.ts).
+  macroGrupo?: string;
 }
 
 export interface CampanhaProduto {
@@ -629,7 +659,9 @@ export interface ParametrosCompra {
   // só o divisor muda, então é uma aproximação; no real, viria de uma
   // agregação configurável sobre venda_itens.
   diasBaseVenda: number;
-  categoria?: string;
+  // Filtra por produto_catalogo.grupo (categoria de produto de fato,
+  // ex. "ETICO", "PERFUMARIA") — não por categoria (tipo de uso).
+  grupo?: string;
 }
 
 // ============================================================
@@ -655,7 +687,7 @@ export interface SugestaoCompra {
   codigoProduto: number;
   nomeProduto: string;
   codigoBarras: string;
-  categoria: string;
+  grupo: string;
   estoqueAtual: number;
   demandaMediaDiaria: number;
   estoqueMinimo: number;
@@ -665,5 +697,11 @@ export interface SugestaoCompra {
   precoVenda: number;
   margemAtualPct: number;
   fornecedorSugerido: string | null;
+  // Fornecedor com o menor valor_custo pago nos últimos 12 meses (pode
+  // ser diferente do fornecedorSugerido, que é sempre o da compra MAIS
+  // RECENTE). É o menor preço HISTÓRICO pago, não uma cotação atual —
+  // a API da Trier não expõe cotação em tempo real.
+  fornecedorMaisBarato: string | null;
+  precoMaisBarato: number | null;
   quantidadeSugerida: number;
 }

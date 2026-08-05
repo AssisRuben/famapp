@@ -1,5 +1,6 @@
 import { ParametrosCompra, ProdutoCatalogo, SugestaoCompra } from '../types/domain';
 import { calcularMargemPct } from './campanhas';
+import { macroGrupoDoProduto } from './macroGrupo';
 
 interface DemandaInfo {
   quantidadeVendidaPeriodo: number;
@@ -8,6 +9,11 @@ interface DemandaInfo {
 interface FornecedorInfo {
   fatorCompra: number;
   nomeFornecedor: string | null;
+}
+
+interface FornecedorMaisBaratoInfo {
+  nomeFornecedor: string;
+  precoCusto: number;
 }
 
 function round2(valor: number): number {
@@ -23,10 +29,18 @@ export function calcularSugestaoCompras(
   catalogo: ProdutoCatalogo[],
   demandaPorProduto: Map<number, DemandaInfo>,
   fornecedorPorProduto: Map<number, FornecedorInfo>,
+  fornecedorMaisBaratoPorProduto: Map<number, FornecedorMaisBaratoInfo>,
   params: ParametrosCompra
 ): SugestaoCompra[] {
   return catalogo
-    .filter((produto) => !params.categoria || produto.categoria === params.categoria)
+    // AMBULATORIO (aplicação IM, teste de glicemia...), BONIFICACAO e
+    // CADASTRO AUTOMATICO ENTR.MERC. não são produto pra repor de
+    // fornecedor — são serviço ou ajuste de sistema (mesma classificação
+    // "outros_administrativo" de lib/macroGrupo.ts, usada em
+    // Precificação). Fora daqui igual "taxa de entrega" já é em
+    // supabaseRepository.ts.
+    .filter((produto) => macroGrupoDoProduto(produto.grupo) !== 'outros_administrativo')
+    .filter((produto) => !params.grupo || produto.grupo === params.grupo)
     .map((produto) => {
       const demanda = demandaPorProduto.get(produto.codigo);
       const demandaMediaDiaria = demanda ? demanda.quantidadeVendidaPeriodo / Math.max(1, params.diasBaseVenda) : 0;
@@ -35,6 +49,7 @@ export function calcularSugestaoCompras(
 
       const fornecedorInfo = fornecedorPorProduto.get(produto.codigo);
       const fatorCompra = fornecedorInfo?.fatorCompra ?? 1;
+      const fornecedorMaisBaratoInfo = fornecedorMaisBaratoPorProduto.get(produto.codigo);
 
       const sugestaoBruta = Math.max(0, estoqueAlvo - produto.estoqueAtual);
       const quantidadeSugerida = Math.ceil(sugestaoBruta / fatorCompra) * fatorCompra;
@@ -43,7 +58,7 @@ export function calcularSugestaoCompras(
         codigoProduto: produto.codigo,
         nomeProduto: produto.nome,
         codigoBarras: produto.codigoBarras,
-        categoria: produto.categoria,
+        grupo: produto.grupo ?? '',
         estoqueAtual: produto.estoqueAtual,
         demandaMediaDiaria: round2(demandaMediaDiaria),
         estoqueMinimo: round2(estoqueMinimo),
@@ -53,6 +68,8 @@ export function calcularSugestaoCompras(
         precoVenda: produto.precoVenda,
         margemAtualPct: round2(calcularMargemPct(produto.precoVenda, produto.custoMedio)),
         fornecedorSugerido: fornecedorInfo?.nomeFornecedor ?? null,
+        fornecedorMaisBarato: fornecedorMaisBaratoInfo?.nomeFornecedor ?? null,
+        precoMaisBarato: fornecedorMaisBaratoInfo?.precoCusto ?? null,
         quantidadeSugerida,
       };
     })

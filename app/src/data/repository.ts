@@ -154,7 +154,7 @@ export interface DataRepository {
     id?: string;
     titulo: string;
     horario: string | null;
-    codigoVendedor: number | null;
+    codigosVendedor: number[];
     diasSemana: number[];
   }): Promise<void>;
   alternarAtividadeChecklist(id: string, ativo: boolean): Promise<void>;

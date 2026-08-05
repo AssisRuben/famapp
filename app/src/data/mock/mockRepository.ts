@@ -217,24 +217,31 @@ async function getMetasOverrides(): Promise<Record<string, MetaOverride>> {
 async function getAtividadesStore(): Promise<AtividadeChecklist[]> {
   const raw = await AsyncStorage.getItem(CHECKLIST_ATIVIDADES_KEY);
   if (raw) {
-    const armazenadas = JSON.parse(raw) as AtividadeChecklist[];
+    const armazenadas = JSON.parse(raw) as any[];
     // migra registros salvos numa versão anterior a existirem os campos
-    // horario/codigoVendedor/nomeVendedor/diasSemana (senão fica "preso"
-    // sem essa informação, ou quebra ao ler diasSemana undefined, até
-    // apagar o app).
+    // horario/diasSemana, ou na versão anterior a codigoVendedor virar
+    // codigosVendedor (um vendedor só -> lista de um) — senão fica
+    // "preso" sem essa informação, ou quebra ao ler campo undefined,
+    // até apagar o app.
     let precisaMigrar = false;
     const migradas = armazenadas.map((a) => {
-      if (a.horario !== undefined && a.diasSemana !== undefined) return a;
+      if (a.horario !== undefined && a.diasSemana !== undefined && a.codigosVendedor !== undefined) return a;
       precisaMigrar = true;
       const doSeed = atividadesChecklistSeed.find((s) => s.id === a.id);
+      const codigosVendedor: number[] =
+        a.codigosVendedor ?? (a.codigoVendedor != null ? [a.codigoVendedor] : doSeed?.codigosVendedor ?? []);
+      const nomesVendedores: string[] =
+        a.nomesVendedores ?? (a.nomeVendedor != null ? [a.nomeVendedor] : doSeed?.nomesVendedores ?? []);
       return {
-        ...a,
+        id: a.id,
+        titulo: a.titulo,
+        ativo: a.ativo,
         horario: a.horario ?? doSeed?.horario ?? null,
-        codigoVendedor: a.codigoVendedor ?? doSeed?.codigoVendedor ?? null,
-        nomeVendedor: a.nomeVendedor ?? doSeed?.nomeVendedor ?? null,
+        codigosVendedor,
+        nomesVendedores,
         diasSemana: a.diasSemana ?? doSeed?.diasSemana ?? [2, 3, 4, 5, 6, 7],
       };
-    });
+    }) as AtividadeChecklist[];
     if (precisaMigrar) {
       await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(migradas));
     }
@@ -651,26 +658,43 @@ class MockRepository implements DataRepository {
 
   async getIdentificacaoCompradorPorVendedor(profile: Profile): Promise<IdentificacaoCompradorVendedor[]> {
     const produtosComReceita = new Set(produtosSeed.filter((p) => p.exigeReceita).map((p) => p.codigo));
-    const porVendedor = new Map<number, { nome: string; total: number; semIdentificacao: number }>();
+    const porVendedor = new Map<
+      number,
+      { nome: string; total: number; semIdentificacao: number; totalControlado: number; semIdentificacaoControlado: number }
+    >();
 
     for (const v of vendaItensDetalheSeed) {
-      if (!produtosComReceita.has(v.codigoProduto)) continue;
       const atual = porVendedor.get(v.codigoVendedor) ?? {
         nome: nomeVendedor(v.codigoVendedor),
         total: 0,
         semIdentificacao: 0,
+        totalControlado: 0,
+        semIdentificacaoControlado: 0,
       };
       atual.total += 1;
       if (v.codigoCliente == null) atual.semIdentificacao += 1;
+      if (produtosComReceita.has(v.codigoProduto)) {
+        atual.totalControlado += 1;
+        if (v.codigoCliente == null) atual.semIdentificacaoControlado += 1;
+      }
       porVendedor.set(v.codigoVendedor, atual);
     }
 
     const linhas: IdentificacaoCompradorVendedor[] = Array.from(porVendedor.entries()).map(([codigoVendedor, v]) => ({
       codigoVendedor,
       nomeVendedor: v.nome,
-      totalVendasControladas: v.total,
+      totalVendas: v.total,
       vendasSemIdentificacao: v.semIdentificacao,
       percentualSemIdentificacao: v.total > 0 ? Math.round((v.semIdentificacao / v.total) * 1000) / 10 : 0,
+      totalVendasControladas: v.totalControlado,
+      vendasControladasSemIdentificacao: v.semIdentificacaoControlado,
+      percentualControladasSemIdentificacao:
+        v.totalControlado > 0 ? Math.round((v.semIdentificacaoControlado / v.totalControlado) * 1000) / 10 : 0,
+      // seed não modela CPF de vendedor/cliente — sem base pra simular
+      // "próprio CPF" no mock (mesma limitação de `motivo`, sempre
+      // 'sem_cliente' em getVendasSemIdentificacaoComprador abaixo).
+      vendasProprioCpf: 0,
+      percentualProprioCpf: 0,
     }));
 
     const visivel = visivelParaPerfil(profile, linhas);
@@ -687,16 +711,17 @@ class MockRepository implements DataRepository {
 
     const produtosComReceita = new Set(produtosSeed.filter((p) => p.exigeReceita).map((p) => p.codigo));
     const linhas: VendaSemIdentificacaoComprador[] = vendaItensDetalheSeed
-      .filter((v) => v.codigoVendedor === codigoVendedor && produtosComReceita.has(v.codigoProduto) && v.codigoCliente == null)
+      .filter((v) => v.codigoVendedor === codigoVendedor && v.codigoCliente == null)
       .map((v) => {
-        const produto = produtosSeed.find((p) => p.codigo === v.codigoProduto)!;
+        const produto = produtosSeed.find((p) => p.codigo === v.codigoProduto);
         return {
           itemId: v.id,
           dataVenda: dataDiasAtras(v.diasAtras),
           horaVenda: null,
           numeroNota: Number(v.id) || 0,
-          nomeProduto: produto.nome,
+          nomeProduto: produto?.nome ?? `Produto ${v.codigoProduto}`,
           motivo: 'sem_cliente' as const,
+          controlado: produtosComReceita.has(v.codigoProduto),
         };
       });
 
@@ -860,18 +885,18 @@ class MockRepository implements DataRepository {
     id?: string;
     titulo: string;
     horario: string | null;
-    codigoVendedor: number | null;
+    codigosVendedor: number[];
     diasSemana: number[];
   }): Promise<void> {
     const atividades = await getAtividadesStore();
-    const nome = input.codigoVendedor != null ? nomeVendedor(input.codigoVendedor) : null;
+    const nomes = input.codigosVendedor.map((codigo) => nomeVendedor(codigo));
     if (input.id) {
       const existente = atividades.find((a) => a.id === input.id);
       if (existente) {
         existente.titulo = input.titulo;
         existente.horario = input.horario;
-        existente.codigoVendedor = input.codigoVendedor;
-        existente.nomeVendedor = nome;
+        existente.codigosVendedor = input.codigosVendedor;
+        existente.nomesVendedores = nomes;
         existente.diasSemana = input.diasSemana;
       }
     } else {
@@ -880,8 +905,8 @@ class MockRepository implements DataRepository {
         titulo: input.titulo,
         horario: input.horario,
         ativo: true,
-        codigoVendedor: input.codigoVendedor,
-        nomeVendedor: nome,
+        codigosVendedor: input.codigosVendedor,
+        nomesVendedores: nomes,
         diasSemana: input.diasSemana,
       });
     }
@@ -906,7 +931,7 @@ class MockRepository implements DataRepository {
     const atividades = (await getAtividadesStore()).filter(
       (a) =>
         a.ativo &&
-        (a.codigoVendedor == null || a.codigoVendedor === profile.codigoVendedor) &&
+        (a.codigosVendedor.length === 0 || a.codigosVendedor.includes(profile.codigoVendedor ?? -1)) &&
         a.diasSemana.includes(diaDaSemanaHoje)
     );
     const respostas = await getRespostasStore();
@@ -1002,7 +1027,16 @@ class MockRepository implements DataRepository {
       ])
     );
 
-    const sugestoes = calcularSugestaoCompras(catalogoProdutosSeed, demandaPorProduto, fornecedorPorProduto, params);
+    // seed não tem histórico de compra por mais de um fornecedor por
+    // produto — sem base pra simular "mais barato" no mock.
+    const fornecedorMaisBaratoPorProduto = new Map<number, { nomeFornecedor: string; precoCusto: number }>();
+    const sugestoes = calcularSugestaoCompras(
+      catalogoProdutosSeed,
+      demandaPorProduto,
+      fornecedorPorProduto,
+      fornecedorMaisBaratoPorProduto,
+      params
+    );
     return delay(sugestoes);
   }
 

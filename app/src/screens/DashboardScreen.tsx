@@ -15,6 +15,7 @@ import {
   DesempenhoVendedorMensal,
   DesempenhoVendedorSemanal,
   FaixaComissao,
+  IdentificacaoCompradorVendedor,
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
@@ -37,6 +38,7 @@ export function DashboardScreen() {
   const [faixasComissao, setFaixasComissao] = useState<FaixaComissao[]>([]);
   const [statusSync, setStatusSync] = useState<StatusSincronizacao[]>([]);
   const [resumoClientes, setResumoClientes] = useState<ResumoClientesInatividade>({ total: 0, inativos: 0 });
+  const [identificacaoComprador, setIdentificacaoComprador] = useState<IdentificacaoCompradorVendedor[]>([]);
   const [periodoMeta, setPeriodoMeta] = useState<PeriodoMeta>('mes');
   const [periodoDesempenho, setPeriodoDesempenho] = useState<PeriodoMeta>('dia');
   const [loading, setLoading] = useState(true);
@@ -49,7 +51,7 @@ export function DashboardScreen() {
     if (!profile) return;
     const ano = hoje.getFullYear();
     const mes = hoje.getMonth() + 1;
-    const [m, d, mm, dm, ms, ds, mt, cm, fx, ss, ci] = await Promise.all([
+    const [m, d, mm, dm, ms, ds, mt, cm, fx, ss, ci, ic] = await Promise.all([
       repository.getMetricasVendedorDiario(profile, data),
       repository.getDesempenhoVendedorDiario(profile, data),
       repository.getMetricasVendedorMensal(profile, ano, mes),
@@ -62,6 +64,9 @@ export function DashboardScreen() {
       repository.getStatusSincronizacao(),
       // "Indicadores de gestão" agora aparece pra todo mundo (01/08/2026).
       repository.getResumoClientesInatividade(profile),
+      // mesma fonte do card "Venda sem comprador" em Alertas — aqui só
+      // soma pra virar um indicador de tendência (06/08/2026).
+      repository.getIdentificacaoCompradorPorVendedor(profile),
     ]);
     setMetricas(m);
     setDesempenho(d);
@@ -74,6 +79,7 @@ export function DashboardScreen() {
     setFaixasComissao(fx);
     setStatusSync(ss);
     setResumoClientes(ci);
+    setIdentificacaoComprador(ic);
   }, [profile, data, semanaAtual]);
 
   useEffect(() => {
@@ -141,15 +147,32 @@ export function DashboardScreen() {
     return realizadoHoje * (taxa / 100);
   });
 
-  // Projeção simples: pega o realizado do mês até hoje (já calculado de
-  // verdade em vw_metas_progresso via getMetas — margem bruta, não é
-  // só o dia de hoje), tira a média diária e multiplica pelos dias do
-  // mês inteiro. Ex.: dia 3, R$9 mil de margem no mês = R$3 mil/dia de
-  // média x 30 dias = R$90 mil de margem projetada.
+  // Projeção simples: pega o realizado do mês até ONTEM (dia de hoje
+  // ainda está em andamento — incluir ele na média puxa a projeção pra
+  // baixo, já que só uma fração do dia foi vendida até o momento de
+  // abrir o app), tira a média diária e multiplica pelos dias do mês
+  // inteiro. Ex.: dia 5, R$9 mil de margem até o dia 4 (fechado) = R$
+  // 2.250/dia de média x 30 dias = R$67,5 mil de margem projetada.
   const totalRealizadoMensal = sum(metas, (m) => m.valorRealizadoMensal);
+  const realizadoHojeTotal = sum(metricas, (m) => m.faturamentoLiquido - m.totalCusto);
   const diaDoMes = hoje.getDate();
   const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
-  const projecaoFechamento = diaDoMes > 0 ? (totalRealizadoMensal / diaDoMes) * diasNoMes : 0;
+  const diasFechados = diaDoMes - 1;
+  // Dia 1 do mês ainda não tem "ontem" dentro do mês corrente — cai de
+  // volta pro acumulado incluindo hoje, única base disponível nesse caso.
+  const projecaoFechamento =
+    diasFechados > 0
+      ? ((totalRealizadoMensal - realizadoHojeTotal) / diasFechados) * diasNoMes
+      : diaDoMes > 0
+        ? (totalRealizadoMensal / diaDoMes) * diasNoMes
+        : 0;
+
+  // Mesma base do card "Venda sem comprador" em Alertas (desde
+  // 01/07/2026, todo tipo de venda) — aqui é só o total somado de todos
+  // os vendedores, pra acompanhar tendência geral, não pra agir por
+  // vendedor (isso continua em Alertas).
+  const totalVendasSemCpf = sum(identificacaoComprador, (v) => v.vendasSemIdentificacao);
+  const totalVendasGeral = sum(identificacaoComprador, (v) => v.totalVendas);
 
   // Desempenho do mês: faturamento e comissão são o ACUMULADO (soma
   // direta); os demais já são taxa/proporção por natureza (ticket
@@ -331,6 +354,12 @@ export function DashboardScreen() {
             numberOfLines={2}
           />
           <MetricTile label="Projeção de margem no mês" value={formatBRLSemCentavos(projecaoFechamento)} accentColor="#9333ea" />
+          <MetricTile
+            label="Vendas sem CPF (desde jul/26)"
+            value={`${totalVendasSemCpf.toLocaleString('pt-BR')} de ${totalVendasGeral.toLocaleString('pt-BR')}`}
+            accentColor={colors.red}
+            numberOfLines={2}
+          />
         </View>
       </Card>
 

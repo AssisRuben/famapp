@@ -244,22 +244,22 @@ export interface AtividadeChecklistSeed {
   titulo: string;
   horario: string | null;
   ativo: boolean;
-  codigoVendedor: number | null;
-  nomeVendedor: string | null;
+  codigosVendedor: number[];
+  nomesVendedores: string[];
   diasSemana: number[];
 }
 
 // horario dispara lembrete push nos dias marcados em diasSemana (ver
 // src/lib/notifications.ts). diasSemana usa domingo=1...sábado=7 —
 // default segunda a sábado, igual o comportamento fixo de antes desse
-// campo existir. codigoVendedor null = vale pra todo mundo.
+// campo existir. codigosVendedor vazio = vale pra todo mundo.
 const DIAS_SEGUNDA_A_SABADO = [2, 3, 4, 5, 6, 7];
 export const atividadesChecklistSeed: AtividadeChecklistSeed[] = [
-  { id: 'chk-1', titulo: 'Conferir temperatura da geladeira de medicamentos', horario: '08:00', ativo: true, codigoVendedor: null, nomeVendedor: null, diasSemana: DIAS_SEGUNDA_A_SABADO },
-  { id: 'chk-2', titulo: 'Organizar prateleira de produtos em promoção', horario: '09:00', ativo: true, codigoVendedor: null, nomeVendedor: null, diasSemana: DIAS_SEGUNDA_A_SABADO },
-  { id: 'chk-3', titulo: 'Verificar validade dos produtos em destaque no balcão', horario: '14:00', ativo: true, codigoVendedor: null, nomeVendedor: null, diasSemana: DIAS_SEGUNDA_A_SABADO },
-  { id: 'chk-4', titulo: 'Repor sacolas e materiais no caixa', horario: '17:00', ativo: true, codigoVendedor: null, nomeVendedor: null, diasSemana: DIAS_SEGUNDA_A_SABADO },
-  { id: 'chk-5', titulo: 'Higienizar balcão de atendimento', horario: '18:00', ativo: true, codigoVendedor: null, nomeVendedor: null, diasSemana: DIAS_SEGUNDA_A_SABADO },
+  { id: 'chk-1', titulo: 'Conferir temperatura da geladeira de medicamentos', horario: '08:00', ativo: true, codigosVendedor: [], nomesVendedores: [], diasSemana: DIAS_SEGUNDA_A_SABADO },
+  { id: 'chk-2', titulo: 'Organizar prateleira de produtos em promoção', horario: '09:00', ativo: true, codigosVendedor: [], nomesVendedores: [], diasSemana: DIAS_SEGUNDA_A_SABADO },
+  { id: 'chk-3', titulo: 'Verificar validade dos produtos em destaque no balcão', horario: '14:00', ativo: true, codigosVendedor: [], nomesVendedores: [], diasSemana: DIAS_SEGUNDA_A_SABADO },
+  { id: 'chk-4', titulo: 'Repor sacolas e materiais no caixa', horario: '17:00', ativo: true, codigosVendedor: [], nomesVendedores: [], diasSemana: DIAS_SEGUNDA_A_SABADO },
+  { id: 'chk-5', titulo: 'Higienizar balcão de atendimento', horario: '18:00', ativo: true, codigosVendedor: [], nomesVendedores: [], diasSemana: DIAS_SEGUNDA_A_SABADO },
 ];
 
 // ============================================================

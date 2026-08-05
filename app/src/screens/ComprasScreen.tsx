@@ -148,6 +148,26 @@ export function ComprasScreen() {
 
       {itens !== null && itens.length > 0 && (
         <>
+          <Card>
+            <Text style={styles.cardTitulo}>Resumo</Text>
+            <Text style={styles.resumoLinha}>{totalItens} produtos · custo estimado {formatBRL(valorTotal)}</Text>
+
+            <Pressable style={styles.botaoSecundario} onPress={exportarCsv} disabled={exportando}>
+              {exportando ? (
+                <ActivityIndicator color={colors.navy} />
+              ) : (
+                <>
+                  <Ionicons name="document-text-outline" size={18} color={colors.navy} />
+                  <Text style={styles.botaoSecundarioTexto}>Exportar CSV</Text>
+                </>
+              )}
+            </Pressable>
+            <Text style={styles.aviso}>
+              Fornecedor e fator de compra vêm da compra mais recente de cada produto — sem prazo de entrega/última cotação,
+              a Trier não expõe esses campos na integração.
+            </Text>
+          </Card>
+
           <Text style={styles.sectionTitulo}>Produtos a repor</Text>
           {itens.map((item) => {
             const aberto = expandido === item.codigoProduto;
@@ -203,31 +223,20 @@ export function ComprasScreen() {
                         <Text style={styles.campoSomenteLeitura}>{formatBRL(item.precoVenda)}</Text>
                       </View>
                     </View>
+
+                    {item.fornecedorMaisBarato && item.precoMaisBarato !== null && (
+                      <>
+                        <Text style={styles.campoLabel}>Fornecedor mais barato (últimos 12 meses)</Text>
+                        <Text style={styles.campoSomenteLeitura}>
+                          {item.fornecedorMaisBarato} · {formatBRL(item.precoMaisBarato)}
+                        </Text>
+                      </>
+                    )}
                   </View>
                 )}
               </Card>
             );
           })}
-
-          <Card>
-            <Text style={styles.cardTitulo}>Resumo</Text>
-            <Text style={styles.resumoLinha}>{totalItens} produtos · custo estimado {formatBRL(valorTotal)}</Text>
-
-            <Pressable style={styles.botaoSecundario} onPress={exportarCsv} disabled={exportando}>
-              {exportando ? (
-                <ActivityIndicator color={colors.navy} />
-              ) : (
-                <>
-                  <Ionicons name="document-text-outline" size={18} color={colors.navy} />
-                  <Text style={styles.botaoSecundarioTexto}>Exportar CSV</Text>
-                </>
-              )}
-            </Pressable>
-            <Text style={styles.aviso}>
-              Fornecedor e fator de compra vêm da compra mais recente de cada produto — sem prazo de entrega/última cotação,
-              a Trier não expõe esses campos na integração.
-            </Text>
-          </Card>
         </>
       )}
     </ScrollView>

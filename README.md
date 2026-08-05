@@ -420,33 +420,41 @@ Revisão feita em 2026-08-05 nas abas do gestor Campanhas, Cartazetes, Compras
 e Precificação. Achados registrados, ainda não implementados — decidir com
 calma antes de mexer em lógica de campanha/compra/preço.
 
-1. **Queries sem paginação truncam o catálogo (~1000 produtos).** Em
-   `app/src/data/supabase/supabaseRepository.ts`, `sugerirProdutosCampanha`,
-   `gerarSugestaoCompras` e `getRelatorioPrecificacao` fazem `.select('*')`
-   direto em `produto_catalogo`, `vw_venda_recente_produto` e
-   `vw_produto_fornecedor_recente`, sem o padrão de paginação em blocos de
-   1000 que `getCatalogoProdutos` já usa (documentado ali: limite padrão do
-   PostgREST corta silenciosamente, ordem alfabética — catálogo tem 26 mil+
-   produtos). Resultado: sugestão de campanha, lista de compras e sinais de
-   precificação hoje só enxergam a primeira fatia alfabética do catálogo.
-2. **Classificação usa `categoria` (tipo de uso, ex. "Uso Adulto") em vez de
-   `grupo` (categoria de produto de verdade, ex. "Analgésicos").** O próprio
-   `supabase/schema.sql` documenta a diferença. `mapearProdutoCatalogo` nunca
-   lê `grupo` — só `categoria` chega no app. Isso quebra:
-   `app/src/lib/precificacao.ts` (`CATEGORIAS_BAIXA_ELASTICIDADE = new
-   Set(['Medicamentos'])` comparado contra `produto.categoria`, que nunca
-   vale "Medicamentos" — provavelmente todo produto cai em "alta
-   elasticidade" sempre) e `app/src/lib/doseCerta.ts` (filtro opcional por
-   categoria em Compras, que além do campo errado nem tem UI pra usá-lo).
-3. **Campanha salva não tem edição** — só criar nova ou excluir na aba
-   Campanhas. Cartazetes deixa ajustar de/por/desconto por item, mas isso
-   não persiste em `campanha_produtos` (é só pra aquela impressão).
-
-**Como aplicar:** antes de implementar o item 2, rodar uma query pra ver os
-valores reais de `grupo` no catálogo em produção — a lista de baixa
-elasticidade hoje é um chute (só "Medicamentos"). O item 1 é mecânico (mesmo
-padrão de `getCatalogoProdutos`), pode ir primeiro sem depender de decisão
-de negócio.
+1. ~~**Queries sem paginação truncam o catálogo (~1000 produtos).**~~
+   **Corrigido em 06/08/2026.** `sugerirProdutosCampanha`, `gerarSugestaoCompras`,
+   `getRelatorioPrecificacao`, `carregarCampanhas` e
+   `carregarCampanhasVendaAdicional` faziam `.select('*')` direto em
+   `produto_catalogo`, `vw_venda_recente_produto` e
+   `vw_produto_fornecedor_recente`, sem paginar (mesmo bug que
+   `getCatalogoProdutos` já tinha corrigido). Extraído um helper privado
+   `buscarPaginado` em `supabaseRepository.ts` (busca em blocos de 1000 até a
+   página voltar incompleta) e aplicado nos 5 métodos.
+2. ~~**Classificação usa `categoria` (tipo de uso) em vez de `grupo`
+   (categoria de produto de verdade).**~~ **Corrigido em 05/08/2026.**
+   Valores reais de produção conferidos por query direta:
+   `categoria` tem ~15% de nulos e não mapeia consistentemente pra
+   medicamento vs. não-medicamento (ex. categoria "ETICO" cai em 5 `grupo`s
+   diferentes). `grupo` é o campo confiável — medicamento é qualquer grupo
+   começando com `ETICO`, `GENERICO` ou `SIMILAR` (cobre as variantes
+   "CONTROLADOS"/"ANTIMICROBIANOS"/"ONEROSO", ex. "GENERICO CONTROLADOS ").
+   `ProdutoCatalogo.grupo` adicionado ao domain type e mapeado em
+   `mapearProdutoCatalogo`; `precificacao.ts` troca o `Set(['Medicamentos'])`
+   por `ehBaixaElasticidade()` (prefixo sobre `grupo`); `doseCerta.ts` troca
+   o filtro pra `produto.grupo` e `ParametrosCompra.categoria` vira
+   `ParametrosCompra.grupo` (segue sem UI que o exponha — não pedido nessa
+   rodada).
+3. ~~**Campanha salva não tem edição** — só criar nova ou excluir na aba
+   Campanhas.~~ **Corrigido em 05/08/2026.** O backend
+   (`salvarCampanha`/`salvarCampanhaVendaAdicional`, real e mock) já
+   suportava update via `input.id` — a lacuna era só de UI. Adicionado
+   ícone de editar no card da lista em `CampanhasScreen.tsx`: carrega
+   nome/datas/produtos da campanha no formulário (sem passar pelo fluxo de
+   "gerar sugestão", que reaplicaria os critérios do zero e excluiria os
+   produtos já ativos na campanha), permite ajustar preço/remover item e
+   salva com `id` preenchido. RLS de `campanhas`/`campanha_produtos` já era
+   `for all` pra gestor, sem precisar de migração. Cartazetes (ajuste
+   avulso de impressão, não persistido) segue como estava — fora do escopo
+   dessa correção.
 
 ## Métricas/insights já definidos como prioridade (para as telas do app)
 

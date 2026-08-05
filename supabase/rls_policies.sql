@@ -405,8 +405,8 @@ left join vendedores vd on vd.codigo = perfil_registro.codigo_vendedor;
 
 -- atividades_checklist: cadastrada pelo gestor (aba "Check list" do
 -- app). Vendedor só lê as ATIVAS (é o que aparece no checklist diário
--- dele, filtrado no app por codigo_vendedor/dias_semana); gestor lê
--- todas (incl. inativas, pra gerenciar). Só gestor escreve.
+-- dele, filtrado no app por atividade_checklist_vendedores/dias_semana);
+-- gestor lê todas (incl. inativas, pra gerenciar). Só gestor escreve.
 alter table atividades_checklist enable row level security;
 
 create policy "atividades_checklist: gestor le tudo"
@@ -439,6 +439,31 @@ with check (exists (
 
 create policy "atividades_checklist: gestor deleta"
 on atividades_checklist for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+-- atividade_checklist_vendedores: quem a atividade vale (join table —
+-- ver comentário em schema.sql). Leitura liberada pra autenticado (não
+-- é dado sensível, mesma sensibilidade de atividades_checklist); só
+-- gestor escreve. Sem policy de update: edição sempre é
+-- apaga-tudo-e-reinsere (mesmo padrão de campanha_produtos), não precisa.
+alter table atividade_checklist_vendedores enable row level security;
+
+create policy "atividade_checklist_vendedores: autenticados leem"
+on atividade_checklist_vendedores for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "atividade_checklist_vendedores: gestor insere"
+on atividade_checklist_vendedores for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "atividade_checklist_vendedores: gestor deleta"
+on atividade_checklist_vendedores for delete
 using (exists (
   select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
 ));
@@ -563,6 +588,7 @@ alter view vw_vendas_sem_identificacao_comprador set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
 alter view vw_metas_comissao set (security_invoker = true);
 alter view vw_produto_fornecedor_recente set (security_invoker = true);
+alter view vw_produto_fornecedor_mais_barato set (security_invoker = true);
 alter view vw_venda_recente_produto set (security_invoker = true);
 alter view vw_metricas_vendedor_mensal set (security_invoker = true);
 alter view vw_desempenho_vendedor_mensal set (security_invoker = true);

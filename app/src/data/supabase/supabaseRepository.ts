@@ -64,6 +64,7 @@ function mapearProdutoCatalogo(r: any): ProdutoCatalogo {
     codigoBarras: r.codigo_barras ?? '',
     nome: r.nome,
     categoria: r.categoria ?? '',
+    grupo: (r.grupo ?? '').trim(),
     marca: r.marca ?? '',
     precoVenda: Number(r.preco_venda),
     custoMedio: Number(r.custo_medio),
@@ -555,12 +556,18 @@ class SupabaseRepository implements DataRepository {
       .map((r) => ({
         codigoVendedor: r.codigo_vendedor,
         nomeVendedor: r.nome_vendedor,
-        totalVendasControladas: r.total_vendas_controladas,
-        vendasSemIdentificacao: r.vendas_sem_identificacao,
+        totalVendas: r.total_vendas,
+        vendasSemIdentificacao: r.vendas_todas_sem_identificacao,
         percentualSemIdentificacao:
+          r.total_vendas > 0 ? Math.round((r.vendas_todas_sem_identificacao / r.total_vendas) * 1000) / 10 : 0,
+        totalVendasControladas: r.total_vendas_controladas,
+        vendasControladasSemIdentificacao: r.vendas_sem_identificacao,
+        percentualControladasSemIdentificacao:
           r.total_vendas_controladas > 0
             ? Math.round((r.vendas_sem_identificacao / r.total_vendas_controladas) * 1000) / 10
             : 0,
+        vendasProprioCpf: r.vendas_proprio_cpf,
+        percentualProprioCpf: r.total_vendas > 0 ? Math.round((r.vendas_proprio_cpf / r.total_vendas) * 1000) / 10 : 0,
       }))
       .sort((a, b) => b.percentualSemIdentificacao - a.percentualSemIdentificacao);
   }
@@ -582,6 +589,7 @@ class SupabaseRepository implements DataRepository {
       numeroNota: r.numero_nota,
       nomeProduto: r.nome_produto,
       motivo: r.motivo as 'sem_cliente' | 'proprio_cpf',
+      controlado: r.controlado,
     }));
   }
 
@@ -764,42 +772,69 @@ class SupabaseRepository implements DataRepository {
 
   // RLS já resolve a diferença vendedor-vê-só-ativas vs gestor-vê-tudo
   // (ver "atividades_checklist: vendedor le as ativas" em
-  // rls_policies.sql) — não precisa filtrar de novo aqui.
+  // rls_policies.sql) — não precisa filtrar de novo aqui. Vínculo com
+  // vendedor agora é join table (atividade_checklist_vendedores), não
+  // coluna — embed do PostgREST traz os vínculos direto.
   async getAtividadesChecklist(_profile: Profile): Promise<AtividadeChecklist[]> {
     const { data, error } = await supabase
       .from('atividades_checklist')
-      .select('id, titulo, horario, ativo, codigo_vendedor, dias_semana, vendedores(nome)')
+      .select('id, titulo, horario, ativo, dias_semana, atividade_checklist_vendedores(codigo_vendedor, vendedores(nome))')
       .order('titulo');
     if (error) throw error;
-    return (data ?? []).map((r) => ({
-      id: String(r.id),
-      titulo: r.titulo,
-      horario: r.horario,
-      ativo: r.ativo,
-      codigoVendedor: r.codigo_vendedor,
-      nomeVendedor: (r.vendedores as unknown as { nome: string } | null)?.nome ?? null,
-      diasSemana: r.dias_semana ?? [],
-    }));
+    return (data ?? []).map((r: any) => {
+      const vinculos = (r.atividade_checklist_vendedores ?? []) as {
+        codigo_vendedor: number;
+        vendedores: { nome: string } | null;
+      }[];
+      return {
+        id: String(r.id),
+        titulo: r.titulo,
+        horario: r.horario,
+        ativo: r.ativo,
+        codigosVendedor: vinculos.map((v) => v.codigo_vendedor),
+        nomesVendedores: vinculos.map((v) => v.vendedores?.nome ?? `Vendedor ${v.codigo_vendedor}`),
+        diasSemana: r.dias_semana ?? [],
+      };
+    });
   }
 
   async salvarAtividadeChecklist(input: {
     id?: string;
     titulo: string;
     horario: string | null;
-    codigoVendedor: number | null;
+    codigosVendedor: number[];
     diasSemana: number[];
   }): Promise<void> {
     const linha = {
       titulo: input.titulo,
       horario: input.horario,
-      codigo_vendedor: input.codigoVendedor,
       dias_semana: input.diasSemana,
     };
+
+    let atividadeId: number;
     if (input.id) {
-      const { error } = await supabase.from('atividades_checklist').update(linha).eq('id', input.id);
+      atividadeId = Number(input.id);
+      const { error } = await supabase.from('atividades_checklist').update(linha).eq('id', atividadeId);
       if (error) throw error;
+
+      // substitui a lista de vendedores por completo — mesmo padrão de
+      // campanha_produtos em salvarCampanha (mais simples e seguro do
+      // que diffar item a item).
+      const { error: deleteError } = await supabase
+        .from('atividade_checklist_vendedores')
+        .delete()
+        .eq('atividade_id', atividadeId);
+      if (deleteError) throw deleteError;
     } else {
-      const { error } = await supabase.from('atividades_checklist').insert(linha);
+      const { data, error } = await supabase.from('atividades_checklist').insert(linha).select('id').single();
+      if (error || !data) throw error ?? new Error('Falha ao criar atividade.');
+      atividadeId = data.id;
+    }
+
+    if (input.codigosVendedor.length > 0) {
+      const { error } = await supabase.from('atividade_checklist_vendedores').insert(
+        input.codigosVendedor.map((codigo) => ({ atividade_id: atividadeId, codigo_vendedor: codigo }))
+      );
       if (error) throw error;
     }
   }
@@ -820,14 +855,22 @@ class SupabaseRepository implements DataRepository {
     // schema.sql) e do expo-notifications, pra não converter em nenhum
     // dos dois lados.
     const diaDaSemanaHoje = new Date(`${hojeIso}T00:00:00`).getDay() + 1;
-    const [{ data: atividades, error: erroAtividades }, { data: respostas, error: erroRespostas }] = await Promise.all([
+    // sem coluna codigo_vendedor pra filtrar direto na query (agora é
+    // join table) — traz os vínculos de todo mundo (tabela pequena) e
+    // filtra em JS: atividade sem NENHUM vínculo = "todos" (RLS já
+    // restringe atividades_checklist pra só as ativas do vendedor).
+    const [
+      { data: atividades, error: erroAtividades },
+      { data: vinculos, error: erroVinculos },
+      { data: respostas, error: erroRespostas },
+    ] = await Promise.all([
       supabase
         .from('atividades_checklist')
-        .select('id, titulo, horario, ativo, codigo_vendedor, dias_semana')
+        .select('id, titulo, horario, ativo, dias_semana')
         .eq('ativo', true)
-        .or(`codigo_vendedor.is.null,codigo_vendedor.eq.${profile.codigoVendedor}`)
         .contains('dias_semana', [diaDaSemanaHoje])
         .order('titulo'),
+      supabase.from('atividade_checklist_vendedores').select('atividade_id, codigo_vendedor'),
       supabase
         .from('checklist_respostas')
         .select('atividade_id, concluida')
@@ -835,22 +878,35 @@ class SupabaseRepository implements DataRepository {
         .eq('data', hojeIso),
     ]);
     if (erroAtividades) throw erroAtividades;
+    if (erroVinculos) throw erroVinculos;
     if (erroRespostas) throw erroRespostas;
+
+    const vendedoresPorAtividade = new Map<number, number[]>();
+    for (const v of vinculos ?? []) {
+      const lista = vendedoresPorAtividade.get(v.atividade_id) ?? [];
+      lista.push(v.codigo_vendedor);
+      vendedoresPorAtividade.set(v.atividade_id, lista);
+    }
 
     const concluidaPorAtividade = new Map<number, boolean>((respostas ?? []).map((r) => [r.atividade_id, r.concluida]));
 
-    return (atividades ?? []).map((a) => ({
-      atividade: {
-        id: String(a.id),
-        titulo: a.titulo,
-        horario: a.horario,
-        ativo: a.ativo,
-        codigoVendedor: a.codigo_vendedor,
-        nomeVendedor: null,
-        diasSemana: a.dias_semana ?? [],
-      },
-      concluida: concluidaPorAtividade.get(a.id) ?? false,
-    }));
+    return (atividades ?? [])
+      .filter((a) => {
+        const codigosVendedor = vendedoresPorAtividade.get(a.id) ?? [];
+        return codigosVendedor.length === 0 || codigosVendedor.includes(profile.codigoVendedor ?? -1);
+      })
+      .map((a) => ({
+        atividade: {
+          id: String(a.id),
+          titulo: a.titulo,
+          horario: a.horario,
+          ativo: a.ativo,
+          codigosVendedor: vendedoresPorAtividade.get(a.id) ?? [],
+          nomesVendedores: [],
+          diasSemana: a.dias_semana ?? [],
+        },
+        concluida: concluidaPorAtividade.get(a.id) ?? false,
+      }));
   }
 
   // atividade_id+codigo_vendedor+data é unique CONSTRAINT de verdade
@@ -877,41 +933,68 @@ class SupabaseRepository implements DataRepository {
     return (data ?? []).map((r) => ({ entityName: r.entity_name, ultimaSincronizacao: r.last_synced_at }));
   }
 
-  async getCatalogoProdutos(_profile: Profile): Promise<ProdutoCatalogo[]> {
-    // produto_catalogo passa de 1000 linhas fácil (catálogo cheio da
-    // farmácia) — sem paginar, o limite padrão do PostgREST cortava
-    // silenciosamente o resultado, e como vem ordenado por nome,
-    // produto que caísse depois da linha 1000 alfabeticamente (ex.:
-    // "Dipirona") nunca aparecia na busca de nenhuma tela (achado
-    // 03/08/2026 — mesmo bug já corrigido antes em getClientesDoVendedor).
+  // produto_catalogo passa de 1000 linhas fácil (catálogo real tem 26
+  // mil+ produtos) — sem paginar, o limite padrão do PostgREST corta
+  // silenciosamente o resultado. Qualquer `select` direto numa tabela/
+  // view grande (produto_catalogo, vw_venda_recente_produto,
+  // vw_produto_fornecedor_recente) precisa passar por aqui, não só
+  // getCatalogoProdutos (achado 03/08/2026, catalogado em
+  // README.md#pendências-técnicas — varreu 5 métodos com o mesmo bug).
+  private async buscarPaginado<T = any>(
+    montarQuery: (inicio: number, fim: number) => PromiseLike<{ data: T[] | null; error: any }>
+  ): Promise<T[]> {
     const TAMANHO_PAGINA = 1000;
-    const linhas: Record<string, unknown>[] = [];
+    const linhas: T[] = [];
     for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-      const { data, error } = await supabase
-        .from('produto_catalogo')
-        .select('*')
-        .order('nome', { ascending: true })
-        .order('codigo', { ascending: true })
-        .range(inicio, inicio + TAMANHO_PAGINA - 1);
+      const { data, error } = await montarQuery(inicio, inicio + TAMANHO_PAGINA - 1);
       if (error) throw error;
       linhas.push(...(data ?? []));
       if (!data || data.length < TAMANHO_PAGINA) break;
     }
+    return linhas;
+  }
+
+  // "TAXA DE ENTREGA", "TAXA E-DELIVERY", "ENTREGA MANUAL" etc. são
+  // linhas de serviço/taxa lançadas como produto no PDV (sem outro jeito
+  // de cobrar frete pelo sistema) — não é catálogo de verdade: preço
+  // simbólico, estoque sempre 0, nenhuma unidade de venda real por
+  // trás. Confirmado com dados reais em 05/08/2026 (6 códigos, nenhum
+  // grupo/categoria único cobre todos — 3 tinham categoria null e grupo
+  // espalhado em CONVENIENCIA/LINHA GERAL/USO OU CONSUMO/CADASTRO
+  // AUTOMATICO). Filtra por nome direto na query pra nunca aparecer em
+  // catálogo, sugestão de campanha, compras ou precificação.
+  private queryProdutoCatalogo(colunas: string) {
+    return supabase
+      .from('produto_catalogo')
+      .select(colunas)
+      .not('nome', 'ilike', '%ENTREGA%')
+      .not('nome', 'ilike', '%DELIVERY%');
+  }
+
+  async getCatalogoProdutos(_profile: Profile): Promise<ProdutoCatalogo[]> {
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      this.queryProdutoCatalogo('*')
+        .order('nome', { ascending: true })
+        .order('codigo', { ascending: true })
+        .range(inicio, fim)
+    );
     return linhas.map((r: any) => mapearProdutoCatalogo(r));
   }
 
   async sugerirProdutosCampanha(profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]> {
-    const [catalogoRes, vendaRes, campanhas] = await Promise.all([
-      supabase.from('produto_catalogo').select('*'),
-      supabase.from('vw_venda_recente_produto').select('*'),
+    const [catalogoLinhas, vendaLinhas, campanhas] = await Promise.all([
+      this.buscarPaginado((inicio, fim) =>
+        this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
+      ),
+      this.buscarPaginado((inicio, fim) =>
+        supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
+      ),
       this.getCampanhas(profile),
     ]);
-    if (catalogoRes.error) throw catalogoRes.error;
-    if (vendaRes.error) throw vendaRes.error;
 
-    const catalogo = (catalogoRes.data ?? []).map(mapearProdutoCatalogo);
+    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
     const vendaPorProduto = new Map(
-      (vendaRes.data ?? []).map((r) => [
+      vendaLinhas.map((r: any) => [
         r.codigo_produto,
         { quantidadeVendida30d: Number(r.quantidade_vendida_30d), diasSemVenda: r.dias_sem_venda },
       ])
@@ -941,11 +1024,10 @@ class SupabaseRepository implements DataRepository {
     // guarda o código. precoRegular é derivado do desconto salvo (não
     // do preço ATUAL do catálogo), pra uma campanha antiga continuar
     // consistente mesmo se o preço de tabela mudar depois.
-    const { data: catalogo, error: catalogoError } = await supabase
-      .from('produto_catalogo')
-      .select('codigo, codigo_barras, nome');
-    if (catalogoError) throw catalogoError;
-    const catalogoPorCodigo = new Map((catalogo ?? []).map((p) => [p.codigo, p]));
+    const catalogo = await this.buscarPaginado((inicio, fim) =>
+      this.queryProdutoCatalogo('codigo, codigo_barras, nome').order('codigo', { ascending: true }).range(inicio, fim)
+    );
+    const catalogoPorCodigo = new Map(catalogo.map((p: any) => [p.codigo, p]));
 
     return (data ?? []).map((c: any) => ({
       id: String(c.id),
@@ -1037,9 +1119,10 @@ class SupabaseRepository implements DataRepository {
     const { data, error } = await query;
     if (error) throw error;
 
-    const { data: catalogo, error: catalogoError } = await supabase.from('produto_catalogo').select('codigo, nome');
-    if (catalogoError) throw catalogoError;
-    const nomePorCodigo = new Map((catalogo ?? []).map((p) => [p.codigo, p.nome]));
+    const catalogo = await this.buscarPaginado((inicio, fim) =>
+      this.queryProdutoCatalogo('codigo, nome').order('codigo', { ascending: true }).range(inicio, fim)
+    );
+    const nomePorCodigo = new Map(catalogo.map((p: any) => [p.codigo, p.nome]));
 
     return (data ?? []).map((c: any) => ({
       id: String(c.id),
@@ -1181,41 +1264,59 @@ class SupabaseRepository implements DataRepository {
   }
 
   async gerarSugestaoCompras(_profile: Profile, params: ParametrosCompra): Promise<SugestaoCompra[]> {
-    const [catalogoRes, vendaRes, fornecedorRes] = await Promise.all([
-      supabase.from('produto_catalogo').select('*'),
-      supabase.from('vw_venda_recente_produto').select('*'),
-      supabase.from('vw_produto_fornecedor_recente').select('*'),
+    const [catalogoLinhas, vendaLinhas, fornecedorLinhas, fornecedorMaisBaratoLinhas] = await Promise.all([
+      this.buscarPaginado((inicio, fim) =>
+        this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
+      ),
+      this.buscarPaginado((inicio, fim) =>
+        supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
+      ),
+      this.buscarPaginado((inicio, fim) =>
+        supabase.from('vw_produto_fornecedor_recente').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
+      ),
+      this.buscarPaginado((inicio, fim) =>
+        supabase
+          .from('vw_produto_fornecedor_mais_barato')
+          .select('*')
+          .order('codigo_produto', { ascending: true })
+          .range(inicio, fim)
+      ),
     ]);
-    if (catalogoRes.error) throw catalogoRes.error;
-    if (vendaRes.error) throw vendaRes.error;
-    if (fornecedorRes.error) throw fornecedorRes.error;
 
-    const catalogo = (catalogoRes.data ?? []).map(mapearProdutoCatalogo);
+    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
     const demandaPorProduto = new Map(
-      (vendaRes.data ?? []).map((r) => [r.codigo_produto, { quantidadeVendidaPeriodo: Number(r.quantidade_vendida_30d) }])
+      vendaLinhas.map((r: any) => [r.codigo_produto, { quantidadeVendidaPeriodo: Number(r.quantidade_vendida_30d) }])
     );
     const fornecedorPorProduto = new Map(
-      (fornecedorRes.data ?? []).map((r) => [
+      fornecedorLinhas.map((r: any) => [
         r.codigo_produto,
         { fatorCompra: r.fator_compra, nomeFornecedor: r.nome_fornecedor },
       ])
     );
+    const fornecedorMaisBaratoPorProduto = new Map(
+      fornecedorMaisBaratoLinhas.map((r: any) => [
+        r.codigo_produto,
+        { nomeFornecedor: r.nome_fornecedor, precoCusto: Number(r.valor_custo) },
+      ])
+    );
 
-    return calcularSugestaoCompras(catalogo, demandaPorProduto, fornecedorPorProduto, params);
+    return calcularSugestaoCompras(catalogo, demandaPorProduto, fornecedorPorProduto, fornecedorMaisBaratoPorProduto, params);
   }
 
   async getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]> {
-    const [catalogoRes, vendaRes, campanhas] = await Promise.all([
-      supabase.from('produto_catalogo').select('*'),
-      supabase.from('vw_venda_recente_produto').select('*'),
+    const [catalogoLinhas, vendaLinhas, campanhas] = await Promise.all([
+      this.buscarPaginado((inicio, fim) =>
+        this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
+      ),
+      this.buscarPaginado((inicio, fim) =>
+        supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
+      ),
       this.getCampanhas(profile),
     ]);
-    if (catalogoRes.error) throw catalogoRes.error;
-    if (vendaRes.error) throw vendaRes.error;
 
-    const catalogo = (catalogoRes.data ?? []).map(mapearProdutoCatalogo);
+    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
     const vendaPorProduto = new Map(
-      (vendaRes.data ?? []).map((r) => [
+      vendaLinhas.map((r: any) => [
         r.codigo_produto,
         { quantidadeVendida30d: Number(r.quantidade_vendida_30d), diasSemVenda: r.dias_sem_venda },
       ])

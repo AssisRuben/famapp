@@ -224,10 +224,13 @@ insert into faixas_comissao (percentual_meta_min, percentual_comissao) values
 -- ============================================================
 -- CHECKLIST DIÁRIO — atividades cadastradas pelo gestor (aba "Check
 -- list" do app) e marcadas pelo vendedor todo dia. Hoje só existe como
--- mock local (AsyncStorage) no app; estas duas tabelas são o próximo
--- passo pra ter histórico real de conclusão no backend.
--- `codigo_vendedor` null = atividade vale pra todo mundo; preenchido =
--- só aparece no checklist desse vendedor específico.
+-- mock local (AsyncStorage) no app; estas tabelas são o próximo passo
+-- pra ter histórico real de conclusão no backend.
+-- `atividade_checklist_vendedores` (join table, não coluna) — SEM
+-- linha nenhuma pra uma atividade = vale pra todo mundo; COM linhas =
+-- só aparece no checklist desses vendedores específicos (pode ser mais
+-- de um). Join table em vez de array/coluna única pra manter FK de
+-- verdade com vendedores(codigo), igual campanha_produtos.
 -- `dias_semana` usa a mesma numeração do expo-notifications (domingo=1
 -- ... sábado=7) pra não precisar converter na hora de agendar o
 -- lembrete — default segunda a sábado, igual o comportamento antigo
@@ -243,9 +246,14 @@ create table atividades_checklist (
   titulo text not null,
   horario time,
   ativo boolean not null default true,
-  codigo_vendedor integer references vendedores(codigo),
   dias_semana integer[] not null default '{2,3,4,5,6,7}',
   created_at timestamptz default now()
+);
+
+create table atividade_checklist_vendedores (
+  atividade_id bigint not null references atividades_checklist(id) on delete cascade,
+  codigo_vendedor integer not null references vendedores(codigo),
+  primary key (atividade_id, codigo_vendedor)
 );
 
 create table checklist_respostas (
@@ -969,6 +977,31 @@ join compras c on c.id = ci.compra_id
 join fornecedores f on f.codigo = c.codigo_fornecedor
 order by ci.codigo_produto, c.data_entrada desc;
 
+-- Fornecedor com o MENOR valor_custo pago por produto nos últimos 12
+-- meses — complementa vw_produto_fornecedor_recente (que é sempre o
+-- fornecedor da compra mais recente, não o mais barato). valor_custo
+-- (não valor_unitario/valor_unitario_liquido) porque é o custo efetivo
+-- já com ST, o mesmo campo que embasa produto_catalogo.custo_medio —
+-- mantém a comparação de preço consistente com o resto do app. É o
+-- menor preço HISTÓRICO pago, não uma cotação atual (a API da Trier não
+-- expõe cotação em tempo real — mesma limitação de
+-- vw_produto_fornecedor_recente). Janela de 12 meses pra não sugerir um
+-- preço velho demais pra ser confiável.
+create view vw_produto_fornecedor_mais_barato as
+select distinct on (ci.codigo_produto)
+  ci.codigo_produto,
+  c.codigo_fornecedor,
+  f.nome_fantasia as nome_fornecedor,
+  ci.valor_custo,
+  c.data_entrada
+from compras_itens ci
+join compras c on c.id = ci.compra_id
+join fornecedores f on f.codigo = c.codigo_fornecedor
+where c.data_entrada >= now() - interval '12 months'
+  and ci.valor_custo is not null
+  and ci.valor_custo > 0
+order by ci.codigo_produto, ci.valor_custo asc, c.data_entrada desc;
+
 -- Venda recente por produto (30 dias) — dá o giro e "dias sem venda"
 -- usados por Campanhas/Compras/Precificação (lib/campanhas.ts,
 -- lib/doseCerta.ts, lib/precificacao.ts). Só telas gestor-only
@@ -1069,13 +1102,21 @@ where v.data_emissao >= current_date - interval '30 days'
     or pc.nome ilike '%cefaclor%'
   );
 
--- Compliance: por vendedor, quantas vendas de produto controlado (a
--- partir de 01/07/2026, mesmo corte de vw_vendas_receita_status) não
--- têm identificação real do comprador — sem cliente na venda, OU
--- cliente cadastrado é o PRÓPRIO vendedor (mesmo CPF, comparado sem
--- pontuação). Achado analisando os dados reais 02/08/2026: alguns
--- vendedores usam o próprio CPF como atalho em vez de pedir o do
--- cliente.
+-- Compliance: por vendedor, quantas vendas não têm identificação real
+-- do comprador — sem cliente na venda, OU cliente cadastrado é o
+-- PRÓPRIO vendedor (mesmo CPF, comparado sem pontuação). Achado
+-- analisando os dados reais 02/08/2026: alguns vendedores usam o
+-- próprio CPF como atalho em vez de pedir o do cliente.
+-- [06/08/2026] Ampliado de "só produto controlado" (a partir de
+-- 01/07/2026, mesmo corte de vw_vendas_receita_status) pra TODO tipo
+-- de venda — pedido explícito do usuário, o hábito de usar o próprio
+-- CPF não é exclusivo de controlado. total_vendas_controladas/
+-- vendas_sem_identificacao continuam com o MESMO significado de antes
+-- (só controlado) pra não quebrar create-or-replace (coluna existente
+-- não pode mudar de posição/sentido); total_vendas/
+-- vendas_todas_sem_identificacao são as novas, com todo tipo de venda
+-- — a tela usa esse par como padrão e o par antigo só quando o filtro
+-- "só controlados" está ativo.
 --
 -- DIFERENTE do resto do app (que abre RLS pra todo mundo ver o
 -- resultado de todos): aqui é dado de desempenho/compliance
@@ -1086,7 +1127,19 @@ create view vw_receita_identificacao_comprador as
 select
   v.codigo_vendedor,
   vd.nome as nome_vendedor,
-  count(*) as total_vendas_controladas,
+  count(*) filter (where nullif(trim(pc.tipo_lista), '') is not null) as total_vendas_controladas,
+  count(*) filter (
+    where nullif(trim(pc.tipo_lista), '') is not null
+      and (
+        v.codigo_cliente is null
+        or (
+          vd.numero_cpf is not null
+          and c.numero_cpf_cnpj is not null
+          and regexp_replace(c.numero_cpf_cnpj, '\D', '', 'g') = regexp_replace(vd.numero_cpf, '\D', '', 'g')
+        )
+      )
+  ) as vendas_sem_identificacao,
+  count(*) as total_vendas,
   count(*) filter (
     where v.codigo_cliente is null
       or (
@@ -1094,10 +1147,24 @@ select
         and c.numero_cpf_cnpj is not null
         and regexp_replace(c.numero_cpf_cnpj, '\D', '', 'g') = regexp_replace(vd.numero_cpf, '\D', '', 'g')
       )
-  ) as vendas_sem_identificacao
+  ) as vendas_todas_sem_identificacao,
+  -- [06/08/2026] Motivo "próprio CPF" isolado de "sem cliente" — dado
+  -- real (05834 vendas desde 01/07, 38,3% não-controlado vs 27,0%
+  -- controlado) confirmou com o usuário que TODA venda deveria ter
+  -- cliente cadastrado (não só controlado), então "sem cliente" sozinho
+  -- já é um sinal válido em qualquer produto. Ainda assim vale destacar
+  -- "próprio CPF" à parte porque é o padrão mais claramente suspeito
+  -- (vendedor usando o CPF dele mesmo), pra filtrar sem misturar com
+  -- "só esqueceu de cadastrar o cliente".
+  count(*) filter (
+    where v.codigo_cliente is not null
+      and vd.numero_cpf is not null
+      and c.numero_cpf_cnpj is not null
+      and regexp_replace(c.numero_cpf_cnpj, '\D', '', 'g') = regexp_replace(vd.numero_cpf, '\D', '', 'g')
+  ) as vendas_proprio_cpf
 from venda_itens vi
 join vendas v on v.id = vi.venda_id
-join produto_catalogo pc on pc.codigo = vi.codigo_produto and nullif(trim(pc.tipo_lista), '') is not null
+join produto_catalogo pc on pc.codigo = vi.codigo_produto
 left join clientes c on c.codigo = v.codigo_cliente
 left join vendedores vd on vd.codigo = v.codigo_vendedor
 where v.data_emissao >= '2026-07-01'
@@ -1110,8 +1177,12 @@ where v.data_emissao >= '2026-07-01'
 group by v.codigo_vendedor, vd.nome;
 
 -- Detalhe item a item por trás da view acima (drill-down do card em
--- Alertas: clicar num vendedor mostra a lista de vendas específicas —
+-- Alertas: clicar no vendedor mostra a lista de vendas específicas —
 -- nota, data, produto, motivo). Mesmo controle de acesso no WHERE.
+-- [06/08/2026] Ampliado pra todo tipo de venda (mesmo motivo da view
+-- acima); `controlado` no fim (append-only, ver create-or-replace) diz
+-- se aquela venda específica é de produto controlado, pra tela poder
+-- filtrar a lista já carregada sem precisar buscar de novo.
 create view vw_vendas_sem_identificacao_comprador as
 select
   vi.id as venda_item_id,
@@ -1120,10 +1191,11 @@ select
   pc.nome as nome_produto,
   v.codigo_vendedor,
   case when v.codigo_cliente is null then 'sem_cliente' else 'proprio_cpf' end as motivo,
-  v.hora_emissao
+  v.hora_emissao,
+  (nullif(trim(pc.tipo_lista), '') is not null) as controlado
 from venda_itens vi
 join vendas v on v.id = vi.venda_id
-join produto_catalogo pc on pc.codigo = vi.codigo_produto and nullif(trim(pc.tipo_lista), '') is not null
+join produto_catalogo pc on pc.codigo = vi.codigo_produto
 left join clientes c on c.codigo = v.codigo_cliente
 left join vendedores vd on vd.codigo = v.codigo_vendedor
 where v.data_emissao >= '2026-07-01'
@@ -1146,32 +1218,77 @@ order by v.data_emissao desc;
 -- Alertas de promoção (tela "Alertas" do app): produtos em promoção e,
 -- pra cada um, os clientes que já compraram antes. Propositalmente SEM
 -- security_invoker — roda com o privilégio do dono (bypassa a RLS de
--- vendas/venda_itens/clientes), porque aqui a regra de negócio é "todo
--- vendedor pode ver oportunidades de contato de qualquer cliente", ao
--- contrário das outras views que restringem vendedor aos próprios dados.
+-- vendas/venda_itens/clientes/campanhas/campanha_produtos), porque aqui
+-- a regra de negócio é "todo vendedor pode ver oportunidades de contato
+-- de qualquer cliente", ao contrário das outras views que restringem
+-- vendedor aos próprios dados.
+-- Duas fontes de "produto em promoção", unidas na CTE: `produtos`
+-- (curadoria manual separada, flag em_promocao) e campanhas ATIVAS
+-- HOJE criadas na aba Campanhas do app (campanhas/campanha_produtos) —
+-- antes só a primeira entrava aqui, então campanha criada pelo
+-- gestor nunca aparecia no card de Alertas (achado 06/08/2026).
+-- exige_receita/tipo_receita do lado de campanha vêm de
+-- produto_catalogo.tipo_lista, mesmo critério de
+-- vw_vendas_antimicrobiano_recente (tipo_lista='T' = antimicrobiano,
+-- preenchido e diferente disso = controle_especial).
 -- exige_receita/tipo_receita entram no fim (não junto de preco_atual)
 -- pra manter create-or-replace válido — ver migracao_frente2.sql.
 create or replace view vw_produtos_promocao_clientes as
+with produtos_em_promocao as (
+  select
+    p.codigo as codigo_produto,
+    p.nome as nome_produto,
+    p.preco_atual,
+    p.preco_anterior,
+    p.percentual_desconto,
+    p.exige_receita,
+    p.tipo_receita
+  from produtos p
+  where p.em_promocao = true
+
+  union all
+
+  select
+    cp.codigo_produto,
+    pc.nome as nome_produto,
+    cp.preco_promocional as preco_atual,
+    -- mesmo cálculo que o app usa pra mostrar "preço regular" de uma
+    -- campanha salva (ver carregarCampanhas em supabaseRepository.ts).
+    case
+      when cp.percentual_desconto > 0 then round(cp.preco_promocional / (1 - cp.percentual_desconto / 100), 2)
+      else cp.preco_promocional
+    end::numeric(12,2) as preco_anterior,
+    cp.percentual_desconto,
+    (nullif(trim(pc.tipo_lista), '') is not null) as exige_receita,
+    case
+      when trim(pc.tipo_lista) = 'T' then 'antimicrobiano'
+      when nullif(trim(pc.tipo_lista), '') is not null then 'controle_especial'
+      else null
+    end as tipo_receita
+  from campanha_produtos cp
+  join campanhas camp on camp.id = cp.campanha_id
+  join produto_catalogo pc on pc.codigo = cp.codigo_produto
+  where current_date between camp.data_inicio and camp.data_fim
+)
 select
-  p.codigo as codigo_produto,
-  p.nome as nome_produto,
-  p.preco_atual,
-  p.preco_anterior,
-  p.percentual_desconto,
+  pp.codigo_produto,
+  pp.nome_produto,
+  pp.preco_atual,
+  pp.preco_anterior,
+  pp.percentual_desconto,
   c.codigo as codigo_cliente,
   c.nome as nome_cliente,
   c.fone as telefone_cliente,
   max(v.data_emissao) as ultima_compra_produto,
   sum(vi.quantidade_produtos) as quantidade_total,
-  p.exige_receita,
-  p.tipo_receita
-from produtos p
-join venda_itens vi on vi.codigo_produto = p.codigo
+  pp.exige_receita,
+  pp.tipo_receita
+from produtos_em_promocao pp
+join venda_itens vi on vi.codigo_produto = pp.codigo_produto
 join vendas v on v.id = vi.venda_id
 join clientes c on c.codigo = v.codigo_cliente
-where p.em_promocao = true
-group by p.codigo, p.nome, p.preco_atual, p.preco_anterior, p.percentual_desconto, c.codigo, c.nome, c.fone,
-  p.exige_receita, p.tipo_receita;
+group by pp.codigo_produto, pp.nome_produto, pp.preco_atual, pp.preco_anterior, pp.percentual_desconto,
+  c.codigo, c.nome, c.fone, pp.exige_receita, pp.tipo_receita;
 
 -- Progresso de metas (mensal e semanal) — tela "Metas" (gestor) e o
 -- bloco de metas no Dashboard (todos). O "realizado" é calculado na
