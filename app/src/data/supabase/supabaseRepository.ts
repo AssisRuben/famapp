@@ -24,6 +24,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorSemanal,
   ParametrosCompra,
+  Pendencia,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
@@ -37,6 +38,7 @@ import {
   SalvarCampanhaInput,
   SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
+  SalvarPendenciaInput,
   SalvarProdutoEmFaltaInput,
   StatusSincronizacao,
   SugestaoCampanhaParams,
@@ -292,11 +294,17 @@ class SupabaseRepository implements DataRepository {
   }
 
   // vw_clientes_inatividade já faz o próprio controle de acesso no
-  // WHERE (vendedor só vê os clientes dele) — select('*') simples basta.
+  // WHERE (vendedor vê todo cliente desde 01/08/2026, não só os
+  // próprios). Paginado: a farmácia já passa de 5 mil clientes
+  // cadastrados, bem acima do limite padrão de 1000 linhas do
+  // PostgREST — sem isso, a busca por nome em Pendências (que reusa
+  // esse método) nunca acharia cliente fora da primeira fatia (achado
+  // 06/08/2026).
   async getClientesInatividade(_profile: Profile): Promise<ClienteInatividade[]> {
-    const { data, error } = await supabase.from('vw_clientes_inatividade').select('*');
-    if (error) throw error;
-    return (data ?? []).map((r) => ({
+    const data = await this.buscarPaginado((inicio, fim) =>
+      supabase.from('vw_clientes_inatividade').select('*').order('codigo', { ascending: true }).range(inicio, fim)
+    );
+    return data.map((r: any) => ({
       codigo: r.codigo,
       nome: r.nome,
       telefone: r.telefone,
@@ -1260,6 +1268,72 @@ class SupabaseRepository implements DataRepository {
 
   async excluirProdutoEmFalta(id: string): Promise<void> {
     const { error } = await supabase.from('produtos_em_falta').delete().eq('id', Number(id));
+    if (error) throw error;
+  }
+
+  // vw_pendencias resolve nome_registrado_por pra qualquer um (sem
+  // máscara de gestor) — só as ATIVAS (baixada=false), "dar baixa" some
+  // da lista sem apagar a linha.
+  async getPendencias(_profile: Profile): Promise<Pendencia[]> {
+    const { data, error } = await supabase
+      .from('vw_pendencias')
+      .select('*')
+      .eq('baixada', false)
+      .order('data', { ascending: false });
+    if (error) throw error;
+
+    const linhas = data ?? [];
+    const paths = [...new Set(linhas.map((r) => r.foto_url).filter((p): p is string => !!p))];
+    const urlPorPath = new Map<string, string>();
+    if (paths.length > 0) {
+      const { data: assinadas } = await supabase.storage.from('pendencias').createSignedUrls(paths, 60 * 60);
+      for (const item of assinadas ?? []) {
+        if (item.path && item.signedUrl) urlPorPath.set(item.path, item.signedUrl);
+      }
+    }
+
+    return linhas.map((r) => ({
+      id: String(r.id),
+      nomeCliente: r.nome_cliente,
+      produtos: r.produtos,
+      fotoUrl: r.foto_url ? urlPorPath.get(r.foto_url) ?? null : null,
+      data: r.data,
+      baixada: r.baixada,
+      baixadaEm: r.baixada_em,
+      nomeRegistradoPor: r.nome_registrado_por,
+    }));
+  }
+
+  async salvarPendencia(input: SalvarPendenciaInput): Promise<void> {
+    // path com nome único (timestamp + sufixo aleatório) em vez de
+    // codigo_vendedor/id como em receitas — aqui não existe id ainda
+    // (registro novo) nem "dono da venda", então não tem por que
+    // organizar em pasta.
+    const path = `${Date.now()}-${Math.round(Math.random() * 1e6)}.jpg`;
+    const arrayBuffer = await new ExpoFile(input.fotoUri).arrayBuffer();
+    const { error: uploadError } = await supabase.storage.from('pendencias').upload(path, arrayBuffer, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (uploadError) throw uploadError;
+
+    const { data: sessao } = await supabase.auth.getUser();
+    const { error } = await supabase.from('pendencias').insert({
+      nome_cliente: input.nomeCliente,
+      produtos: input.produtos,
+      foto_url: path,
+      data: todayISO(),
+      registrado_por: sessao.user?.id ?? null,
+    });
+    if (error) throw error;
+  }
+
+  async darBaixaPendencia(id: string): Promise<void> {
+    const { data: sessao } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('pendencias')
+      .update({ baixada: true, baixada_em: new Date().toISOString(), baixada_por: sessao.user?.id ?? null })
+      .eq('id', Number(id));
     if (error) throw error;
   }
 

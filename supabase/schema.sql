@@ -526,6 +526,31 @@ create table produtos_em_falta (
 create index idx_produtos_em_falta_data on produtos_em_falta (data desc);
 
 -- ============================================================
+-- PENDÊNCIAS (06/08/2026) — vendedor registra que separou/reservou
+-- produto(s) pra um cliente buscar depois (foto de comprovante,
+-- produtos, cliente, data automática). Lista compartilhada como
+-- produtos_em_falta — todo mundo lê e registra, mas aqui NÃO tem
+-- apagar: "dar baixa" marca resolvida (baixada=true) em vez de
+-- excluir, pra manter histórico de quem entregou o quê.
+-- foto_url é só o path dentro do bucket "pendencias" (privado — ver
+-- storage_setup.sql), igual venda_item_receitas.foto_url.
+-- ============================================================
+create table pendencias (
+  id bigserial primary key,
+  nome_cliente text not null,
+  produtos text not null,
+  foto_url text,
+  data date not null default current_date,
+  registrado_por uuid references auth.users(id),
+  baixada boolean not null default false,
+  baixada_em timestamptz,
+  baixada_por uuid references auth.users(id),
+  criado_em timestamptz not null default now()
+);
+
+create index idx_pendencias_baixada on pendencias (baixada);
+
+-- ============================================================
 -- ATENDIMENTOS DIÁRIOS POR VENDEDOR (VendasVendedorIntegracaoDto)
 -- ============================================================
 create table vendas_vendedor_diario (

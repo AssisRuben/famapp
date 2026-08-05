@@ -403,6 +403,50 @@ from produtos_em_falta pef
 left join profiles perfil_registro on perfil_registro.id = pef.registrado_por
 left join vendedores vd on vd.codigo = perfil_registro.codigo_vendedor;
 
+-- pendencias: lista compartilhada, "dar baixa" é UPDATE (marca
+-- baixada=true), não DELETE — sem policy de delete de propósito, pra
+-- não perder o histórico de quem entregou o quê.
+alter table pendencias enable row level security;
+
+create policy "pendencias: autenticados leem"
+on pendencias for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "pendencias: autenticados inserem"
+on pendencias for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "pendencias: autenticados atualizam"
+on pendencias for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+-- vw_pendencias: resolve quem registrou pra QUALQUER UM (sem máscara de
+-- gestor, diferente de vw_produtos_em_falta — pedido é "todo mundo tem
+-- acesso", sem nuance de visibilidade). Mesmo motivo de SEM
+-- security_invoker: profiles só deixa cada um ler o próprio perfil.
+create view vw_pendencias as
+select
+  p.id,
+  p.nome_cliente,
+  p.produtos,
+  p.foto_url,
+  p.data,
+  p.baixada,
+  p.baixada_em,
+  coalesce(vd.nome, 'Gestor(a) da Farmácia') as nome_registrado_por
+from pendencias p
+left join profiles perfil_registro on perfil_registro.id = p.registrado_por
+left join vendedores vd on vd.codigo = perfil_registro.codigo_vendedor;
+
 -- atividades_checklist: cadastrada pelo gestor (aba "Check list" do
 -- app). Vendedor só lê as ATIVAS (é o que aparece no checklist diário
 -- dele, filtrado no app por atividade_checklist_vendedores/dias_semana);

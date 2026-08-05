@@ -23,6 +23,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorSemanal,
   ParametrosCompra,
+  Pendencia,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
@@ -35,6 +36,7 @@ import {
   SalvarCampanhaInput,
   SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
+  SalvarPendenciaInput,
   SalvarProdutoEmFaltaInput,
   StatusSincronizacao,
   SugestaoCampanhaParams,
@@ -67,6 +69,7 @@ import {
   VendaItemDetalheSeed,
 } from './seed';
 import { diasDecorridosNaSemana, rotuloSemana, semanaDoDia } from '../../lib/metas';
+import { todayISO } from '../../lib/format';
 import { sugerirCandidatos } from '../../lib/campanhas';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
@@ -80,6 +83,7 @@ const CAMPANHAS_KEY = '@farmapp/campanhas';
 const CAMPANHAS_VENDA_ADICIONAL_KEY = '@farmapp/campanhas_venda_adicional';
 const CONTATOS_CLIENTES_KEY = '@farmapp/contatos_clientes';
 const PRODUTOS_EM_FALTA_KEY = '@farmapp/produtos_em_falta';
+const PENDENCIAS_KEY = '@farmapp/pendencias';
 const SIMULATED_LATENCY_MS = 350;
 
 interface ReceitaOverride {
@@ -287,6 +291,15 @@ async function getProdutosEmFaltaStore(): Promise<ProdutoEmFalta[]> {
 
 async function salvarProdutosEmFaltaStore(itens: ProdutoEmFalta[]): Promise<void> {
   await AsyncStorage.setItem(PRODUTOS_EM_FALTA_KEY, JSON.stringify(itens));
+}
+
+async function getPendenciasStore(): Promise<Pendencia[]> {
+  const raw = await AsyncStorage.getItem(PENDENCIAS_KEY);
+  return raw ? (JSON.parse(raw) as Pendencia[]) : [];
+}
+
+async function salvarPendenciasStore(itens: Pendencia[]): Promise<void> {
+  await AsyncStorage.setItem(PENDENCIAS_KEY, JSON.stringify(itens));
 }
 
 class MockRepository implements DataRepository {
@@ -1181,6 +1194,43 @@ class MockRepository implements DataRepository {
   async excluirProdutoEmFalta(id: string): Promise<void> {
     const itens = await getProdutosEmFaltaStore();
     await salvarProdutosEmFaltaStore(itens.filter((i) => i.id !== id));
+  }
+
+  async getPendencias(_profile: Profile): Promise<Pendencia[]> {
+    const itens = await getPendenciasStore();
+    return delay(
+      itens
+        .filter((i) => !i.baixada)
+        .sort((a, b) => b.data.localeCompare(a.data))
+    );
+  }
+
+  async salvarPendencia(input: SalvarPendenciaInput): Promise<void> {
+    const itens = await getPendenciasStore();
+    itens.push({
+      id: `pend-${Date.now()}`,
+      nomeCliente: input.nomeCliente,
+      produtos: input.produtos,
+      // uri local do dispositivo — sem storage de verdade no mock, mas
+      // <Image> renderiza uri local igual signed URL, então funciona
+      // pra pré-visualizar na mesma sessão.
+      fotoUrl: input.fotoUri,
+      data: todayISO(),
+      baixada: false,
+      baixadaEm: null,
+      nomeRegistradoPor: null,
+    });
+    await salvarPendenciasStore(itens);
+  }
+
+  async darBaixaPendencia(id: string): Promise<void> {
+    const itens = await getPendenciasStore();
+    const existente = itens.find((i) => i.id === id);
+    if (existente) {
+      existente.baixada = true;
+      existente.baixadaEm = new Date().toISOString();
+    }
+    await salvarPendenciasStore(itens);
   }
 }
 

@@ -18,6 +18,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorSemanal,
   ParametrosCompra,
+  Pendencia,
   Profile,
   ProdutoCatalogo,
   ProdutoElegibilidade,
@@ -30,6 +31,7 @@ import {
   SalvarCampanhaInput,
   SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
+  SalvarPendenciaInput,
   SalvarProdutoEmFaltaInput,
   StatusSincronizacao,
   IdentificacaoCompradorVendedor,
@@ -191,6 +193,13 @@ export interface DataRepository {
   getProdutosEmFalta(profile: Profile): Promise<ProdutoEmFalta[]>;
   salvarProdutoEmFalta(input: SalvarProdutoEmFaltaInput): Promise<void>;
   excluirProdutoEmFalta(id: string): Promise<void>;
+
+  // Pendências — lista compartilhada (todo mundo lê/registra), igual
+  // Produto em falta. getPendencias traz só as ATIVAS (baixada=false);
+  // darBaixaPendencia marca resolvida, não apaga.
+  getPendencias(profile: Profile): Promise<Pendencia[]>;
+  salvarPendencia(input: SalvarPendenciaInput): Promise<void>;
+  darBaixaPendencia(id: string): Promise<void>;
 
   // Compras (Dose Certa) — gestor-only na UI. Fornecedor sugerido e
   // fator de compra vêm da compra mais recente de cada produto

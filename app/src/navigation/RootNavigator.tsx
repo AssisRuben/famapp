@@ -21,6 +21,7 @@ import { ComprasScreen } from '../screens/ComprasScreen';
 import { VendaAdicionalScreen } from '../screens/VendaAdicionalScreen';
 import { ProdutoEmFaltaScreen } from '../screens/ProdutoEmFaltaScreen';
 import { PrecificacaoScreen } from '../screens/PrecificacaoScreen';
+import { PendenciasScreen } from '../screens/PendenciasScreen';
 import { SideDrawer } from '../components/SideDrawer';
 import { colors } from '../theme/colors';
 
@@ -91,6 +92,7 @@ function AppTabs() {
   const itensDrawer = [
     { label: ehGestor ? 'Check list' : 'Meta', emoji: ehGestor ? '✅' : '🎯', onPress: () => irPara('Meta') },
     { label: 'Produto em falta', emoji: '📦', onPress: () => irPara('ProdutoEmFalta') },
+    { label: 'Pendências', emoji: '🗒️', onPress: () => irPara('Pendencias') },
     ...(ehGestor
       ? [
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
@@ -197,6 +199,15 @@ function AppTabs() {
           options={{
             title: 'Produto em falta',
             tabBarIcon: ({ focused }) => <TabIcon emoji="📦" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="Pendencias"
+          component={PendenciasScreen}
+          options={{
+            title: 'Pendências',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🗒️" focused={focused} />,
             ...abaOculta(true),
           }}
         />

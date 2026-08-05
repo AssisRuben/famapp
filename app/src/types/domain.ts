@@ -639,6 +639,30 @@ export interface SalvarProdutoEmFaltaInput {
 }
 
 // ============================================================
+// PENDÊNCIAS (06/08/2026) — vendedor separa/reserva produto(s) pra um
+// cliente buscar depois: foto de comprovante, produtos (texto livre),
+// nome do cliente, data automática (hoje). Lista compartilhada — todo
+// mundo lê e registra. "Dar baixa" marca resolvida (não apaga, mantém
+// histórico) e some da lista ativa.
+// ============================================================
+export interface Pendencia {
+  id: string;
+  nomeCliente: string;
+  produtos: string;
+  fotoUrl: string | null;
+  data: string;
+  baixada: boolean;
+  baixadaEm: string | null;
+  nomeRegistradoPor: string | null;
+}
+
+export interface SalvarPendenciaInput {
+  nomeCliente: string;
+  produtos: string;
+  fotoUri: string;
+}
+
+// ============================================================
 // COMPRAS (Dose Certa) — lista de compras sugerida por
 // demanda/estoque. Estratégia "estoque de segurança": calcula a
 // demanda média diária a partir da venda recente (mesma janela usada
