@@ -414,6 +414,40 @@ Pontos que não são óbvios olhando só o código:
 - Troca de volta pro mock (ex.: demo sem depender de rede): editar as
   duas linhas comentadas em `src/data/index.ts`.
 
+## Pendências técnicas — Campanhas / Cartazetes / Compras / Precificação
+
+Revisão feita em 2026-08-05 nas abas do gestor Campanhas, Cartazetes, Compras
+e Precificação. Achados registrados, ainda não implementados — decidir com
+calma antes de mexer em lógica de campanha/compra/preço.
+
+1. **Queries sem paginação truncam o catálogo (~1000 produtos).** Em
+   `app/src/data/supabase/supabaseRepository.ts`, `sugerirProdutosCampanha`,
+   `gerarSugestaoCompras` e `getRelatorioPrecificacao` fazem `.select('*')`
+   direto em `produto_catalogo`, `vw_venda_recente_produto` e
+   `vw_produto_fornecedor_recente`, sem o padrão de paginação em blocos de
+   1000 que `getCatalogoProdutos` já usa (documentado ali: limite padrão do
+   PostgREST corta silenciosamente, ordem alfabética — catálogo tem 26 mil+
+   produtos). Resultado: sugestão de campanha, lista de compras e sinais de
+   precificação hoje só enxergam a primeira fatia alfabética do catálogo.
+2. **Classificação usa `categoria` (tipo de uso, ex. "Uso Adulto") em vez de
+   `grupo` (categoria de produto de verdade, ex. "Analgésicos").** O próprio
+   `supabase/schema.sql` documenta a diferença. `mapearProdutoCatalogo` nunca
+   lê `grupo` — só `categoria` chega no app. Isso quebra:
+   `app/src/lib/precificacao.ts` (`CATEGORIAS_BAIXA_ELASTICIDADE = new
+   Set(['Medicamentos'])` comparado contra `produto.categoria`, que nunca
+   vale "Medicamentos" — provavelmente todo produto cai em "alta
+   elasticidade" sempre) e `app/src/lib/doseCerta.ts` (filtro opcional por
+   categoria em Compras, que além do campo errado nem tem UI pra usá-lo).
+3. **Campanha salva não tem edição** — só criar nova ou excluir na aba
+   Campanhas. Cartazetes deixa ajustar de/por/desconto por item, mas isso
+   não persiste em `campanha_produtos` (é só pra aquela impressão).
+
+**Como aplicar:** antes de implementar o item 2, rodar uma query pra ver os
+valores reais de `grupo` no catálogo em produção — a lista de baixa
+elasticidade hoje é um chute (só "Medicamentos"). O item 1 é mecânico (mesmo
+padrão de `getCatalogoProdutos`), pode ir primeiro sem depender de decisão
+de negócio.
+
 ## Métricas/insights já definidos como prioridade (para as telas do app)
 
 - Ticket médio por atendimento e por vendedor/dia (valorTotalLiquido dos
