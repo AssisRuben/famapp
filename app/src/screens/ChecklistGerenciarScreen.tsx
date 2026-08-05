@@ -20,7 +20,8 @@ const DIAS_SEMANA: { valor: number; rotulo: string }[] = [
   { valor: 7, rotulo: 'Sáb' },
 ];
 const DIAS_SEGUNDA_A_SABADO = [2, 3, 4, 5, 6, 7];
-const HORAS = Array.from({ length: 24 }, (_, h) => h);
+// Só dentro do horário de funcionamento da farmácia — 08:00 a 20:00.
+const HORAS = Array.from({ length: 13 }, (_, h) => h + 8);
 
 // Atividades padrão — atalho pra preencher o título sem digitar do
 // zero. Não impede atividade avulsa: o campo de título continua livre,
