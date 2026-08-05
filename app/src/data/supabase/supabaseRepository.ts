@@ -809,6 +809,11 @@ class SupabaseRepository implements DataRepository {
     if (error) throw error;
   }
 
+  async excluirAtividadeChecklist(id: string): Promise<void> {
+    const { error } = await supabase.from('atividades_checklist').delete().eq('id', id);
+    if (error) throw error;
+  }
+
   async getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]> {
     const hojeIso = todayISO();
     // domingo=1 ... sábado=7 — mesma numeração de dias_semana (ver

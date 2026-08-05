@@ -895,6 +895,11 @@ class MockRepository implements DataRepository {
     await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(atividades));
   }
 
+  async excluirAtividadeChecklist(id: string): Promise<void> {
+    const atividades = (await getAtividadesStore()).filter((a) => a.id !== id);
+    await AsyncStorage.setItem(CHECKLIST_ATIVIDADES_KEY, JSON.stringify(atividades));
+  }
+
   async getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]> {
     // domingo=1 ... sábado=7 — mesma numeração de diasSemana.
     const diaDaSemanaHoje = new Date().getDay() + 1;

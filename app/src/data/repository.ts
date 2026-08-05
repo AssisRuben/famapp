@@ -158,6 +158,7 @@ export interface DataRepository {
     diasSemana: number[];
   }): Promise<void>;
   alternarAtividadeChecklist(id: string, ativo: boolean): Promise<void>;
+  excluirAtividadeChecklist(id: string): Promise<void>;
   getChecklistHoje(profile: Profile): Promise<ChecklistItemStatus[]>;
   marcarChecklistItem(profile: Profile, atividadeId: string, concluida: boolean): Promise<void>;
 

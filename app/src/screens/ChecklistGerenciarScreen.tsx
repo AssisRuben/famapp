@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
-import { alertar } from '../lib/alert';
+import { alertar, confirmar } from '../lib/alert';
 import { AtividadeChecklist, VendedorAtivo } from '../types/domain';
 
 // domingo=1 ... sábado=7 — mesma numeração usada em diasSemana (ver
@@ -41,6 +41,19 @@ function rotulosDias(dias: number[]): string {
     .join(', ');
 }
 
+interface EdicaoAtividade {
+  id: string;
+  titulo: string;
+  codigoVendedor: number | null;
+  diasSemana: number[];
+  hora: number | null;
+}
+
+interface SeletorHora {
+  valor: number | null;
+  aoSelecionar: (hora: number | null) => void;
+}
+
 export function ChecklistGerenciarScreen() {
   const { profile } = useAuth();
   const [atividades, setAtividades] = useState<AtividadeChecklist[]>([]);
@@ -51,7 +64,16 @@ export function ChecklistGerenciarScreen() {
   const [codigoVendedorNovo, setCodigoVendedorNovo] = useState<number | null>(null);
   const [diasSemanaNovo, setDiasSemanaNovo] = useState<number[]>(DIAS_SEGUNDA_A_SABADO);
   const [horaNovo, setHoraNovo] = useState<number | null>(null);
-  const [modalHoraAberto, setModalHoraAberto] = useState(false);
+
+  // Modal de horário é compartilhado entre o form "Nova atividade" e o
+  // modal de edição — abrirSeletorHora recebe onde ler/gravar o valor
+  // pra não duplicar a lista de horas em dois lugares.
+  const [seletorHora, setSeletorHora] = useState<SeletorHora | null>(null);
+  const abrirSeletorHora = (valor: number | null, aoSelecionar: (hora: number | null) => void) =>
+    setSeletorHora({ valor, aoSelecionar });
+
+  const [edicao, setEdicao] = useState<EdicaoAtividade | null>(null);
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
   const carregarAtividades = useCallback(async () => {
     if (!profile) return;
@@ -102,6 +124,69 @@ export function ChecklistGerenciarScreen() {
   const alternarAtividade = async (atividade: AtividadeChecklist) => {
     await repository.alternarAtividadeChecklist(atividade.id, !atividade.ativo);
     await carregarAtividades();
+  };
+
+  const abrirEdicao = (atividade: AtividadeChecklist) => {
+    setEdicao({
+      id: atividade.id,
+      titulo: atividade.titulo,
+      codigoVendedor: atividade.codigoVendedor,
+      diasSemana: atividade.diasSemana,
+      hora: atividade.horario ? Number(atividade.horario.slice(0, 2)) : null,
+    });
+  };
+
+  const alternarDiaSemanaEdicao = (valor: number) => {
+    setEdicao((atual) =>
+      atual && {
+        ...atual,
+        diasSemana: atual.diasSemana.includes(valor)
+          ? atual.diasSemana.filter((d) => d !== valor)
+          : [...atual.diasSemana, valor].sort((a, b) => a - b),
+      }
+    );
+  };
+
+  const salvarEdicao = async () => {
+    if (!edicao) return;
+    const titulo = edicao.titulo.trim();
+    if (!titulo) {
+      alertar('Título obrigatório', 'Digite o título da atividade.');
+      return;
+    }
+    if (edicao.diasSemana.length === 0) {
+      alertar('Selecione os dias', 'Escolha pelo menos um dia da semana.');
+      return;
+    }
+
+    setSalvandoEdicao(true);
+    try {
+      await repository.salvarAtividadeChecklist({
+        id: edicao.id,
+        titulo,
+        horario: edicao.hora != null ? `${String(edicao.hora).padStart(2, '0')}:00` : null,
+        codigoVendedor: edicao.codigoVendedor,
+        diasSemana: edicao.diasSemana,
+      });
+      setEdicao(null);
+      await carregarAtividades();
+    } finally {
+      setSalvandoEdicao(false);
+    }
+  };
+
+  const excluirEdicao = () => {
+    if (!edicao) return;
+    confirmar(
+      'Excluir atividade',
+      `Excluir "${edicao.titulo}" definitivamente? Isso também apaga o histórico de conclusão dela.`,
+      async () => {
+        await repository.excluirAtividadeChecklist(edicao.id);
+        setEdicao(null);
+        await carregarAtividades();
+      },
+      { textoConfirmar: 'Excluir', destrutivo: true }
+    );
   };
 
   return (
@@ -165,7 +250,7 @@ export function ChecklistGerenciarScreen() {
         </View>
 
         <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Horário do lembrete</Text>
-        <Pressable style={styles.horaBotao} onPress={() => setModalHoraAberto(true)}>
+        <Pressable style={styles.horaBotao} onPress={() => abrirSeletorHora(horaNovo, setHoraNovo)}>
           <Ionicons name="time-outline" size={16} color={colors.navy} />
           <Text style={styles.horaBotaoTexto}>
             {horaNovo != null ? `${String(horaNovo).padStart(2, '0')}:00` : 'Sem lembrete'}
@@ -184,7 +269,7 @@ export function ChecklistGerenciarScreen() {
         atividades.map((atividade) => (
           <Card key={atividade.id}>
             <View style={styles.atividadeRow}>
-              <View style={styles.atividadeInfo}>
+              <Pressable style={styles.atividadeInfo} onPress={() => abrirEdicao(atividade)}>
                 <Text
                   style={[styles.atividadeTexto, !atividade.ativo && styles.atividadeTextoInativo]}
                   numberOfLines={2}
@@ -195,7 +280,7 @@ export function ChecklistGerenciarScreen() {
                   👤 {atividade.nomeVendedor ?? 'Todos'} · 📅 {rotulosDias(atividade.diasSemana)}
                   {atividade.horario ? ` · 🔔 ${atividade.horario.slice(0, 5)}` : ''}
                 </Text>
-              </View>
+              </Pressable>
               <Switch
                 value={atividade.ativo}
                 onValueChange={() => alternarAtividade(atividade)}
@@ -206,41 +291,123 @@ export function ChecklistGerenciarScreen() {
         ))
       )}
       <Text style={styles.hint}>
-        Ativa/inativa quais atividades aparecem no checklist diário dos vendedores — sem apagar o histórico já
-        registrado.
+        Toca numa atividade pra editar ou excluir. O switch ativa/inativa sem apagar o histórico já registrado.
       </Text>
 
-      <Modal visible={modalHoraAberto} transparent animationType="fade" onRequestClose={() => setModalHoraAberto(false)}>
-        <Pressable style={styles.modalFundo} onPress={() => setModalHoraAberto(false)}>
+      <Modal visible={seletorHora !== null} transparent animationType="fade" onRequestClose={() => setSeletorHora(null)}>
+        <Pressable style={styles.modalFundo} onPress={() => setSeletorHora(null)}>
           <Pressable style={styles.modalConteudo} onPress={() => {}}>
             <Text style={styles.modalTitulo}>Horário do lembrete</Text>
             <ScrollView style={styles.modalLista}>
               <Pressable
-                style={[styles.modalItem, horaNovo === null && styles.modalItemAtivo]}
+                style={[styles.modalItem, seletorHora?.valor === null && styles.modalItemAtivo]}
                 onPress={() => {
-                  setHoraNovo(null);
-                  setModalHoraAberto(false);
+                  seletorHora?.aoSelecionar(null);
+                  setSeletorHora(null);
                 }}
               >
-                <Text style={[styles.modalItemTexto, horaNovo === null && styles.modalItemTextoAtivo]}>
+                <Text style={[styles.modalItemTexto, seletorHora?.valor === null && styles.modalItemTextoAtivo]}>
                   Sem lembrete
                 </Text>
               </Pressable>
               {HORAS.map((h) => (
                 <Pressable
                   key={h}
-                  style={[styles.modalItem, horaNovo === h && styles.modalItemAtivo]}
+                  style={[styles.modalItem, seletorHora?.valor === h && styles.modalItemAtivo]}
                   onPress={() => {
-                    setHoraNovo(h);
-                    setModalHoraAberto(false);
+                    seletorHora?.aoSelecionar(h);
+                    setSeletorHora(null);
                   }}
                 >
-                  <Text style={[styles.modalItemTexto, horaNovo === h && styles.modalItemTextoAtivo]}>
+                  <Text style={[styles.modalItemTexto, seletorHora?.valor === h && styles.modalItemTextoAtivo]}>
                     {String(h).padStart(2, '0')}:00
                   </Text>
                 </Pressable>
               ))}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={edicao !== null} transparent animationType="fade" onRequestClose={() => setEdicao(null)}>
+        <Pressable style={styles.modalFundo} onPress={() => setEdicao(null)}>
+          <Pressable style={styles.modalConteudo} onPress={() => {}}>
+            {edicao && (
+              <ScrollView>
+                <Text style={styles.modalTitulo}>Editar atividade</Text>
+                <TextInput
+                  style={styles.input}
+                  value={edicao.titulo}
+                  onChangeText={(texto) => setEdicao((atual) => atual && { ...atual, titulo: texto })}
+                />
+
+                <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Vendedor</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                  <Pressable
+                    style={[styles.chip, edicao.codigoVendedor === null && styles.chipAtivo]}
+                    onPress={() => setEdicao((atual) => atual && { ...atual, codigoVendedor: null })}
+                  >
+                    <Text style={[styles.chipTexto, edicao.codigoVendedor === null && styles.chipTextoAtivo]}>
+                      Todos
+                    </Text>
+                  </Pressable>
+                  {vendedores.map((v) => (
+                    <Pressable
+                      key={v.codigo}
+                      style={[styles.chip, edicao.codigoVendedor === v.codigo && styles.chipAtivo]}
+                      onPress={() => setEdicao((atual) => atual && { ...atual, codigoVendedor: v.codigo })}
+                    >
+                      <Text
+                        style={[styles.chipTexto, edicao.codigoVendedor === v.codigo && styles.chipTextoAtivo]}
+                      >
+                        {v.nome}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+
+                <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Dias da semana</Text>
+                <View style={styles.diasRow}>
+                  {DIAS_SEMANA.map((d) => (
+                    <Pressable
+                      key={d.valor}
+                      style={[styles.diaChip, edicao.diasSemana.includes(d.valor) && styles.chipAtivo]}
+                      onPress={() => alternarDiaSemanaEdicao(d.valor)}
+                    >
+                      <Text
+                        style={[styles.chipTexto, edicao.diasSemana.includes(d.valor) && styles.chipTextoAtivo]}
+                      >
+                        {d.rotulo}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Horário do lembrete</Text>
+                <Pressable
+                  style={styles.horaBotao}
+                  onPress={() =>
+                    abrirSeletorHora(edicao.hora, (h) => setEdicao((atual) => atual && { ...atual, hora: h }))
+                  }
+                >
+                  <Ionicons name="time-outline" size={16} color={colors.navy} />
+                  <Text style={styles.horaBotaoTexto}>
+                    {edicao.hora != null ? `${String(edicao.hora).padStart(2, '0')}:00` : 'Sem lembrete'}
+                  </Text>
+                </Pressable>
+
+                <Pressable style={styles.addButton} onPress={salvarEdicao} disabled={salvandoEdicao}>
+                  {salvandoEdicao ? (
+                    <ActivityIndicator color={colors.white} size="small" />
+                  ) : (
+                    <Text style={styles.addButtonTexto}>Salvar</Text>
+                  )}
+                </Pressable>
+                <Pressable style={styles.excluirButton} onPress={excluirEdicao}>
+                  <Text style={styles.excluirButtonTexto}>Excluir atividade</Text>
+                </Pressable>
+              </ScrollView>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -304,6 +471,13 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   addButtonTexto: { color: colors.white, fontWeight: '700', fontSize: 14 },
+  excluirButton: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  excluirButtonTexto: { color: colors.red, fontWeight: '700', fontSize: 14 },
   sectionTitulo: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 4, marginBottom: 8 },
   atividadeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   atividadeInfo: { flex: 1 },
