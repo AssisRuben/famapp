@@ -11,13 +11,17 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.conviva.farmacias",
       "adaptiveIcon": {
         "backgroundColor": "#003068",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -47,6 +51,12 @@
         }
       ],
       "expo-sharing"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "63522966-036e-4ceb-a818-a1ea627842e9"
+      }
+    },
+    "owner": "assisrubens"
   }
 }
