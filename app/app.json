@@ -57,6 +57,12 @@
         "projectId": "63522966-036e-4ceb-a818-a1ea627842e9"
       }
     },
-    "owner": "assisrubens"
+    "owner": "assisrubens",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/63522966-036e-4ceb-a818-a1ea627842e9"
+    }
   }
 }
