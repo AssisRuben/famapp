@@ -133,6 +133,13 @@ Componentes:
       `supabase/seed_profiles.sql`) — sem isso, `login()` falha com
       "Usuário sem perfil cadastrado" mesmo com e-mail/senha corretos no
       Supabase Auth.
+- [ ] Rodar [`supabase/migracao_push_comissao.sql`](supabase/migracao_push_comissao.sql)
+      no projeto real e importar/ativar
+      [`coletor/notificacao_comissao.n8n.json`](coletor/notificacao_comissao.n8n.json)
+      no n8n — ver seção "Notificação push de 'subiu de faixa'" abaixo.
+      Precisa também da credencial FCM V1 configurada no EAS
+      (`eas credentials` → Android → Push Notifications) pra push
+      chegar de verdade no Android.
 
 O desenvolvimento do app PODE COMEÇAR JÁ, em paralelo à liberação da API,
 usando mocks no formato exato dos DTOs reais abaixo.
@@ -373,6 +380,36 @@ em `src/types/domain.ts` (`FaixaComissao`, `ComissaoMensal`) e método
 usa a margem bruta % do dia como proxy (mock não tem livro-razão do mês
 inteiro); na Frente 2 (`supabaseRepository.ts`, ver seção abaixo) já é
 exato, direto de `vw_metas_comissao`.
+
+### Notificação push de "subiu de faixa" (gamificação)
+
+Adicionado 07/08/2026. Diferente do lembrete do Checklist (local, agendado
+no próprio celular — `src/lib/notifications.ts` `sincronizarNotificacoesChecklist`),
+esta é push de verdade, mandada pelo n8n via Expo Push API, e exige
+FCM configurado no EAS (Firebase Cloud Messaging — sem isso a notificação
+não chega no Android; ver `eas credentials`).
+
+- `profiles.expo_push_token`: gravado pelo app no login (`AuthContext`
+  → `obterPushToken()` em `src/lib/notifications.ts`) — coluna liberada
+  por `GRANT UPDATE` específico (não a linha inteira), então o vendedor
+  só consegue escrever nesse campo em si mesmo.
+- `vw_faixa_comissao_atual`: faixa "se fechasse agora" (3/5/7/8/10%,
+  direto de `faixas_comissao` pelo % da meta mensal batido) — mais
+  simples que `vw_metas_comissao.percentual_comissao` de propósito
+  (aquela é uma média ponderada das 4 semanas, só vira número limpo no
+  caso flat 100%).
+- `comissao_faixa_alcancada`: ratchet (só sobe, nunca desce, nunca
+  guarda o piso de 3%) da maior faixa já alcançada no mês por vendedor
+  — serve tanto pra medalha 🥉🥈🥇🏆 mostrada em Meta/Metas
+  (`badgeFaixaComissao` em `src/lib/metas.ts`) quanto pra evitar
+  mandar o mesmo push duas vezes.
+- [`coletor/notificacao_comissao.n8n.json`](coletor/notificacao_comissao.n8n.json):
+  workflow agendado (a cada 20 min, 08h-20h) que detecta quem subiu de
+  faixa desde o último registro, manda o push via Expo Push API
+  (`https://exp.host/--/api/v2/push/send`) e atualiza
+  `comissao_faixa_alcancada` — mesmo padrão de
+  `coletor/fechamento_comissao.n8n.json` (nó Postgres + agendamento).
+- Migração standalone: [`supabase/migracao_push_comissao.sql`](supabase/migracao_push_comissao.sql).
 
 ## Frente 2 — SupabaseRepository (app consumindo dado real)
 

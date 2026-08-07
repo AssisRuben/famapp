@@ -8,6 +8,11 @@ create table profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   codigo_vendedor integer references vendedores(codigo),
   role text not null check (role in ('vendedor', 'gestor')),
+  -- Expo push token do dispositivo — gravado pelo próprio app no login
+  -- (ver AuthContext/lib/notifications.ts obterPushToken), lido pelo
+  -- workflow n8n de notificação de comissão (roda como service_role,
+  -- ignora RLS). Não é sensível, mas só o dono deveria escrever nele.
+  expo_push_token text,
   created_at timestamptz default now()
 );
 
@@ -17,9 +22,21 @@ create policy "profiles: usuario le o proprio perfil"
 on profiles for select
 using (id = auth.uid());
 
--- Sem policies de insert/update/delete para authenticated: a
--- gestão de profiles (vincular vendedor, definir papel) é feita
--- via service_role (que ignora RLS), não pelo app.
+-- Sem policies de insert/delete para authenticated: a gestão de
+-- profiles (vincular vendedor, definir papel) é feita via service_role
+-- (que ignora RLS), não pelo app.
+--
+-- UPDATE é diferente: liberado, mas só pra coluna expo_push_token — o
+-- GRANT abaixo restringe quais colunas a policy de update alcança
+-- (mesmo com using/with check permissivos por linha, tentar escrever
+-- role/codigo_vendedor nessa mesma chamada falha por falta de
+-- privilégio na coluna, não só por RLS).
+grant update (expo_push_token) on profiles to authenticated;
+
+create policy "profiles: usuario atualiza o proprio push token"
+on profiles for update
+using (id = auth.uid())
+with check (id = auth.uid());
 
 -- ============================================================
 -- Clientes ativos vs inativos (sem compra nos últimos 60 dias), com o
@@ -581,6 +598,21 @@ using (exists (
   select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
 ));
 
+-- comissao_faixa_alcancada: escrita exclusiva do workflow n8n via
+-- service_role (nenhuma policy de insert/update/delete para
+-- authenticated) — vendedor só lê a própria, gestor lê todas. Mesmo
+-- padrão de sync_control/vendedores (dado sincronizado por fora, não
+-- editável pelo app).
+alter table comissao_faixa_alcancada enable row level security;
+
+create policy "comissao_faixa_alcancada: select proprio ou gestor"
+on comissao_faixa_alcancada for select
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = comissao_faixa_alcancada.codigo_vendedor)
+));
+
 -- sync_control: escrita continua exclusiva do coletor via service_role
 -- (nenhuma policy de insert/update/delete para authenticated). Leitura
 -- liberada pra qualquer autenticado — usada pelo app pra mostrar "dados
@@ -631,6 +663,7 @@ alter view vw_receita_identificacao_comprador set (security_invoker = true);
 alter view vw_vendas_sem_identificacao_comprador set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
 alter view vw_metas_comissao set (security_invoker = true);
+alter view vw_faixa_comissao_atual set (security_invoker = true);
 alter view vw_produto_fornecedor_recente set (security_invoker = true);
 alter view vw_produto_fornecedor_mais_barato set (security_invoker = true);
 alter view vw_venda_recente_produto set (security_invoker = true);

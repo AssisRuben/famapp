@@ -103,3 +103,32 @@ export async function sincronizarNotificacoesChecklist(atividades: AtividadeChec
     // quebrar o carregamento do checklist em si.
   }
 }
+
+// Push de verdade (mandado pelo n8n, ex.: subiu de faixa de comissão)
+// exige um Expo push token registrado em profiles.expo_push_token —
+// diferente do lembrete local do checklist acima, que não depende de
+// servidor nenhum. Chamado no login (ver AuthContext) — retorna null
+// se não tiver como registrar (web, Expo Go, permissão negada), pra
+// quem chamar decidir se salva ou não.
+export async function obterPushToken(): Promise<string | null> {
+  if (Platform.OS === 'web' || RODANDO_NO_EXPO_GO) return null;
+
+  try {
+    const Notifications = carregarNotifications();
+    garantirHandlerConfigurado();
+
+    const permissaoAtual = await Notifications.getPermissionsAsync();
+    if (!permissaoAtual.granted) {
+      const solicitada = await Notifications.requestPermissionsAsync();
+      if (!solicitada.granted) return null;
+    }
+
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) return null;
+
+    const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
+    return data;
+  } catch {
+    return null;
+  }
+}

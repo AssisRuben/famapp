@@ -332,6 +332,10 @@ class MockRepository implements DataRepository {
     return raw ? (JSON.parse(raw) as Profile) : null;
   }
 
+  // Push de verdade não existe em mock (não tem servidor pra mandar) —
+  // no-op de propósito.
+  async salvarPushToken(_profile: Profile, _token: string): Promise<void> {}
+
   async getDesempenhoVendedorDiario(profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]> {
     const fator = fatorVariacaoPorData(dataEmissao);
     const linhas = desempenhoSeedHoje.map((d) => {
@@ -865,6 +869,12 @@ class MockRepository implements DataRepository {
         detalheSemanas = semanas;
       }
 
+      // Mock não tem workflow n8n escrevendo o ratchet de verdade —
+      // aproxima pela faixa "se fechasse agora" (mesma lógica de
+      // vw_faixa_comissao_atual), sem guardar o piso de 3% como
+      // "alcançada".
+      const faixaAtual = faixaPara(percentualAtingido).percentualComissao;
+
       return {
         codigoVendedor: meta.codigoVendedor,
         nomeVendedor: meta.nomeVendedor,
@@ -878,6 +888,7 @@ class MockRepository implements DataRepository {
         comissaoValor,
         regraAplicada,
         detalheSemanas,
+        faixaAlcancada: faixaAtual > 3 ? faixaAtual : null,
       };
     });
 

@@ -1,6 +1,18 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { repository } from '../data';
+import { obterPushToken } from '../lib/notifications';
 import { Profile } from '../types/domain';
+
+// Registra (ou atualiza) o Expo push token no perfil logado — usado
+// pelo n8n pra mandar push de verdade (ex.: subiu de faixa de
+// comissão). "Nice to have": nunca deve travar login nem sessão.
+function registrarPushToken(profile: Profile): void {
+  obterPushToken()
+    .then((token) => {
+      if (token) return repository.salvarPushToken(profile, token);
+    })
+    .catch(() => {});
+}
 
 interface AuthContextValue {
   profile: Profile | null;
@@ -22,7 +34,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     repository
       .getSession()
-      .then(setProfile)
+      .then((sessionProfile) => {
+        setProfile(sessionProfile);
+        if (sessionProfile) registrarPushToken(sessionProfile);
+      })
       .finally(() => setLoadingSession(false));
   }, []);
 
@@ -32,6 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const loggedProfile = await repository.login(email, senha);
       setProfile(loggedProfile);
+      registrarPushToken(loggedProfile);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao entrar.');
     } finally {

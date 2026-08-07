@@ -145,6 +145,15 @@ class SupabaseRepository implements DataRepository {
     return buscarProfile(user);
   }
 
+  // Coluna liberada por GRANT específico (não a linha inteira) em
+  // rls_policies.sql — vendedor só consegue escrever esse campo em si
+  // mesmo, nunca role/codigo_vendedor.
+  async salvarPushToken(profile: Profile, token: string): Promise<void> {
+    if (!profile.codigoVendedor) return;
+    const { error } = await supabase.from('profiles').update({ expo_push_token: token }).eq('id', profile.id);
+    if (error) throw error;
+  }
+
   async getDesempenhoVendedorDiario(_profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]> {
     const { data, error } = await supabase
       .from('vw_desempenho_vendedor_diario')
@@ -748,8 +757,15 @@ class SupabaseRepository implements DataRepository {
   }
 
   async getComissoesMensal(_profile: Profile, ano: number, mes: number): Promise<ComissaoMensal[]> {
-    const { data, error } = await supabase.from('vw_metas_comissao').select('*').eq('ano', ano).eq('mes', mes);
+    const [{ data, error }, { data: faixas, error: erroFaixas }] = await Promise.all([
+      supabase.from('vw_metas_comissao').select('*').eq('ano', ano).eq('mes', mes),
+      supabase.from('comissao_faixa_alcancada').select('codigo_vendedor, faixa_percentual').eq('ano', ano).eq('mes', mes),
+    ]);
     if (error) throw error;
+    if (erroFaixas) throw erroFaixas;
+
+    const faixaPorVendedor = new Map((faixas ?? []).map((f) => [f.codigo_vendedor, Number(f.faixa_percentual)]));
+
     return (data ?? []).map((r) => ({
       codigoVendedor: r.codigo_vendedor,
       nomeVendedor: r.nome_vendedor,
@@ -763,6 +779,7 @@ class SupabaseRepository implements DataRepository {
       comissaoValor: Number(r.comissao_valor),
       regraAplicada: r.regra_aplicada,
       detalheSemanas: (r.detalhe_semanas ?? null) as ComissaoMensal['detalheSemanas'],
+      faixaAlcancada: faixaPorVendedor.get(r.codigo_vendedor) ?? null,
     }));
   }
 

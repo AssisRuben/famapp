@@ -1442,6 +1442,54 @@ join lateral (
 ) calc on true
 where mp.semana is null;
 
+-- Faixa de comissão "se fechasse agora" (3/5/7/8/10%, direto de
+-- faixas_comissao pelo % da meta MENSAL batido até aqui) — mais simples
+-- que vw_metas_comissao.percentual_comissao de propósito: aquela é uma
+-- MÉDIA ponderada das 4 semanas (só vira número limpo quando bate
+-- 100% e cai no flat), essa aqui é sempre uma das 5 faixas exatas.
+-- Usada só pra gamificação (medalha 🔰🥉🥈🥇🏆 no app + push de "subiu
+-- de faixa" via n8n) — ver comissao_faixa_alcancada logo abaixo.
+-- security_invoker=true: respeita a RLS de `metas` (via
+-- vw_metas_progresso), mesmo padrão de vw_metas_comissao.
+create view vw_faixa_comissao_atual as
+select
+  mp.codigo_vendedor,
+  mp.nome_vendedor,
+  mp.ano,
+  mp.mes,
+  mp.valor_meta,
+  mp.valor_realizado,
+  round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2) as percentual_atingido,
+  faixa.percentual_comissao as faixa_atual
+from vw_metas_progresso mp
+join lateral (
+  select percentual_comissao
+  from faixas_comissao
+  where percentual_meta_min <= coalesce(round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2), 0)
+  order by percentual_meta_min desc
+  limit 1
+) faixa on true
+where mp.semana is null;
+
+-- Maior faixa de comissão já alcançada no mês, por vendedor —
+-- registro em RATCHET (só sobe, nunca desce; nunca guarda a faixa
+-- mínima de 3%, que é o piso — não é "alcançar" nada) escrito pelo
+-- workflow n8n coletor/notificacao_comissao.n8n.json toda vez que
+-- vw_faixa_comissao_atual mostra uma faixa maior que a última
+-- registrada aqui. Serve pra DUAS coisas: (1) medalha 🔰🥉🥈🥇🏆
+-- mostrada no app (Meta/Metas) — não regride mesmo se o vendedor tiver
+-- uma semana fraca depois de já ter alcançado uma faixa alta; (2)
+-- evita mandar o mesmo push de novo (o workflow só notifica quando
+-- este registro muda).
+create table comissao_faixa_alcancada (
+  codigo_vendedor integer not null references vendedores(codigo),
+  ano integer not null,
+  mes integer not null check (mes between 1 and 12),
+  faixa_percentual numeric(5,2) not null,
+  alcancada_em timestamptz not null default now(),
+  primary key (codigo_vendedor, ano, mes)
+);
+
 -- Comissão FECHADA (snapshot congelado, usado pra folha de pagamento)
 -- — preenchida só pela função fechar_comissoes_mes() abaixo, chamada
 -- pelo workflow n8n coletor/fechamento_comissao.n8n.json todo dia às

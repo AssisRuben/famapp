@@ -60,6 +60,12 @@ export interface DataRepository {
   logout(): Promise<void>;
   getSession(): Promise<Profile | null>;
 
+  // Push de verdade (n8n, ex.: subiu de faixa de comissão) — token do
+  // Expo Notifications registrado no login (ver lib/notifications.ts
+  // obterPushToken). Sem-op silencioso se profile não tiver
+  // codigoVendedor (gestor não recebe esse tipo de push por ora).
+  salvarPushToken(profile: Profile, token: string): Promise<void>;
+
   getDesempenhoVendedorDiario(profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]>;
   getMetricasVendedorDiario(profile: Profile, dataEmissao: string): Promise<MetricasVendedorDiario[]>;
   // Mesmas métricas, agregadas pro mês inteiro — usadas pelo card
