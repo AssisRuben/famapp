@@ -431,11 +431,17 @@ envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
   workflow. Usa `at time zone 'America/Fortaleza'` explicitamente em vez
   de `current_date` cru, porque às 22:20 local já é depois da meia-noite
   em UTC (mesmo cuidado do `notificacao_comissao.n8n.json`).
+- [`coletor/whatsapp_faltas_pendencias.n8n.json`](coletor/whatsapp_faltas_pendencias.n8n.json):
+  a cada 2 dias às 08:00, duas listas numa mensagem só — **produtos em
+  falta** registrados nos últimos 2 dias (`produtos_em_falta`, janela
+  curta pra não repetir histórico velho a cada envio) e **pendências em
+  aberto** (`pendencias.baixada = false`, sem janela — continua
+  aparecendo até alguém dar baixa), com quantos dias cada pendência
+  está aberta e ⚠️ se passou de 7 dias sem resolver.
 - Outras ideias discutidas, ainda não implementadas: resumo semanal,
-  aviso de comissão fechada no mês, lembrete de pendências em aberto,
-  aviso de receita pendente acumulando, follow-up de antibiótico,
-  aviso de "subiu de faixa" pro grupo (em vez de só push individual),
-  resumo de produto em falta/sugestão de compra.
+  aviso de comissão fechada no mês, aviso de receita pendente
+  acumulando, follow-up de antibiótico, aviso de "subiu de faixa" pro
+  grupo (em vez de só push individual).
 
 ## Frente 2 — SupabaseRepository (app consumindo dado real)
 

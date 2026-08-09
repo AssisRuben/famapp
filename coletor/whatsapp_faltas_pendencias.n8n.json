@@ -1,0 +1,113 @@
+{
+  "name": "WhatsApp - Faltas e pendências (a cada 2 dias)",
+  "nodes": [
+    {
+      "id": "trigger-2dias",
+      "name": "A cada 2 dias às 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        460
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 2,
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "buscar-faltas-pendencias",
+      "name": "Buscar faltas e pendências",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with faltas as (\n  select\n    pef.nome_produto,\n    pef.data,\n    coalesce(vd.nome, 'Gestor(a) da Farmácia') as registrado_por\n  from produtos_em_falta pef\n  left join profiles perfil on perfil.id = pef.registrado_por\n  left join vendedores vd on vd.codigo = perfil.codigo_vendedor\n  where pef.data >= (now() at time zone 'America/Fortaleza')::date - interval '2 days'\n  order by pef.data desc, pef.nome_produto\n),\npendencias_abertas as (\n  select\n    p.nome_cliente,\n    p.produtos,\n    p.data,\n    coalesce(vd.nome, 'Gestor(a) da Farmácia') as registrado_por,\n    ((now() at time zone 'America/Fortaleza')::date - p.data) as dias_aberta\n  from pendencias p\n  left join profiles perfil on perfil.id = p.registrado_por\n  left join vendedores vd on vd.codigo = perfil.codigo_vendedor\n  where p.baixada = false\n  order by p.data asc\n)\nselect\n  (select coalesce(json_agg(f), '[]'::json) from faltas f) as faltas,\n  (select coalesce(json_agg(pa), '[]'::json) from pendencias_abertas pa) as pendencias;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "montar-mensagem",
+      "name": "Montar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "const linha = $input.first().json;\nconst faltas = linha.faltas || [];\nconst pendencias = linha.pendencias || [];\n\nfunction fmtData(iso) {\n  const [ano, mes, dia] = iso.split('-');\n  return `${dia}/${mes}`;\n}\n\nconst partes = ['📦 *Faltas e pendências*', ''];\n\npartes.push(`🚫 *Produtos em falta (últimos 2 dias)* — ${faltas.length}`);\nif (faltas.length === 0) {\n  partes.push('Nenhum registrado.');\n} else {\n  faltas.forEach((f) => {\n    partes.push(`• ${f.nome_produto} — ${fmtData(f.data)} (${f.registrado_por})`);\n  });\n}\npartes.push('');\n\npartes.push(`🗒️ *Pendências em aberto* — ${pendencias.length}`);\nif (pendencias.length === 0) {\n  partes.push('Nenhuma pendência em aberto.');\n} else {\n  pendencias.forEach((p) => {\n    const dias = p.dias_aberta;\n    const alerta = dias >= 7 ? ' ⚠️' : '';\n    partes.push(`• ${p.nome_cliente} — ${p.produtos} (${dias}d aberta${alerta}, ${p.registrado_por})`);\n  });\n}\n\nreturn [{ json: { mensagem: partes.join('\\n').trim() } }];"
+      }
+    },
+    {
+      "id": "enviar-evolution",
+      "name": "➡️ Enviar via Evolution API (troque por aqui)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        560,
+        460
+      ],
+      "notes": "Placeholder — troque este nó pelo nó de envio de mensagem da sua instância Evolution API. O texto pronto pra enviar chega em $json.mensagem.",
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "A cada 2 dias às 08:00": {
+      "main": [
+        [
+          {
+            "node": "Buscar faltas e pendências",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar faltas e pendências": {
+      "main": [
+        [
+          {
+            "node": "Montar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar mensagem": {
+      "main": [
+        [
+          {
+            "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
