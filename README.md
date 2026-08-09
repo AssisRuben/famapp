@@ -421,8 +421,11 @@ envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
   todo dia às 22:20, uma mensagem só com o resumo de TODOS os
   vendedores ativos (`vw_vendedores_ativos`) — margem e % da meta do
   dia, margem e % da meta da semana com a faixa de comissão da semana
-  (🥉🥈🥇🏆, mesma escala de `badgeFaixaComissao`), e quantas vendas do
-  dia tiveram cliente identificado (CPF) vs não. Todo o cálculo (meta
+  (🥉🥈🥇🏆, mesma escala de `badgeFaixaComissao`), e as vendas do dia
+  separadas em 3: com cliente real identificado, no CPF do próprio
+  vendedor (mesma comparação de `vw_vendas_sem_identificacao_comprador`
+  — bate CPF do cliente contra o do vendedor) e sem cliente nenhum.
+  Todo o cálculo (meta
   diária = mensal/dias do mês, semana = bucket 1-7/8-14/15-21/22-fim)
   replica a mesma lógica já usada no app — ver comentários no próprio
   workflow. Usa `at time zone 'America/Fortaleza'` explicitamente em vez

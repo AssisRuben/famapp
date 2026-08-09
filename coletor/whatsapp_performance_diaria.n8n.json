@@ -6,7 +6,10 @@
       "name": "Todo dia às 22:20",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-320, 460],
+      "position": [
+        -320,
+        460
+      ],
       "parameters": {
         "rule": {
           "interval": [
@@ -25,13 +28,18 @@
       "name": "Buscar performance do dia",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [0, 460],
+      "position": [
+        0,
+        460
+      ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "with hoje as (\n  select\n    (now() at time zone 'America/Fortaleza')::date as dia,\n    extract(year from (now() at time zone 'America/Fortaleza'))::int as ano,\n    extract(month from (now() at time zone 'America/Fortaleza'))::int as mes,\n    extract(day from (now() at time zone 'America/Fortaleza'))::int as dia_do_mes\n),\nsemana_atual as (\n  select case\n    when h.dia_do_mes <= 7 then 1\n    when h.dia_do_mes <= 14 then 2\n    when h.dia_do_mes <= 21 then 3\n    else 4\n  end as semana\n  from hoje h\n),\ndias_no_mes as (\n  select extract(day from (make_date(h.ano, h.mes, 1) + interval '1 month' - interval '1 day'))::int as total\n  from hoje h\n),\nvendas_hoje as (\n  select\n    v.codigo_vendedor,\n    count(*) filter (where v.codigo_cliente is not null) as vendas_com_cliente,\n    count(*) filter (where v.codigo_cliente is null) as vendas_sem_cliente\n  from vendas v, hoje h\n  where v.data_emissao = h.dia\n  group by v.codigo_vendedor\n),\nmeta_mensal as (\n  select mp.codigo_vendedor, mp.valor_meta as meta_mensal\n  from vw_metas_progresso mp, hoje h\n  where mp.ano = h.ano and mp.mes = h.mes and mp.semana is null\n),\nmeta_semanal as (\n  select mp.codigo_vendedor, mp.valor_meta as meta_semana, mp.valor_realizado as margem_semana\n  from vw_metas_progresso mp, hoje h, semana_atual s\n  where mp.ano = h.ano and mp.mes = h.mes and mp.semana = s.semana\n)\nselect\n  vd.codigo as codigo_vendedor,\n  vd.nome as nome_vendedor,\n  coalesce(mv.faturamento_liquido, 0) - coalesce(mv.total_custo, 0) as margem_dia,\n  coalesce(mv.qtd_notas, 0) as qtd_notas_dia,\n  coalesce(vh.vendas_com_cliente, 0) as vendas_com_cliente,\n  coalesce(vh.vendas_sem_cliente, 0) as vendas_sem_cliente,\n  round(mm.meta_mensal / nullif(dnm.total, 0), 2) as meta_dia,\n  round(\n    (coalesce(mv.faturamento_liquido,0) - coalesce(mv.total_custo,0))\n    / nullif(mm.meta_mensal / nullif(dnm.total,0), 0) * 100\n  , 1) as percentual_dia,\n  ms.margem_semana,\n  ms.meta_semana,\n  round(ms.margem_semana / nullif(ms.meta_semana,0) * 100, 1) as percentual_semana,\n  faixa_sem.percentual_comissao as faixa_semana\nfrom vw_vendedores_ativos vd\ncross join hoje h\ncross join dias_no_mes dnm\nleft join vw_metricas_vendedor_diario mv on mv.codigo_vendedor = vd.codigo and mv.data_emissao = h.dia\nleft join vendas_hoje vh on vh.codigo_vendedor = vd.codigo\nleft join meta_mensal mm on mm.codigo_vendedor = vd.codigo\nleft join meta_semanal ms on ms.codigo_vendedor = vd.codigo\nleft join lateral (\n  select percentual_comissao\n  from faixas_comissao\n  where percentual_meta_min <= coalesce(round(ms.margem_semana / nullif(ms.meta_semana,0) * 100, 1), 0)\n  order by percentual_meta_min desc\n  limit 1\n) faixa_sem on true\nwhere mm.meta_mensal is not null\norder by margem_dia desc nulls last;"
+        "query": "with hoje as (\n  select\n    (now() at time zone 'America/Fortaleza')::date as dia,\n    extract(year from (now() at time zone 'America/Fortaleza'))::int as ano,\n    extract(month from (now() at time zone 'America/Fortaleza'))::int as mes,\n    extract(day from (now() at time zone 'America/Fortaleza'))::int as dia_do_mes\n),\nsemana_atual as (\n  select case\n    when h.dia_do_mes <= 7 then 1\n    when h.dia_do_mes <= 14 then 2\n    when h.dia_do_mes <= 21 then 3\n    else 4\n  end as semana\n  from hoje h\n),\ndias_no_mes as (\n  select extract(day from (make_date(h.ano, h.mes, 1) + interval '1 month' - interval '1 day'))::int as total\n  from hoje h\n),\nvendas_hoje as (\n  select\n    v.codigo_vendedor,\n    count(*) filter (\n      where v.codigo_cliente is not null\n        and not (\n          vd.numero_cpf is not null\n          and c.numero_cpf_cnpj is not null\n          and regexp_replace(c.numero_cpf_cnpj, '\\\\D', '', 'g') = regexp_replace(vd.numero_cpf, '\\\\D', '', 'g')\n        )\n    ) as vendas_cliente_real,\n    count(*) filter (\n      where v.codigo_cliente is not null\n        and vd.numero_cpf is not null\n        and c.numero_cpf_cnpj is not null\n        and regexp_replace(c.numero_cpf_cnpj, '\\\\D', '', 'g') = regexp_replace(vd.numero_cpf, '\\\\D', '', 'g')\n    ) as vendas_proprio_cpf,\n    count(*) filter (where v.codigo_cliente is null) as vendas_sem_cliente\n  from vendas v\n  join hoje h on true\n  left join vendedores vd on vd.codigo = v.codigo_vendedor\n  left join clientes c on c.codigo = v.codigo_cliente\n  where v.data_emissao = h.dia\n  group by v.codigo_vendedor\n),\nmeta_mensal as (\n  select mp.codigo_vendedor, mp.valor_meta as meta_mensal\n  from vw_metas_progresso mp, hoje h\n  where mp.ano = h.ano and mp.mes = h.mes and mp.semana is null\n),\nmeta_semanal as (\n  select mp.codigo_vendedor, mp.valor_meta as meta_semana, mp.valor_realizado as margem_semana\n  from vw_metas_progresso mp, hoje h, semana_atual s\n  where mp.ano = h.ano and mp.mes = h.mes and mp.semana = s.semana\n)\nselect\n  vd.codigo as codigo_vendedor,\n  vd.nome as nome_vendedor,\n  coalesce(mv.faturamento_liquido, 0) - coalesce(mv.total_custo, 0) as margem_dia,\n  coalesce(mv.qtd_notas, 0) as qtd_notas_dia,\n  coalesce(vh.vendas_cliente_real, 0) as vendas_cliente_real,\n  coalesce(vh.vendas_proprio_cpf, 0) as vendas_proprio_cpf,\n  coalesce(vh.vendas_sem_cliente, 0) as vendas_sem_cliente,\n  round(mm.meta_mensal / nullif(dnm.total, 0), 2) as meta_dia,\n  round(\n    (coalesce(mv.faturamento_liquido,0) - coalesce(mv.total_custo,0))\n    / nullif(mm.meta_mensal / nullif(dnm.total,0), 0) * 100\n  , 1) as percentual_dia,\n  ms.margem_semana,\n  ms.meta_semana,\n  round(ms.margem_semana / nullif(ms.meta_semana,0) * 100, 1) as percentual_semana,\n  faixa_sem.percentual_comissao as faixa_semana\nfrom vw_vendedores_ativos vd\ncross join hoje h\ncross join dias_no_mes dnm\nleft join vw_metricas_vendedor_diario mv on mv.codigo_vendedor = vd.codigo and mv.data_emissao = h.dia\nleft join vendas_hoje vh on vh.codigo_vendedor = vd.codigo\nleft join meta_mensal mm on mm.codigo_vendedor = vd.codigo\nleft join meta_semanal ms on ms.codigo_vendedor = vd.codigo\nleft join lateral (\n  select percentual_comissao\n  from faixas_comissao\n  where percentual_meta_min <= coalesce(round(ms.margem_semana / nullif(ms.meta_semana,0) * 100, 1), 0)\n  order by percentual_meta_min desc\n  limit 1\n) faixa_sem on true\nwhere mm.meta_mensal is not null\norder by margem_dia desc nulls last;"
       },
       "credentials": {
-        "postgres": { "name": "Supabase Postgres" }
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
       }
     },
     {
@@ -39,11 +47,14 @@
       "name": "Montar mensagem",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [280, 460],
+      "position": [
+        280,
+        460
+      ],
       "parameters": {
         "language": "javaScript",
         "mode": "runOnceForAllItems",
-        "jsCode": "const itens = $input.all().map((i) => i.json);\nconst hojeLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' });\n\nconst BADGE_FAIXA = { 5: '🥉', 7: '🥈', 8: '🥇', 10: '🏆' };\nconst MEDALHA_POSICAO = ['🥇', '🥈', '🥉'];\n\nfunction fmtBRL(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n\nconst linhas = [`📊 *Performance do dia — ${hojeLabel}*`, ''];\n\nitens.forEach((v, idx) => {\n  const posicao = MEDALHA_POSICAO[idx] ?? '▪️';\n  const faixa = v.faixa_semana != null ? Number(v.faixa_semana) : 3;\n  const badge = BADGE_FAIXA[faixa] ? ` ${BADGE_FAIXA[faixa]}` : '';\n  linhas.push(`${posicao} *${v.nome_vendedor}*${badge}`);\n  linhas.push(`💰 Hoje: ${fmtBRL(v.margem_dia)} (${v.percentual_dia ?? 0}% da meta do dia)`);\n  linhas.push(`📅 Semana: ${fmtBRL(v.margem_semana)} (${v.percentual_semana ?? 0}% da meta) — faixa ${faixa}%`);\n  linhas.push(`🧾 ${v.qtd_notas_dia} venda(s) — ${v.vendas_com_cliente} com CPF, ${v.vendas_sem_cliente} sem`);\n  linhas.push('');\n});\n\nreturn [{ json: { mensagem: linhas.join('\\n').trim() } }];"
+        "jsCode": "const itens = $input.all().map((i) => i.json);\nconst hojeLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' });\n\nconst BADGE_FAIXA = { 5: '🥉', 7: '🥈', 8: '🥇', 10: '🏆' };\nconst MEDALHA_POSICAO = ['🥇', '🥈', '🥉'];\n\nfunction fmtBRL(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n\nconst linhas = [`📊 *Performance do dia — ${hojeLabel}*`, ''];\n\nitens.forEach((v, idx) => {\n  const posicao = MEDALHA_POSICAO[idx] ?? '▪️';\n  const faixa = v.faixa_semana != null ? Number(v.faixa_semana) : 3;\n  const badge = BADGE_FAIXA[faixa] ? ` ${BADGE_FAIXA[faixa]}` : '';\n  linhas.push(`${posicao} *${v.nome_vendedor}*${badge}`);\n  linhas.push(`💰 Hoje: ${fmtBRL(v.margem_dia)} (${v.percentual_dia ?? 0}% da meta do dia)`);\n  linhas.push(`📅 Semana: ${fmtBRL(v.margem_semana)} (${v.percentual_semana ?? 0}% da meta) — faixa ${faixa}%`);\n  linhas.push(`🧾 ${v.qtd_notas_dia} venda(s) — ${v.vendas_cliente_real} com cliente, ${v.vendas_proprio_cpf} no CPF do vendedor, ${v.vendas_sem_cliente} sem cliente`);\n  linhas.push('');\n});\n\nreturn [{ json: { mensagem: linhas.join('\\n').trim() } }];"
       }
     },
     {
@@ -51,23 +62,52 @@
       "name": "➡️ Enviar via Evolution API (troque por aqui)",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [560, 460],
+      "position": [
+        560,
+        460
+      ],
       "notes": "Placeholder — troque este nó pelo nó de envio de mensagem da sua instância Evolution API. O texto pronto pra enviar chega em $json.mensagem.",
       "parameters": {}
     }
   ],
   "connections": {
     "Todo dia às 22:20": {
-      "main": [[{ "node": "Buscar performance do dia", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Buscar performance do dia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Buscar performance do dia": {
-      "main": [[{ "node": "Montar mensagem", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Montar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Montar mensagem": {
-      "main": [[{ "node": "➡️ Enviar via Evolution API (troque por aqui)", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "pinData": {}
 }
