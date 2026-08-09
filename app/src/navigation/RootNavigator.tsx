@@ -22,6 +22,7 @@ import { VendaAdicionalScreen } from '../screens/VendaAdicionalScreen';
 import { ProdutoEmFaltaScreen } from '../screens/ProdutoEmFaltaScreen';
 import { PrecificacaoScreen } from '../screens/PrecificacaoScreen';
 import { PendenciasScreen } from '../screens/PendenciasScreen';
+import { CarteiraClientesScreen } from '../screens/CarteiraClientesScreen';
 import { SideDrawer } from '../components/SideDrawer';
 import { colors } from '../theme/colors';
 
@@ -93,6 +94,7 @@ function AppTabs() {
     { label: ehGestor ? 'Check list' : 'Meta', emoji: ehGestor ? '✅' : '🎯', onPress: () => irPara('Meta') },
     { label: 'Produto em falta', emoji: '📦', onPress: () => irPara('ProdutoEmFalta') },
     { label: 'Pendências', emoji: '🗒️', onPress: () => irPara('Pendencias') },
+    { label: 'Carteira de clientes', emoji: '👥', onPress: () => irPara('CarteiraClientes') },
     ...(ehGestor
       ? [
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
@@ -208,6 +210,15 @@ function AppTabs() {
           options={{
             title: 'Pendências',
             tabBarIcon: ({ focused }) => <TabIcon emoji="🗒️" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="CarteiraClientes"
+          component={CarteiraClientesScreen}
+          options={{
+            title: 'Carteira de clientes',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="👥" focused={focused} />,
             ...abaOculta(true),
           }}
         />

@@ -19,6 +19,7 @@ import {
 } from '../lib/vendaAdicional';
 import {
   CampanhaVendaAdicional,
+  ClienteCarteira,
   ClienteDoVendedor,
   ContatoCliente,
   HistoricoCompraCliente,
@@ -39,8 +40,8 @@ const MOTIVO_LABEL: Record<VendaSemIdentificacaoComprador['motivo'], string> = {
   proprio_cpf: 'No CPF do próprio vendedor',
 };
 
-// Reaproveitada nas 3 listas de Alertas que mostram cliente
-// (aniversário, alto valor sumindo, e dentro de promoção) — mesmo
+// Reaproveitada nas 3 listas de Alertas que mostram cliente (carteira
+// de clientes, alto valor sumindo, e dentro de promoção) — mesmo
 // comportamento de "Meus Clientes": clica no cliente, expande as
 // últimas 5 compras (produto + data) do histórico completo dele
 // (01/08/2026).
@@ -241,26 +242,12 @@ function mensagemPromocao(alerta: ProdutoPromocaoAlerta, nomeCliente: string, ul
   )}. Aproveita antes que acabe!`;
 }
 
-// Próxima ocorrência do dia/mês de nascimento a partir de hoje (troca
-// de ano quando já passou este ano) — pra saber "faltam quantos dias".
-function diasAteProximoAniversario(dataNascimentoISO: string, hoje: Date): number {
-  const [, mesStr, diaStr] = dataNascimentoISO.split('-');
-  const mes = Number(mesStr) - 1;
-  const dia = Number(diaStr);
-  let proximo = new Date(hoje.getFullYear(), mes, dia);
-  proximo.setHours(0, 0, 0, 0);
-  const hojeSemHora = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
-  if (proximo < hojeSemHora) proximo = new Date(hoje.getFullYear() + 1, mes, dia);
-  return Math.round((proximo.getTime() - hojeSemHora.getTime()) / 86400000);
-}
-
 function diasDesde(dataISO: string, hoje: Date): number {
   const data = new Date(dataISO);
   const hojeSemHora = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
   return Math.round((hojeSemHora.getTime() - data.getTime()) / 86400000);
 }
 
-const JANELA_ANIVERSARIO_DIAS = 7;
 const RECEITA_PENDENTE_DIAS = 7;
 const CLIENTE_SUMIU_DIAS = 60;
 const ANTIBIOTICO_DIAS = 7;
@@ -299,6 +286,7 @@ export function AlertasScreen() {
   const [contatos, setContatos] = useState<ContatoCliente[]>([]);
   const [campanhasVendaAdicionalAtivas, setCampanhasVendaAdicionalAtivas] = useState<CampanhaVendaAdicional[]>([]);
   const [vendasVendaAdicionalPorCampanha, setVendasVendaAdicionalPorCampanha] = useState<Record<string, VendaVendaAdicional[]>>({});
+  const [carteiraClientes, setCarteiraClientes] = useState<ClienteCarteira[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
@@ -312,7 +300,7 @@ export function AlertasScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     const hoje = new Date();
-    const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont] = await Promise.all([
+    const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont, carteira] = await Promise.all([
       repository.getProdutosEmPromocao(profile),
       repository.getClientesDoVendedor(profile),
       repository.getClientesValorGeral(profile),
@@ -322,6 +310,10 @@ export function AlertasScreen() {
       repository.getIdentificacaoCompradorPorVendedor(profile),
       repository.getMetas(profile, hoje.getFullYear(), hoje.getMonth() + 1),
       repository.getContatosRecentes(profile),
+      // Sem codigoVendedor: vendedor traz a própria carteira, gestor
+      // traz a de todo mundo somada (card de Alertas é um resumo geral
+      // — o detalhe por vendedor fica na aba "Carteira de clientes").
+      repository.getCarteiraClientes(profile),
     ]);
     setAlertasPromocao(promocao);
     setClientes(cli);
@@ -332,6 +324,7 @@ export function AlertasScreen() {
     setIdentificacaoComprador(ident);
     setMetas(met);
     setContatos(cont);
+    setCarteiraClientes(carteira);
 
     // Venda adicional: só as campanhas ativas hoje interessam pro card
     // de Alertas — busca as vendas de cada uma já aqui (não é lazy
@@ -387,15 +380,16 @@ export function AlertasScreen() {
     [produtosRecorrentes, contatos]
   );
 
-  const aniversariantes = useMemo(
-    () =>
-      clientes
-        .filter((c) => c.dataNascimento != null)
-        .map((c) => ({ cliente: c, dias: diasAteProximoAniversario(c.dataNascimento as string, hoje) }))
-        .filter((x) => x.dias <= JANELA_ANIVERSARIO_DIAS && !foiContatadoRecentemente(contatos, x.cliente.codigo, 'aniversario'))
-        .sort((a, b) => a.dias - b.dias),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [clientes, contatos]
+  // Estatísticas do card "Carteira de clientes" — valor somado é o
+  // valor6Meses de cada cliente (já soma qualquer vendedor, ver
+  // comentário de vw_carteira_clientes), não all-time.
+  const carteiraStats = useMemo(
+    () => ({
+      valorTotal: carteiraClientes.reduce((soma, c) => soma + c.valor6Meses, 0),
+      totalClientes: carteiraClientes.length,
+      compraramEsteMes: carteiraClientes.filter((c) => c.compradoEsteMes).length,
+    }),
+    [carteiraClientes]
   );
 
   const diaDoMes = hoje.getDate();
@@ -540,7 +534,7 @@ export function AlertasScreen() {
 
   const cards: AlertaCardInfo[] = [
     { chave: 'uso_continuo', emoji: '🔁', titulo: 'Uso contínuo atrasado', contagem: usoContinuoAtrasado.length, cor: '#9333ea' },
-    { chave: 'aniversario', emoji: '🎂', titulo: 'Aniversário essa semana', contagem: aniversariantes.length, cor: '#0891b2' },
+    { chave: 'carteira_clientes', emoji: '👥', titulo: 'Carteira de clientes', contagem: carteiraStats.totalClientes, cor: '#0891b2' },
     { chave: 'meta_risco', emoji: '📉', titulo: 'Meta em risco', contagem: metasEmRisco.length, cor: colors.red },
     { chave: 'receita_pendente', emoji: '💊', titulo: 'Receita pendente há tempo', contagem: receitasPendentesAntigas.length, cor: colors.red },
     {
@@ -626,21 +620,34 @@ export function AlertasScreen() {
         ))}
       </View>
 
-      {expandido === 'aniversario' && (
+      {expandido === 'carteira_clientes' && (
         <Card>
-          <Text style={styles.listaTitulo}>Aniversário nos próximos {JANELA_ANIVERSARIO_DIAS} dias</Text>
-          {aniversariantes.length === 0 ? (
-            <Text style={styles.empty}>Ninguém fazendo aniversário nessa janela.</Text>
+          <Text style={styles.listaTitulo}>Carteira de clientes</Text>
+          <View style={styles.carteiraStatsRow}>
+            <View style={styles.carteiraStatItem}>
+              <Text style={styles.carteiraStatValor}>{formatBRL(carteiraStats.valorTotal)}</Text>
+              <Text style={styles.carteiraStatLabel}>Vendido (últ. 6 meses)</Text>
+            </View>
+            <View style={styles.carteiraStatItem}>
+              <Text style={styles.carteiraStatValor}>{carteiraStats.totalClientes}</Text>
+              <Text style={styles.carteiraStatLabel}>Clientes na carteira</Text>
+            </View>
+            <View style={styles.carteiraStatItem}>
+              <Text style={styles.carteiraStatValor}>{carteiraStats.compraramEsteMes}</Text>
+              <Text style={styles.carteiraStatLabel}>Compraram este mês</Text>
+            </View>
+          </View>
+          {carteiraClientes.length === 0 ? (
+            <Text style={styles.empty}>Nenhum cliente na carteira ainda — adiciona na aba "Carteira de clientes".</Text>
           ) : (
-            aniversariantes.map(({ cliente, dias }) => (
+            carteiraClientes.map((cliente) => (
               <LinhaClienteComHistorico
-                key={cliente.codigo}
-                codigoCliente={cliente.codigo}
+                key={cliente.id}
+                codigoCliente={cliente.codigoCliente}
                 nome={cliente.nome}
                 telefone={cliente.telefone}
-                detalhe={dias === 0 ? 'Hoje! 🎉' : dias === 1 ? 'Amanhã' : `Em ${dias} dias`}
-                mensagemWhatsapp={`Parabéns, ${nomeCurto(cliente.nome)}! 🎉🎂 A equipe da Farmácia Conviva Parquelândia deseja um feliz aniversário pra você!`}
-                onContato={(tipo) => registrarContatoAlerta('aniversario', cliente.codigo, tipo)}
+                detalhe={`${formatBRL(cliente.valor6Meses)} (últ. 6 meses)${cliente.compradoEsteMes ? ' · comprou este mês ✅' : ''}`}
+                mensagemWhatsapp={`Oi, ${nomeCurto(cliente.nome)}! Tudo bem? Aqui é da Farmácia Conviva Parquelândia. Passando pra saber se você precisa de alguma coisa 🙂`}
               />
             ))
           )}
@@ -969,6 +976,18 @@ const styles = StyleSheet.create({
   cardTitulo: { fontSize: 12.5, color: colors.textSecondary, marginTop: 3, lineHeight: 16 },
   listaTitulo: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: 4 },
   listaSubtitulo: { fontSize: 11, color: colors.textMuted, marginBottom: 10 },
+  carteiraStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: 14,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  carteiraStatItem: { flex: 1, alignItems: 'center' },
+  carteiraStatValor: { fontSize: 15, fontWeight: '700', color: colors.navy },
+  carteiraStatLabel: { fontSize: 10, color: colors.textMuted, marginTop: 2, textAlign: 'center' },
   filtroRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   filtroChip: {
     paddingHorizontal: 12,

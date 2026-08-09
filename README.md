@@ -457,6 +457,30 @@ envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
   acumulando, follow-up de antibiótico, aviso de "subiu de faixa" pro
   grupo (em vez de só push individual).
 
+### Carteira de clientes
+
+Adicionado 09/08/2026 — substitui o antigo card de aniversário em
+Alertas. Lista curada MANUALMENTE pelo vendedor (busca por nome/CPF pra
+adicionar, botão de excluir pra remover) — diferente de todas as outras
+listas de cliente do app, que são derivadas de histórico de compra.
+
+- Nova aba **"Carteira de clientes"** (`CarteiraClientesScreen`) no
+  menu sanduíche, pros dois papéis. Vendedor gerencia só a própria;
+  gestor tem um seletor de vendedor (igual em Metas/Check list) pra
+  gerenciar a de qualquer um.
+- `carteira_clientes`: só o vínculo vendedor↔cliente (tabela
+  `supabase/schema.sql`). `vw_carteira_clientes` enriquece com
+  `valor_6_meses`/`comprado_este_mes` somando QUALQUER vendedor (mesmo
+  raciocínio de `vw_clientes_valor_geral` — mede o engajamento real do
+  cliente) — controle de acesso feito no WHERE da view, não por
+  `security_invoker`, mesma família de `vw_produtos_promocao_clientes`.
+- Card em Alertas (`getCarteiraClientes(profile)` sem `codigoVendedor`
+  — vendedor vê a própria, gestor vê a soma de todos): mostra valor
+  total vendido (6 meses), quantidade de clientes na carteira e
+  quantos já compraram esse mês, além da lista com os botões de
+  contato padrão do app.
+- Migração standalone: [`supabase/migracao_carteira_clientes.sql`](supabase/migracao_carteira_clientes.sql).
+
 ## Frente 2 — SupabaseRepository (app consumindo dado real)
 
 `src/data/index.ts` exporta `supabaseRepository`

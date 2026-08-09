@@ -846,6 +846,64 @@ join clientes c on c.codigo = v.codigo_cliente
 where v.codigo_cliente is not null
 group by c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
 
+-- ============================================================
+-- CARTEIRA DE CLIENTES (09/08/2026) — lista curada manualmente pelo
+-- vendedor (aba "Carteira de clientes" do app), substitui o antigo
+-- card de aniversário em Alertas. Diferente das outras listas de
+-- cliente do app (todas derivadas de histórico de compra), aqui é o
+-- vendedor quem decide manualmente quem entra/sai.
+-- ============================================================
+create table carteira_clientes (
+  id bigserial primary key,
+  codigo_vendedor integer not null references vendedores(codigo),
+  codigo_cliente integer not null references clientes(codigo),
+  adicionado_por uuid references auth.users(id),
+  criado_em timestamptz not null default now(),
+  unique (codigo_vendedor, codigo_cliente)
+);
+
+create index idx_carteira_clientes_vendedor on carteira_clientes (codigo_vendedor);
+
+-- valor_6_meses/comprado_este_mes somam QUALQUER vendedor (mesmo
+-- raciocínio de vw_clientes_valor_geral — mede o engajamento real do
+-- cliente, não só o que comprou com o vendedor dono da carteira); só o
+-- VÍNCULO à carteira é que é por vendedor. Por isso o controle de
+-- acesso é feito no WHERE (checando profiles/auth.uid()), não por
+-- security_invoker — com security_invoker=true a RLS de vendas/
+-- venda_itens recortaria as subqueries pro vendedor logado por baixo
+-- dos panos, dando o mesmo problema já corrigido em
+-- vw_clientes_valor_geral (ver comentário lá).
+create view vw_carteira_clientes as
+select
+  cc.id,
+  cc.codigo_vendedor,
+  c.codigo as codigo_cliente,
+  c.nome,
+  c.fone as telefone,
+  cc.criado_em,
+  coalesce(v6m.valor_total, 0) as valor_6_meses,
+  coalesce(vm.qtd_compras_mes, 0) > 0 as comprado_este_mes
+from carteira_clientes cc
+join clientes c on c.codigo = cc.codigo_cliente
+left join lateral (
+  select sum(vi.valor_total_liquido) as valor_total
+  from vendas v
+  join venda_itens vi on vi.venda_id = v.id
+  where v.codigo_cliente = c.codigo
+    and v.data_emissao >= (current_date - interval '6 months')
+) v6m on true
+left join lateral (
+  select count(*) as qtd_compras_mes
+  from vendas v
+  where v.codigo_cliente = c.codigo
+    and date_trunc('month', v.data_emissao) = date_trunc('month', current_date)
+) vm on true
+where exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = cc.codigo_vendedor)
+);
+
 -- Histórico de compra por PRODUTO (não por nota) — 1 linha por item
 -- vendido, com nome do produto (produto_catalogo, sincronizado da
 -- Trier; sem FK formal com venda_itens.codigo_produto, daí o left

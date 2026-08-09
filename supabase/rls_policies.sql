@@ -613,6 +613,38 @@ using (exists (
     and (p.role = 'gestor' or p.codigo_vendedor = comissao_faixa_alcancada.codigo_vendedor)
 ));
 
+-- carteira_clientes: vendedor gerencia (lê/adiciona/remove) só a
+-- própria carteira; gestor gerencia a de qualquer vendedor (seletor de
+-- vendedor na aba "Carteira de clientes"). A leitura enriquecida
+-- (valor_6_meses/comprado_este_mes) é feita via vw_carteira_clientes,
+-- que já tem seu próprio controle de acesso embutido no WHERE — essas
+-- policies aqui cobrem a tabela crua (usada por insert/delete direto).
+alter table carteira_clientes enable row level security;
+
+create policy "carteira_clientes: select proprio ou gestor"
+on carteira_clientes for select
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = carteira_clientes.codigo_vendedor)
+));
+
+create policy "carteira_clientes: insere proprio ou gestor"
+on carteira_clientes for insert
+with check (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = carteira_clientes.codigo_vendedor)
+));
+
+create policy "carteira_clientes: deleta proprio ou gestor"
+on carteira_clientes for delete
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = carteira_clientes.codigo_vendedor)
+));
+
 -- sync_control: escrita continua exclusiva do coletor via service_role
 -- (nenhuma policy de insert/update/delete para authenticated). Leitura
 -- liberada pra qualquer autenticado — usada pelo app pra mostrar "dados
@@ -677,13 +709,15 @@ alter view vw_clientes_produtos_vendedor set (security_invoker = true);
 alter view vw_clientes_produtos set (security_invoker = true);
 alter view vw_vendedores_ativos set (security_invoker = true);
 -- vw_produtos_promocao_clientes, vw_clientes_inatividade,
--- vw_ranking_vendedores_dia e vw_clientes_valor_geral ficam de
--- propósito SEM security_invoker (ver comentário de cada uma em
--- schema.sql) — não é esquecimento. Gap corrigido nesta rodada:
--- vw_ranking_vendedores_dia tinha security_invoker=true aqui antes, o
--- que fazia um vendedor real só ver a própria linha do ranking (sempre
--- em 1º, sozinho), diferente da tela "Ranking" do app, que mostra todo
--- mundo de propósito (gamificação). As duas primeiras fazem o próprio
--- controle de acesso no WHERE (checando profiles/auth.uid()) em vez de
--- confiar na RLS automática das tabelas base; ranking e
--- clientes_valor_geral não precisam nem disso, rodam liberadas.
+-- vw_ranking_vendedores_dia, vw_clientes_valor_geral e
+-- vw_carteira_clientes ficam de propósito SEM security_invoker (ver
+-- comentário de cada uma em schema.sql) — não é esquecimento. Gap
+-- corrigido nesta rodada: vw_ranking_vendedores_dia tinha
+-- security_invoker=true aqui antes, o que fazia um vendedor real só ver
+-- a própria linha do ranking (sempre em 1º, sozinho), diferente da tela
+-- "Ranking" do app, que mostra todo mundo de propósito (gamificação).
+-- vw_produtos_promocao_clientes/vw_clientes_inatividade/
+-- vw_carteira_clientes fazem o próprio controle de acesso no WHERE
+-- (checando profiles/auth.uid()) em vez de confiar na RLS automática
+-- das tabelas base; ranking e clientes_valor_geral não precisam nem
+-- disso, rodam liberadas.

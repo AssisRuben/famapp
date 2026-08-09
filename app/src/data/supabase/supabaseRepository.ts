@@ -7,6 +7,8 @@ import {
   Campanha,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
+  ClienteBusca,
+  ClienteCarteira,
   ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
@@ -403,6 +405,60 @@ class SupabaseRepository implements DataRepository {
       valorTotal: Number(r.valor_total),
       ultimaCompra: r.ultima_compra,
     }));
+  }
+
+  async getCarteiraClientes(profile: Profile, codigoVendedor?: number): Promise<ClienteCarteira[]> {
+    // Sem codigoVendedor explícito: vendedor filtra pra si mesmo;
+    // gestor NÃO filtra (a view já mostra tudo pra ele, usado pelo
+    // card de Alertas pra somar a carteira de todo mundo). Com
+    // codigoVendedor: usado pelo gestor na aba, com o seletor.
+    const filtro = codigoVendedor ?? (profile.role === 'vendedor' ? profile.codigoVendedor : null);
+    let query = supabase.from('vw_carteira_clientes').select('*').order('nome', { ascending: true });
+    if (filtro != null) query = query.eq('codigo_vendedor', filtro);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      id: String(r.id),
+      codigoVendedor: r.codigo_vendedor,
+      codigoCliente: r.codigo_cliente,
+      nome: r.nome,
+      telefone: r.telefone,
+      valor6Meses: Number(r.valor_6_meses),
+      compradoEsteMes: r.comprado_este_mes,
+    }));
+  }
+
+  async buscarClientesParaCarteira(termo: string): Promise<ClienteBusca[]> {
+    const termoLimpo = termo.trim();
+    if (!termoLimpo) return [];
+    const { data, error } = await supabase
+      .from('clientes')
+      .select('codigo, nome, numero_cpf_cnpj, fone')
+      .or(`nome.ilike.%${termoLimpo}%,numero_cpf_cnpj.ilike.%${termoLimpo}%`)
+      .order('nome', { ascending: true })
+      .limit(20);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      codigo: r.codigo,
+      nome: r.nome,
+      numeroCpfCnpj: r.numero_cpf_cnpj,
+      telefone: r.fone,
+    }));
+  }
+
+  async adicionarClienteCarteira(codigoVendedor: number, codigoCliente: number): Promise<void> {
+    const { data: sessao } = await supabase.auth.getUser();
+    const { error } = await supabase.from('carteira_clientes').insert({
+      codigo_vendedor: codigoVendedor,
+      codigo_cliente: codigoCliente,
+      adicionado_por: sessao.user?.id ?? null,
+    });
+    if (error) throw error;
+  }
+
+  async removerClienteCarteira(id: string): Promise<void> {
+    const { error } = await supabase.from('carteira_clientes').delete().eq('id', Number(id));
+    if (error) throw error;
   }
 
   // Limit no app, não na view — a view fica genérica pra outros usos

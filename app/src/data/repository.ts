@@ -3,6 +3,8 @@ import {
   Campanha,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
+  ClienteBusca,
+  ClienteCarteira,
   ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
@@ -90,6 +92,20 @@ export interface DataRepository {
   // por vendedor; reaproveitar getClientesDoVendedor ali fazia cliente
   // que comprou recente com OUTRO vendedor entrar como "sumindo").
   getClientesValorGeral(profile: Profile): Promise<ClienteDoVendedor[]>;
+
+  // Carteira de clientes: lista curada manualmente (aba "Carteira de
+  // clientes" + card em Alertas). Sem codigoVendedor: vendedor logado
+  // vê a própria; gestor vê a soma de TODOS (usado no card de
+  // Alertas). Com codigoVendedor: filtra pra esse vendedor específico
+  // (usado pelo gestor na aba, com o seletor de vendedor).
+  getCarteiraClientes(profile: Profile, codigoVendedor?: number): Promise<ClienteCarteira[]>;
+  // Busca em `clientes` (aberta a qualquer autenticado) por nome ou
+  // CPF, pra escolher quem adicionar na carteira — limitada (não
+  // carrega o cadastro inteiro).
+  buscarClientesParaCarteira(termo: string): Promise<ClienteBusca[]>;
+  adicionarClienteCarteira(codigoVendedor: number, codigoCliente: number): Promise<void>;
+  removerClienteCarteira(id: string): Promise<void>;
+
   // Histórico de compra do cliente (qualquer vendedor), mostrado ao
   // expandir um cliente na tela "Meus clientes" (limite padrão 5) e na
   // tela "Cliente para resgate" (limite 7, com nome do vendedor por
