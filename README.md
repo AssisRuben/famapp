@@ -411,6 +411,29 @@ não chega no Android; ver `eas credentials`).
   `coletor/fechamento_comissao.n8n.json` (nó Postgres + agendamento).
 - Migração standalone: [`supabase/migracao_push_comissao.sql`](supabase/migracao_push_comissao.sql).
 
+### Mensagens WhatsApp via n8n (Evolution API)
+
+Adicionado 08/08/2026. Farmácia já roda Evolution API em outros fluxos —
+estes workflows terminam num nó placeholder (`noOp`) onde entra o nó de
+envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
+
+- [`coletor/whatsapp_performance_diaria.n8n.json`](coletor/whatsapp_performance_diaria.n8n.json):
+  todo dia às 22:20, uma mensagem só com o resumo de TODOS os
+  vendedores ativos (`vw_vendedores_ativos`) — margem e % da meta do
+  dia, margem e % da meta da semana com a faixa de comissão da semana
+  (🥉🥈🥇🏆, mesma escala de `badgeFaixaComissao`), e quantas vendas do
+  dia tiveram cliente identificado (CPF) vs não. Todo o cálculo (meta
+  diária = mensal/dias do mês, semana = bucket 1-7/8-14/15-21/22-fim)
+  replica a mesma lógica já usada no app — ver comentários no próprio
+  workflow. Usa `at time zone 'America/Fortaleza'` explicitamente em vez
+  de `current_date` cru, porque às 22:20 local já é depois da meia-noite
+  em UTC (mesmo cuidado do `notificacao_comissao.n8n.json`).
+- Outras ideias discutidas, ainda não implementadas: resumo semanal,
+  aviso de comissão fechada no mês, lembrete de pendências em aberto,
+  aviso de receita pendente acumulando, follow-up de antibiótico,
+  aviso de "subiu de faixa" pro grupo (em vez de só push individual),
+  resumo de produto em falta/sugestão de compra.
+
 ## Frente 2 — SupabaseRepository (app consumindo dado real)
 
 `src/data/index.ts` exporta `supabaseRepository`
