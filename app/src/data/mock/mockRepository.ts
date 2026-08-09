@@ -546,6 +546,33 @@ class MockRepository implements DataRepository {
     return delay(linhas);
   }
 
+  async getClientesValorGeral(_profile: Profile): Promise<ClienteDoVendedor[]> {
+    // Mesma conta de getClientesDoVendedor, mas somando QUALQUER
+    // vendedor (sem filtrar vendaItensDetalheSeed por codigoVendedor).
+    const porCliente = new Map<number, { valorTotal: number; ultimaCompra: string }>();
+    for (const item of vendaItensDetalheSeed) {
+      const produto = produtosSeed.find((p) => p.codigo === item.codigoProduto);
+      const valor = (produto?.precoAtual ?? 0) * item.quantidade;
+      const data = dataDiasAtras(item.diasAtras);
+      const atual = porCliente.get(item.codigoCliente);
+      porCliente.set(item.codigoCliente, {
+        valorTotal: round2((atual?.valorTotal ?? 0) + valor),
+        ultimaCompra: atual && atual.ultimaCompra > data ? atual.ultimaCompra : data,
+      });
+    }
+    const linhas = Array.from(porCliente.entries())
+      .map(([codigo, agregado]) => ({
+        codigo,
+        nome: nomeCliente(codigo),
+        telefone: telefoneCliente(codigo),
+        email: null,
+        dataNascimento: null,
+        ...agregado,
+      }))
+      .sort((a, b) => b.ultimaCompra.localeCompare(a.ultimaCompra));
+    return delay(linhas);
+  }
+
   async getHistoricoComprasCliente(_profile: Profile, codigoCliente: number, limite = 5): Promise<HistoricoCompraCliente[]> {
     const linhas = vendaItensDetalheSeed
       .filter((v) => v.codigoCliente === codigoCliente)

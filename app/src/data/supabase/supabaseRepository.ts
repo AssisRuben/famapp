@@ -377,6 +377,34 @@ class SupabaseRepository implements DataRepository {
     }));
   }
 
+  async getClientesValorGeral(_profile: Profile): Promise<ClienteDoVendedor[]> {
+    // Mesma paginação de getClientesDoVendedor (PostgREST limita 1000
+    // linhas por request) — aqui sem filtro de vendedor, então o total
+    // de clientes é ainda maior.
+    const TAMANHO_PAGINA = 1000;
+    const linhas: Record<string, unknown>[] = [];
+    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
+      const { data, error } = await supabase
+        .from('vw_clientes_valor_geral')
+        .select('*')
+        .order('ultima_compra', { ascending: false })
+        .order('codigo', { ascending: true })
+        .range(inicio, inicio + TAMANHO_PAGINA - 1);
+      if (error) throw error;
+      linhas.push(...(data ?? []));
+      if (!data || data.length < TAMANHO_PAGINA) break;
+    }
+    return linhas.map((r: any) => ({
+      codigo: r.codigo,
+      nome: r.nome,
+      telefone: r.telefone,
+      email: r.email,
+      dataNascimento: r.data_nascimento,
+      valorTotal: Number(r.valor_total),
+      ultimaCompra: r.ultima_compra,
+    }));
+  }
+
   // Limit no app, não na view — a view fica genérica pra outros usos
   // poderem pedir mais/menos (padrão 5 pra "Meus clientes", 7 pra
   // "Cliente para resgate").

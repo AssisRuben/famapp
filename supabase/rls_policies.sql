@@ -676,13 +676,14 @@ alter view vw_historico_compras_cliente set (security_invoker = true);
 alter view vw_clientes_produtos_vendedor set (security_invoker = true);
 alter view vw_clientes_produtos set (security_invoker = true);
 alter view vw_vendedores_ativos set (security_invoker = true);
--- vw_produtos_promocao_clientes, vw_clientes_inatividade e
--- vw_ranking_vendedores_dia ficam de propósito SEM security_invoker (ver
--- comentário de cada uma em schema.sql) — não é esquecimento. Gap
--- corrigido nesta rodada: vw_ranking_vendedores_dia tinha
--- security_invoker=true aqui antes, o que fazia um vendedor real só ver
--- a própria linha do ranking (sempre em 1º, sozinho), diferente da tela
--- "Ranking" do app, que mostra todo mundo de propósito (gamificação).
--- As duas primeiras fazem o próprio controle de acesso no WHERE
--- (checando profiles/auth.uid()) em vez de confiar na RLS automática das
--- tabelas base; a de ranking não precisa nem disso, roda liberada.
+-- vw_produtos_promocao_clientes, vw_clientes_inatividade,
+-- vw_ranking_vendedores_dia e vw_clientes_valor_geral ficam de
+-- propósito SEM security_invoker (ver comentário de cada uma em
+-- schema.sql) — não é esquecimento. Gap corrigido nesta rodada:
+-- vw_ranking_vendedores_dia tinha security_invoker=true aqui antes, o
+-- que fazia um vendedor real só ver a própria linha do ranking (sempre
+-- em 1º, sozinho), diferente da tela "Ranking" do app, que mostra todo
+-- mundo de propósito (gamificação). As duas primeiras fazem o próprio
+-- controle de acesso no WHERE (checando profiles/auth.uid()) em vez de
+-- confiar na RLS automática das tabelas base; ranking e
+-- clientes_valor_geral não precisam nem disso, rodam liberadas.

@@ -84,6 +84,12 @@ export interface DataRepository {
   // vendedor, não precisa de busca no banco). Gestor (sem
   // codigoVendedor) recebe lista vazia — tela é por vendedor mesmo.
   getClientesDoVendedor(profile: Profile): Promise<ClienteDoVendedor[]>;
+  // Mesma base de getClientesDoVendedor, mas valorTotal/ultimaCompra
+  // somam QUALQUER vendedor — usada só pelo card "Cliente de alto
+  // valor sumindo" em Alertas (oportunidade de contato, não filtrado
+  // por vendedor; reaproveitar getClientesDoVendedor ali fazia cliente
+  // que comprou recente com OUTRO vendedor entrar como "sumindo").
+  getClientesValorGeral(profile: Profile): Promise<ClienteDoVendedor[]>;
   // Histórico de compra do cliente (qualquer vendedor), mostrado ao
   // expandir um cliente na tela "Meus clientes" (limite padrão 5) e na
   // tela "Cliente para resgate" (limite 7, com nome do vendedor por

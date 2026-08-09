@@ -289,6 +289,7 @@ export function AlertasScreen() {
   const navigation = useNavigation<any>();
   const [alertasPromocao, setAlertasPromocao] = useState<ProdutoPromocaoAlerta[]>([]);
   const [clientes, setClientes] = useState<ClienteDoVendedor[]>([]);
+  const [clientesValorGeral, setClientesValorGeral] = useState<ClienteDoVendedor[]>([]);
   const [produtosRecorrentes, setProdutosRecorrentes] = useState<ProdutoRecorrenteCliente[]>([]);
   const [receitas, setReceitas] = useState<VendaReceitaPendente[]>([]);
   const [antimicrobianos, setAntimicrobianos] = useState<VendaAntimicrobianoRecente[]>([]);
@@ -311,9 +312,10 @@ export function AlertasScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     const hoje = new Date();
-    const [promocao, cli, prod, rec, antim, ident, met, cont] = await Promise.all([
+    const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont] = await Promise.all([
       repository.getProdutosEmPromocao(profile),
       repository.getClientesDoVendedor(profile),
+      repository.getClientesValorGeral(profile),
       repository.getProdutosRecorrentesDoVendedor(profile),
       repository.getVendasComReceita(profile),
       repository.getVendasAntimicrobianoRecente(profile),
@@ -323,6 +325,7 @@ export function AlertasScreen() {
     ]);
     setAlertasPromocao(promocao);
     setClientes(cli);
+    setClientesValorGeral(valorGeral);
     setProdutosRecorrentes(prod);
     setReceitas(rec);
     setAntimicrobianos(antim);
@@ -421,8 +424,15 @@ export function AlertasScreen() {
     [receitas]
   );
 
+  // clientesValorGeral (não `clientes`, que é escopado por vendedor) —
+  // achado 09/08/2026: usando a lista por vendedor, um cliente que
+  // comprou recentemente com OUTRO vendedor entrava como "sumindo" na
+  // lista de quem não foi o vendedor da última compra, porque
+  // valorTotal/ultimaCompra daquela lista já vêm recortados pra 1
+  // vendedor só. É oportunidade de contato pra qualquer atendente,
+  // então soma qualquer vendedor mesmo.
   const clientesAltoValorSumindo = useMemo(() => {
-    const comValor = clientes.filter((c) => c.valorTotal > 0).sort((a, b) => b.valorTotal - a.valorTotal);
+    const comValor = clientesValorGeral.filter((c) => c.valorTotal > 0).sort((a, b) => b.valorTotal - a.valorTotal);
     const corteTop25 = comValor[Math.floor(comValor.length * 0.25)]?.valorTotal ?? 0;
     return comValor
       .filter(
@@ -434,7 +444,7 @@ export function AlertasScreen() {
       )
       .sort((a, b) => b.valorTotal - a.valorTotal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientes, contatos]);
+  }, [clientesValorGeral, contatos]);
 
   // Mesma lista de alertasPromocao, só tirando quem já foi contatado
   // sobre ESSE produto especificamente — contatar sobre um produto não

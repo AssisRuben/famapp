@@ -817,6 +817,35 @@ join clientes c on c.codigo = v.codigo_cliente
 where v.codigo_vendedor is not null and v.codigo_cliente is not null
 group by v.codigo_vendedor, c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
 
+-- Mesma conta de vw_clientes_por_vendedor, mas somando QUALQUER
+-- vendedor — usada só pelo card "Cliente de alto valor sumindo" em
+-- Alertas (08/08/2026). Achado: reaproveitar vw_clientes_por_vendedor
+-- ali fazia um cliente que comprou recentemente com OUTRO vendedor
+-- entrar como "sumindo" na lista de quem não é o vendedor da última
+-- compra — porque ultima_compra/valor_total daquela view já vêm
+-- recortados pra 1 vendedor só. Aqui não recorta por vendedor de
+-- propósito: é oportunidade de contato pra qualquer atendente, mesma
+-- família de vw_produtos_promocao_clientes — por isso fica SEM
+-- security_invoker (ver alter view mais abaixo/rls_policies.sql):
+-- com security_invoker=true, a RLS de vendas/venda_itens ainda
+-- recortaria pro vendedor logado por baixo dos panos mesmo sem filtro
+-- explícito na view, e o corte "sumiu" voltaria a ficar errado.
+create view vw_clientes_valor_geral as
+select
+  c.codigo,
+  c.nome,
+  c.fone as telefone,
+  c.email,
+  c.data_nascimento,
+  count(distinct v.id) as qtd_compras,
+  sum(vi.valor_total_liquido) as valor_total,
+  max(v.data_emissao) as ultima_compra
+from vendas v
+join venda_itens vi on vi.venda_id = v.id
+join clientes c on c.codigo = v.codigo_cliente
+where v.codigo_cliente is not null
+group by c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
+
 -- Histórico de compra por PRODUTO (não por nota) — 1 linha por item
 -- vendido, com nome do produto (produto_catalogo, sincronizado da
 -- Trier; sem FK formal com venda_itens.codigo_produto, daí o left
