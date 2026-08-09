@@ -431,13 +431,25 @@ envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
   workflow. Usa `at time zone 'America/Fortaleza'` explicitamente em vez
   de `current_date` cru, porque às 22:20 local já é depois da meia-noite
   em UTC (mesmo cuidado do `notificacao_comissao.n8n.json`).
-- [`coletor/whatsapp_faltas_pendencias.n8n.json`](coletor/whatsapp_faltas_pendencias.n8n.json):
-  a cada 2 dias às 08:00, duas listas numa mensagem só — **produtos em
-  falta** registrados nos últimos 2 dias (`produtos_em_falta`, janela
-  curta pra não repetir histórico velho a cada envio) e **pendências em
-  aberto** (`pendencias.baixada = false`, sem janela — continua
-  aparecendo até alguém dar baixa), com quantos dias cada pendência
-  está aberta e ⚠️ se passou de 7 dias sem resolver.
+- [`coletor/whatsapp_faltas.n8n.json`](coletor/whatsapp_faltas.n8n.json): a
+  cada 2 dias às 08:00, 1 mensagem de texto com os **produtos em
+  falta** registrados desde o envio anterior (`produtos_em_falta`,
+  janela de exatamente 2 dias — ontem + hoje — pra não repetir nem
+  pular nenhum dia).
+- [`coletor/whatsapp_pendencias.n8n.json`](coletor/whatsapp_pendencias.n8n.json):
+  mesma cadência (2 em 2 dias, 08:00), mas manda **1 mensagem de mídia
+  por pendência em aberto** (`pendencias.baixada = false`, sem janela —
+  continua aparecendo até alguém dar baixa), com a foto + legenda
+  (produtos/observações, responsável, data, quantos dias em aberto, ⚠️
+  se passou de 7 dias). O bucket `pendencias` é privado, então tem um
+  nó extra (`Gerar link da foto`) chamando a API de Storage do Supabase
+  pra gerar um link temporário antes de montar a legenda — precisa da
+  credencial de Header Auth **"Supabase Service Role"** (Name=`apikey`,
+  Value=a `service_role` key do projeto; se o Supabase recusar com
+  401/403, adiciona também um header manual `Authorization: Bearer
+  <mesma key>` — não dá pra deixar isso pronto no workflow porque é
+  segredo). Pendência sem foto passa direto (nó `Tem foto?`) e a
+  mensagem final sai só com o texto.
 - Outras ideias discutidas, ainda não implementadas: resumo semanal,
   aviso de comissão fechada no mês, aviso de receita pendente
   acumulando, follow-up de antibiótico, aviso de "subiu de faixa" pro
