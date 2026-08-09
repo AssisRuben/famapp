@@ -432,12 +432,14 @@ envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
   de `current_date` cru, porque às 22:20 local já é depois da meia-noite
   em UTC (mesmo cuidado do `notificacao_comissao.n8n.json`).
 - [`coletor/whatsapp_faltas.n8n.json`](coletor/whatsapp_faltas.n8n.json): a
-  cada 2 dias às 08:00, 1 mensagem de texto com os **produtos em
+  cada 7 dias às 08:00, 1 mensagem de texto com os **produtos em
   falta** registrados desde o envio anterior (`produtos_em_falta`,
-  janela de exatamente 2 dias — ontem + hoje — pra não repetir nem
-  pular nenhum dia).
+  janela de exatamente 7 dias — 6 dias atrás + hoje — pra não repetir
+  nem pular nenhum dia; ajustar `interval` na query junto com o
+  `daysInterval` do gatilho se mudar a cadência de novo, são dois
+  lugares separados).
 - [`coletor/whatsapp_pendencias.n8n.json`](coletor/whatsapp_pendencias.n8n.json):
-  mesma cadência (2 em 2 dias, 08:00), mas manda **1 mensagem de mídia
+  a cada 2 dias, 08:00, mas manda **1 mensagem de mídia
   por pendência em aberto** (`pendencias.baixada = false`, sem janela —
   continua aparecendo até alguém dar baixa), com a foto + legenda
   (produtos/observações, responsável, data, quantos dias em aberto, ⚠️

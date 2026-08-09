@@ -1,9 +1,9 @@
 {
-  "name": "WhatsApp - Faltas (a cada 2 dias)",
+  "name": "WhatsApp - Faltas (a cada 7 dias)",
   "nodes": [
     {
       "id": "trigger-2dias",
-      "name": "A cada 2 dias às 08:00",
+      "name": "A cada 7 dias às 08:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -15,7 +15,7 @@
           "interval": [
             {
               "field": "days",
-              "daysInterval": 2,
+              "daysInterval": 7,
               "triggerAtHour": 8,
               "triggerAtMinute": 0
             }
@@ -34,7 +34,7 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "select\n  pef.nome_produto,\n  pef.data,\n  coalesce(vd.nome, 'Gestor(a) da Farmácia') as registrado_por\nfrom produtos_em_falta pef\nleft join profiles perfil on perfil.id = pef.registrado_por\nleft join vendedores vd on vd.codigo = perfil.codigo_vendedor\n-- janela de EXATAMENTE 2 dias (ontem + hoje), batendo com o\n-- agendamento de 2 em 2 dias sem sobrepor o envio anterior.\nwhere pef.data >= (now() at time zone 'America/Fortaleza')::date - interval '1 day'\norder by pef.data desc, pef.nome_produto;"
+        "query": "select\n  pef.nome_produto,\n  pef.data,\n  coalesce(vd.nome, 'Gestor(a) da Farmácia') as registrado_por\nfrom produtos_em_falta pef\nleft join profiles perfil on perfil.id = pef.registrado_por\nleft join vendedores vd on vd.codigo = perfil.codigo_vendedor\n-- janela de EXATAMENTE 7 dias (6 dias atrás + hoje), batendo com o\n-- agendamento de 7 em 7 dias sem sobrepor o envio anterior.\nwhere pef.data >= (now() at time zone 'America/Fortaleza')::date - interval '6 days'\norder by pef.data desc, pef.nome_produto;"
       },
       "credentials": {
         "postgres": {
@@ -54,7 +54,7 @@
       "parameters": {
         "language": "javaScript",
         "mode": "runOnceForAllItems",
-        "jsCode": "const itens = $input.all().map((i) => i.json);\n\n// Postgres do n8n devolve coluna `date` como timestamp completo\n// (\"2026-08-09T00:00:00.000Z\"), não só \"2026-08-09\" — corta os 10\n// primeiros caracteres antes de separar, funciona pros dois formatos.\nfunction fmtData(iso) {\n  const [ano, mes, dia] = String(iso).slice(0, 10).split('-');\n  return `${dia}/${mes}`;\n}\n\nconst partes = [`🚫 *Produtos em falta (últimos 2 dias)* — ${itens.length}`, ''];\n\nif (itens.length === 0) {\n  partes.push('Nenhum registrado.');\n} else {\n  itens.forEach((f) => {\n    partes.push(`• ${f.nome_produto} — ${fmtData(f.data)} (${f.registrado_por})`);\n  });\n}\n\nreturn [{ json: { mensagem: partes.join('\\n').trim() } }];"
+        "jsCode": "const itens = $input.all().map((i) => i.json);\n\n// Postgres do n8n devolve coluna `date` como timestamp completo\n// (\"2026-08-09T00:00:00.000Z\"), não só \"2026-08-09\" — corta os 10\n// primeiros caracteres antes de separar, funciona pros dois formatos.\nfunction fmtData(iso) {\n  const [ano, mes, dia] = String(iso).slice(0, 10).split('-');\n  return `${dia}/${mes}`;\n}\n\nconst partes = [`🚫 *Produtos em falta (últimos 7 dias)* — ${itens.length}`, ''];\n\nif (itens.length === 0) {\n  partes.push('Nenhum registrado.');\n} else {\n  itens.forEach((f) => {\n    partes.push(`• ${f.nome_produto} — ${fmtData(f.data)} (${f.registrado_por})`);\n  });\n}\n\nreturn [{ json: { mensagem: partes.join('\\n').trim() } }];"
       }
     },
     {
@@ -71,7 +71,7 @@
     }
   ],
   "connections": {
-    "A cada 2 dias às 08:00": {
+    "A cada 7 dias às 08:00": {
       "main": [
         [
           {
