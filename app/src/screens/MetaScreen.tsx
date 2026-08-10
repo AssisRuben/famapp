@@ -5,7 +5,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { formatBRL, formatBRLSemCentavos, todayISO } from '../lib/format';
-import { comissaoAproximada, diasDecorridosNaSemana, diasNoBucketSemana, semanaDoDia, valoresDaMeta } from '../lib/metas';
+import { badgeFaixaComissao, comissaoAproximada, diasDecorridosNaSemana, diasNoBucketSemana, semanaDoDia, valoresDaMeta } from '../lib/metas';
 import { ComissaoMensal, FaixaComissao, MetaVendedor, MetricasVendedorDiario } from '../types/domain';
 import { colors } from '../theme/colors';
 
@@ -214,7 +214,10 @@ export function MetaScreen() {
 
           {minhaComissaoMensal && (
             <Card>
-              <Text style={styles.cardTitulo}>💰 Comissão do mês</Text>
+              <Text style={styles.cardTitulo}>
+                💰 Comissão do mês
+                {badgeFaixaComissao(minhaComissaoMensal.faixaAlcancada) ? ` ${badgeFaixaComissao(minhaComissaoMensal.faixaAlcancada)}` : ''}
+              </Text>
               <Text style={styles.comissaoTexto}>
                 {minhaComissaoMensal.regraAplicada === 'flat_10_mensal'
                   ? 'Meta mensal batida: 10% flat'

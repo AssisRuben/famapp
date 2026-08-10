@@ -43,7 +43,21 @@ export function DashboardScreen() {
   const [periodoDesempenho, setPeriodoDesempenho] = useState<PeriodoMeta>('dia');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const data = todayISO();
+  // `new Date()`/`todayISO()` direto no corpo do componente só atualizam
+  // quando a tela RE-renderiza — se o app fica aberto passando da meia-
+  // noite sem nenhuma interação, nada dispara um novo render sozinho, e
+  // a "projeção de margem no mês" (e tudo mais que depende de "hoje")
+  // continua calculando com o dia de ontem indefinidamente. Confere a
+  // cada minuto se o dia local mudou e força o re-render (via troca de
+  // estado) só quando muda de verdade — não fica recarregando à toa.
+  const [data, setData] = useState(() => todayISO());
+  useEffect(() => {
+    const id = setInterval(() => {
+      const agora = todayISO();
+      setData((atual) => (atual === agora ? atual : agora));
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
   const hoje = new Date();
   const semanaAtual = semanaDoDia(hoje.getDate());
 

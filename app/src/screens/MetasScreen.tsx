@@ -7,7 +7,7 @@ import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { colors } from '../theme/colors';
 import { formatBRL } from '../lib/format';
-import { mesAnoLabel, rotuloSemana } from '../lib/metas';
+import { badgeFaixaComissao, mesAnoLabel, rotuloSemana } from '../lib/metas';
 import { alertar } from '../lib/alert';
 import { ComissaoMensal, MetaVendedor, VendedorAtivo } from '../types/domain';
 
@@ -261,10 +261,11 @@ export function MetasScreen() {
       ) : (
         metas.map((meta) => {
           const comissao = comissoes.find((c) => c.codigoVendedor === meta.codigoVendedor);
+          const badge = comissao ? badgeFaixaComissao(comissao.faixaAlcancada) : null;
           return (
             <Card key={meta.codigoVendedor}>
               <MetaProgressBar
-                label={`${meta.nomeVendedor} — mensal`}
+                label={`${badge ? `${badge} ` : ''}${meta.nomeVendedor} — mensal`}
                 valorRealizado={meta.valorRealizadoMensal}
                 valorMeta={meta.valorMetaMensal}
               />

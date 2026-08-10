@@ -1,0 +1,203 @@
+{
+  "name": "WhatsApp - Pendências (a cada 2 dias)",
+  "nodes": [
+    {
+      "id": "trigger-2dias",
+      "name": "A cada 2 dias às 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -560,
+        460
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 2,
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "buscar-pendencias",
+      "name": "Buscar pendências em aberto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -280,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  p.id,\n  p.nome_cliente,\n  p.produtos,\n  p.foto_url,\n  p.data,\n  coalesce(vd.nome, 'Gestor(a) da Farmácia') as registrado_por,\n  ((now() at time zone 'America/Fortaleza')::date - p.data) as dias_aberta\nfrom pendencias p\nleft join profiles perfil on perfil.id = p.registrado_por\nleft join vendedores vd on vd.codigo = perfil.codigo_vendedor\nwhere p.baixada = false\norder by p.data asc;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "tem-foto",
+      "name": "Tem foto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-foto",
+              "leftValue": "={{ $json.foto_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "gerar-link-foto",
+      "name": "Gerar link da foto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        340
+      ],
+      "notes": "Credencial \"Supabase Service Role\" (Header Auth, Name=apikey, Value=<service_role key>). Se der 401/403, adiciona também um header manual Authorization: Bearer <mesma key>.",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://ggzuchqfepjbsyadfcnk.supabase.co/storage/v1/object/sign/pendencias/' + $json.foto_url }}",
+        "sendHeaders": true,
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ expiresIn: 3600 }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Supabase Service Role"
+        }
+      }
+    },
+    {
+      "id": "montar-legenda",
+      "name": "Montar legenda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForEachItem",
+        "jsCode": "// O node \"Gerar link da foto\" (HTTP Request) troca o conteúdo do item\n// pela resposta da API (só sobra signedURL) — os campos originais\n// (nome_cliente, produtos, data, registrado_por, dias_aberta) vêm do\n// node \"Tem foto?\" de propósito, não do input direto deste node.\nconst original = $('Tem foto?').item.json;\nconst item = $input.item.json;\n\n// Postgres do n8n devolve coluna `date` como timestamp completo\n// (\"2026-08-09T00:00:00.000Z\"), não só \"2026-08-09\" — corta os 10\n// primeiros caracteres antes de separar, funciona pros dois formatos.\nfunction fmtData(iso) {\n  const [ano, mes, dia] = String(iso).slice(0, 10).split('-');\n  return `${dia}/${mes}`;\n}\n\nconst dias = original.dias_aberta;\nconst alerta = dias >= 7 ? ' ⚠️' : '';\n\nconst legenda = [\n  `🗒️ *Pendência — ${original.nome_cliente}*`,\n  original.produtos,\n  `Responsável: ${original.registrado_por}`,\n  `Registrada em ${fmtData(original.data)} (${dias} dia(s) em aberto${alerta})`,\n].join('\\n');\n\n// signedURL vem relativo (\"/object/sign/pendencias/...\") do node\n// \"Gerar link da foto\" só quando tinha foto — prefixa pra virar link\n// de verdade. Sem foto, fica null (o nó de envio decide mandar texto\n// puro nesse caso).\nconst fotoUrl = item.signedURL ? `https://ggzuchqfepjbsyadfcnk.supabase.co/storage/v1${item.signedURL}` : null;\n\nreturn { json: { ...original, legenda, fotoUrl } };"
+      }
+    },
+    {
+      "id": "enviar-evolution",
+      "name": "➡️ Enviar via Evolution API (troque por aqui)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        840,
+        460
+      ],
+      "notes": "Placeholder — troque por um nó de envio de mídia (com legenda) da sua instância Evolution API. $json.fotoUrl (pode ser null) e $json.legenda chegam prontos; se fotoUrl for null, manda só texto.",
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "A cada 2 dias às 08:00": {
+      "main": [
+        [
+          {
+            "node": "Buscar pendências em aberto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar pendências em aberto": {
+      "main": [
+        [
+          {
+            "node": "Tem foto?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem foto?": {
+      "main": [
+        [
+          {
+            "node": "Gerar link da foto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Montar legenda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar link da foto": {
+      "main": [
+        [
+          {
+            "node": "Montar legenda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar legenda": {
+      "main": [
+        [
+          {
+            "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

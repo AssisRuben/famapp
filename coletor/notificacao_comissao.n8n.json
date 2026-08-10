@@ -1,0 +1,137 @@
+{
+  "name": "Notificação de comissão (subiu de faixa)",
+  "nodes": [
+    {
+      "id": "trigger-20min",
+      "name": "A cada 20 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        460
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 20
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "detectar-subida",
+      "name": "Detectar quem subiu de faixa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  a.codigo_vendedor,\n  a.nome_vendedor,\n  a.ano,\n  a.mes,\n  a.faixa_atual,\n  a.expo_push_token\nfrom (\n  select\n    f.codigo_vendedor,\n    f.nome_vendedor,\n    f.ano,\n    f.mes,\n    f.faixa_atual,\n    p.expo_push_token\n  from vw_faixa_comissao_atual f\n  join profiles p on p.codigo_vendedor = f.codigo_vendedor\n  where f.ano = extract(year from current_date)::int\n    and f.mes = extract(month from current_date)::int\n    and f.faixa_atual > 3\n    and p.expo_push_token is not null\n) a\nleft join comissao_faixa_alcancada c\n  on c.codigo_vendedor = a.codigo_vendedor and c.ano = a.ano and c.mes = a.mes\nwhere a.faixa_atual > coalesce(c.faixa_percentual, 0)\n  and extract(hour from (now() at time zone 'America/Fortaleza')) between 8 and 20;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "enviar-push",
+      "name": "Enviar push (Expo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        460
+      ],
+      "onError": "continueRegularOutput",
+      "continueOnFail": true,
+      "parameters": {
+        "method": "POST",
+        "url": "https://exp.host/--/api/v2/push/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to: $json.expo_push_token, title: ({5:'🥉 Bronze',7:'🥈 Prata',8:'🥇 Ouro',10:'🏆 Faixa máxima'})[$json.faixa_atual] || 'Nova faixa de comissão!', body: $json.nome_vendedor + ', você chegou em ' + $json.faixa_atual + '% de comissão sobre a margem! Continue assim 💪', sound: 'default', priority: 'high' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "registrar-faixa",
+      "name": "Registrar faixa alcançada",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        560,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into comissao_faixa_alcancada (codigo_vendedor, ano, mes, faixa_percentual, alcancada_em)\nvalues (\n  {{ $('Detectar quem subiu de faixa').item.json.codigo_vendedor }},\n  {{ $('Detectar quem subiu de faixa').item.json.ano }},\n  {{ $('Detectar quem subiu de faixa').item.json.mes }},\n  {{ $('Detectar quem subiu de faixa').item.json.faixa_atual }},\n  now()\n)\non conflict (codigo_vendedor, ano, mes)\ndo update set faixa_percentual = excluded.faixa_percentual, alcancada_em = excluded.alcancada_em;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "A cada 20 minutos": {
+      "main": [
+        [
+          {
+            "node": "Detectar quem subiu de faixa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar quem subiu de faixa": {
+      "main": [
+        [
+          {
+            "node": "Enviar push (Expo)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar push (Expo)": {
+      "main": [
+        [
+          {
+            "node": "Registrar faixa alcançada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

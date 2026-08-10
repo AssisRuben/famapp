@@ -817,6 +817,93 @@ join clientes c on c.codigo = v.codigo_cliente
 where v.codigo_vendedor is not null and v.codigo_cliente is not null
 group by v.codigo_vendedor, c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
 
+-- Mesma conta de vw_clientes_por_vendedor, mas somando QUALQUER
+-- vendedor — usada só pelo card "Cliente de alto valor sumindo" em
+-- Alertas (08/08/2026). Achado: reaproveitar vw_clientes_por_vendedor
+-- ali fazia um cliente que comprou recentemente com OUTRO vendedor
+-- entrar como "sumindo" na lista de quem não é o vendedor da última
+-- compra — porque ultima_compra/valor_total daquela view já vêm
+-- recortados pra 1 vendedor só. Aqui não recorta por vendedor de
+-- propósito: é oportunidade de contato pra qualquer atendente, mesma
+-- família de vw_produtos_promocao_clientes — por isso fica SEM
+-- security_invoker (ver alter view mais abaixo/rls_policies.sql):
+-- com security_invoker=true, a RLS de vendas/venda_itens ainda
+-- recortaria pro vendedor logado por baixo dos panos mesmo sem filtro
+-- explícito na view, e o corte "sumiu" voltaria a ficar errado.
+create view vw_clientes_valor_geral as
+select
+  c.codigo,
+  c.nome,
+  c.fone as telefone,
+  c.email,
+  c.data_nascimento,
+  count(distinct v.id) as qtd_compras,
+  sum(vi.valor_total_liquido) as valor_total,
+  max(v.data_emissao) as ultima_compra
+from vendas v
+join venda_itens vi on vi.venda_id = v.id
+join clientes c on c.codigo = v.codigo_cliente
+where v.codigo_cliente is not null
+group by c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
+
+-- ============================================================
+-- CARTEIRA DE CLIENTES (09/08/2026) — lista curada manualmente pelo
+-- vendedor (aba "Carteira de clientes" do app), substitui o antigo
+-- card de aniversário em Alertas. Diferente das outras listas de
+-- cliente do app (todas derivadas de histórico de compra), aqui é o
+-- vendedor quem decide manualmente quem entra/sai.
+-- ============================================================
+create table carteira_clientes (
+  id bigserial primary key,
+  codigo_vendedor integer not null references vendedores(codigo),
+  codigo_cliente integer not null references clientes(codigo),
+  adicionado_por uuid references auth.users(id),
+  criado_em timestamptz not null default now(),
+  unique (codigo_vendedor, codigo_cliente)
+);
+
+create index idx_carteira_clientes_vendedor on carteira_clientes (codigo_vendedor);
+
+-- valor_6_meses/comprado_este_mes somam QUALQUER vendedor (mesmo
+-- raciocínio de vw_clientes_valor_geral — mede o engajamento real do
+-- cliente, não só o que comprou com o vendedor dono da carteira); só o
+-- VÍNCULO à carteira é que é por vendedor. Por isso o controle de
+-- acesso é feito no WHERE (checando profiles/auth.uid()), não por
+-- security_invoker — com security_invoker=true a RLS de vendas/
+-- venda_itens recortaria as subqueries pro vendedor logado por baixo
+-- dos panos, dando o mesmo problema já corrigido em
+-- vw_clientes_valor_geral (ver comentário lá).
+create view vw_carteira_clientes as
+select
+  cc.id,
+  cc.codigo_vendedor,
+  c.codigo as codigo_cliente,
+  c.nome,
+  c.fone as telefone,
+  cc.criado_em,
+  coalesce(v6m.valor_total, 0) as valor_6_meses,
+  coalesce(vm.qtd_compras_mes, 0) > 0 as comprado_este_mes
+from carteira_clientes cc
+join clientes c on c.codigo = cc.codigo_cliente
+left join lateral (
+  select sum(vi.valor_total_liquido) as valor_total
+  from vendas v
+  join venda_itens vi on vi.venda_id = v.id
+  where v.codigo_cliente = c.codigo
+    and v.data_emissao >= (current_date - interval '6 months')
+) v6m on true
+left join lateral (
+  select count(*) as qtd_compras_mes
+  from vendas v
+  where v.codigo_cliente = c.codigo
+    and date_trunc('month', v.data_emissao) = date_trunc('month', current_date)
+) vm on true
+where exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = cc.codigo_vendedor)
+);
+
 -- Histórico de compra por PRODUTO (não por nota) — 1 linha por item
 -- vendido, com nome do produto (produto_catalogo, sincronizado da
 -- Trier; sem FK formal com venda_itens.codigo_produto, daí o left
@@ -1441,6 +1528,54 @@ join lateral (
   ) semanal
 ) calc on true
 where mp.semana is null;
+
+-- Faixa de comissão "se fechasse agora" (3/5/7/8/10%, direto de
+-- faixas_comissao pelo % da meta MENSAL batido até aqui) — mais simples
+-- que vw_metas_comissao.percentual_comissao de propósito: aquela é uma
+-- MÉDIA ponderada das 4 semanas (só vira número limpo quando bate
+-- 100% e cai no flat), essa aqui é sempre uma das 5 faixas exatas.
+-- Usada só pra gamificação (medalha 🔰🥉🥈🥇🏆 no app + push de "subiu
+-- de faixa" via n8n) — ver comissao_faixa_alcancada logo abaixo.
+-- security_invoker=true: respeita a RLS de `metas` (via
+-- vw_metas_progresso), mesmo padrão de vw_metas_comissao.
+create view vw_faixa_comissao_atual as
+select
+  mp.codigo_vendedor,
+  mp.nome_vendedor,
+  mp.ano,
+  mp.mes,
+  mp.valor_meta,
+  mp.valor_realizado,
+  round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2) as percentual_atingido,
+  faixa.percentual_comissao as faixa_atual
+from vw_metas_progresso mp
+join lateral (
+  select percentual_comissao
+  from faixas_comissao
+  where percentual_meta_min <= coalesce(round(mp.valor_realizado / nullif(mp.valor_meta, 0) * 100, 2), 0)
+  order by percentual_meta_min desc
+  limit 1
+) faixa on true
+where mp.semana is null;
+
+-- Maior faixa de comissão já alcançada no mês, por vendedor —
+-- registro em RATCHET (só sobe, nunca desce; nunca guarda a faixa
+-- mínima de 3%, que é o piso — não é "alcançar" nada) escrito pelo
+-- workflow n8n coletor/notificacao_comissao.n8n.json toda vez que
+-- vw_faixa_comissao_atual mostra uma faixa maior que a última
+-- registrada aqui. Serve pra DUAS coisas: (1) medalha 🔰🥉🥈🥇🏆
+-- mostrada no app (Meta/Metas) — não regride mesmo se o vendedor tiver
+-- uma semana fraca depois de já ter alcançado uma faixa alta; (2)
+-- evita mandar o mesmo push de novo (o workflow só notifica quando
+-- este registro muda).
+create table comissao_faixa_alcancada (
+  codigo_vendedor integer not null references vendedores(codigo),
+  ano integer not null,
+  mes integer not null check (mes between 1 and 12),
+  faixa_percentual numeric(5,2) not null,
+  alcancada_em timestamptz not null default now(),
+  primary key (codigo_vendedor, ano, mes)
+);
 
 -- Comissão FECHADA (snapshot congelado, usado pra folha de pagamento)
 -- — preenchida só pela função fechar_comissoes_mes() abaixo, chamada

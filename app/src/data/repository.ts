@@ -3,6 +3,8 @@ import {
   Campanha,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
+  ClienteBusca,
+  ClienteCarteira,
   ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
@@ -60,6 +62,12 @@ export interface DataRepository {
   logout(): Promise<void>;
   getSession(): Promise<Profile | null>;
 
+  // Push de verdade (n8n, ex.: subiu de faixa de comissão) — token do
+  // Expo Notifications registrado no login (ver lib/notifications.ts
+  // obterPushToken). Sem-op silencioso se profile não tiver
+  // codigoVendedor (gestor não recebe esse tipo de push por ora).
+  salvarPushToken(profile: Profile, token: string): Promise<void>;
+
   getDesempenhoVendedorDiario(profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]>;
   getMetricasVendedorDiario(profile: Profile, dataEmissao: string): Promise<MetricasVendedorDiario[]>;
   // Mesmas métricas, agregadas pro mês inteiro — usadas pelo card
@@ -78,6 +86,26 @@ export interface DataRepository {
   // vendedor, não precisa de busca no banco). Gestor (sem
   // codigoVendedor) recebe lista vazia — tela é por vendedor mesmo.
   getClientesDoVendedor(profile: Profile): Promise<ClienteDoVendedor[]>;
+  // Mesma base de getClientesDoVendedor, mas valorTotal/ultimaCompra
+  // somam QUALQUER vendedor — usada só pelo card "Cliente de alto
+  // valor sumindo" em Alertas (oportunidade de contato, não filtrado
+  // por vendedor; reaproveitar getClientesDoVendedor ali fazia cliente
+  // que comprou recente com OUTRO vendedor entrar como "sumindo").
+  getClientesValorGeral(profile: Profile): Promise<ClienteDoVendedor[]>;
+
+  // Carteira de clientes: lista curada manualmente (aba "Carteira de
+  // clientes" + card em Alertas). Sem codigoVendedor: vendedor logado
+  // vê a própria; gestor vê a soma de TODOS (usado no card de
+  // Alertas). Com codigoVendedor: filtra pra esse vendedor específico
+  // (usado pelo gestor na aba, com o seletor de vendedor).
+  getCarteiraClientes(profile: Profile, codigoVendedor?: number): Promise<ClienteCarteira[]>;
+  // Busca em `clientes` (aberta a qualquer autenticado) por nome ou
+  // CPF, pra escolher quem adicionar na carteira — limitada (não
+  // carrega o cadastro inteiro).
+  buscarClientesParaCarteira(termo: string): Promise<ClienteBusca[]>;
+  adicionarClienteCarteira(codigoVendedor: number, codigoCliente: number): Promise<void>;
+  removerClienteCarteira(id: string): Promise<void>;
+
   // Histórico de compra do cliente (qualquer vendedor), mostrado ao
   // expandir um cliente na tela "Meus clientes" (limite padrão 5) e na
   // tela "Cliente para resgate" (limite 7, com nome do vendedor por

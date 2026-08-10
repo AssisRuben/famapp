@@ -7,6 +7,8 @@ import {
   Campanha,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
+  ClienteBusca,
+  ClienteCarteira,
   ClienteDoVendedor,
   ClienteInatividade,
   ComissaoMensal,
@@ -143,6 +145,15 @@ class SupabaseRepository implements DataRepository {
     const user = data.session?.user;
     if (!user) return null;
     return buscarProfile(user);
+  }
+
+  // Coluna liberada por GRANT específico (não a linha inteira) em
+  // rls_policies.sql — vendedor só consegue escrever esse campo em si
+  // mesmo, nunca role/codigo_vendedor.
+  async salvarPushToken(profile: Profile, token: string): Promise<void> {
+    if (!profile.codigoVendedor) return;
+    const { error } = await supabase.from('profiles').update({ expo_push_token: token }).eq('id', profile.id);
+    if (error) throw error;
   }
 
   async getDesempenhoVendedorDiario(_profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]> {
@@ -366,6 +377,88 @@ class SupabaseRepository implements DataRepository {
       valorTotal: Number(r.valor_total),
       ultimaCompra: r.ultima_compra,
     }));
+  }
+
+  async getClientesValorGeral(_profile: Profile): Promise<ClienteDoVendedor[]> {
+    // Mesma paginação de getClientesDoVendedor (PostgREST limita 1000
+    // linhas por request) — aqui sem filtro de vendedor, então o total
+    // de clientes é ainda maior.
+    const TAMANHO_PAGINA = 1000;
+    const linhas: Record<string, unknown>[] = [];
+    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
+      const { data, error } = await supabase
+        .from('vw_clientes_valor_geral')
+        .select('*')
+        .order('ultima_compra', { ascending: false })
+        .order('codigo', { ascending: true })
+        .range(inicio, inicio + TAMANHO_PAGINA - 1);
+      if (error) throw error;
+      linhas.push(...(data ?? []));
+      if (!data || data.length < TAMANHO_PAGINA) break;
+    }
+    return linhas.map((r: any) => ({
+      codigo: r.codigo,
+      nome: r.nome,
+      telefone: r.telefone,
+      email: r.email,
+      dataNascimento: r.data_nascimento,
+      valorTotal: Number(r.valor_total),
+      ultimaCompra: r.ultima_compra,
+    }));
+  }
+
+  async getCarteiraClientes(profile: Profile, codigoVendedor?: number): Promise<ClienteCarteira[]> {
+    // Sem codigoVendedor explícito: vendedor filtra pra si mesmo;
+    // gestor NÃO filtra (a view já mostra tudo pra ele, usado pelo
+    // card de Alertas pra somar a carteira de todo mundo). Com
+    // codigoVendedor: usado pelo gestor na aba, com o seletor.
+    const filtro = codigoVendedor ?? (profile.role === 'vendedor' ? profile.codigoVendedor : null);
+    let query = supabase.from('vw_carteira_clientes').select('*').order('nome', { ascending: true });
+    if (filtro != null) query = query.eq('codigo_vendedor', filtro);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      id: String(r.id),
+      codigoVendedor: r.codigo_vendedor,
+      codigoCliente: r.codigo_cliente,
+      nome: r.nome,
+      telefone: r.telefone,
+      valor6Meses: Number(r.valor_6_meses),
+      compradoEsteMes: r.comprado_este_mes,
+    }));
+  }
+
+  async buscarClientesParaCarteira(termo: string): Promise<ClienteBusca[]> {
+    const termoLimpo = termo.trim();
+    if (!termoLimpo) return [];
+    const { data, error } = await supabase
+      .from('clientes')
+      .select('codigo, nome, numero_cpf_cnpj, fone')
+      .or(`nome.ilike.%${termoLimpo}%,numero_cpf_cnpj.ilike.%${termoLimpo}%`)
+      .order('nome', { ascending: true })
+      .limit(20);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      codigo: r.codigo,
+      nome: r.nome,
+      numeroCpfCnpj: r.numero_cpf_cnpj,
+      telefone: r.fone,
+    }));
+  }
+
+  async adicionarClienteCarteira(codigoVendedor: number, codigoCliente: number): Promise<void> {
+    const { data: sessao } = await supabase.auth.getUser();
+    const { error } = await supabase.from('carteira_clientes').insert({
+      codigo_vendedor: codigoVendedor,
+      codigo_cliente: codigoCliente,
+      adicionado_por: sessao.user?.id ?? null,
+    });
+    if (error) throw error;
+  }
+
+  async removerClienteCarteira(id: string): Promise<void> {
+    const { error } = await supabase.from('carteira_clientes').delete().eq('id', Number(id));
+    if (error) throw error;
   }
 
   // Limit no app, não na view — a view fica genérica pra outros usos
@@ -748,8 +841,15 @@ class SupabaseRepository implements DataRepository {
   }
 
   async getComissoesMensal(_profile: Profile, ano: number, mes: number): Promise<ComissaoMensal[]> {
-    const { data, error } = await supabase.from('vw_metas_comissao').select('*').eq('ano', ano).eq('mes', mes);
+    const [{ data, error }, { data: faixas, error: erroFaixas }] = await Promise.all([
+      supabase.from('vw_metas_comissao').select('*').eq('ano', ano).eq('mes', mes),
+      supabase.from('comissao_faixa_alcancada').select('codigo_vendedor, faixa_percentual').eq('ano', ano).eq('mes', mes),
+    ]);
     if (error) throw error;
+    if (erroFaixas) throw erroFaixas;
+
+    const faixaPorVendedor = new Map((faixas ?? []).map((f) => [f.codigo_vendedor, Number(f.faixa_percentual)]));
+
     return (data ?? []).map((r) => ({
       codigoVendedor: r.codigo_vendedor,
       nomeVendedor: r.nome_vendedor,
@@ -763,6 +863,7 @@ class SupabaseRepository implements DataRepository {
       comissaoValor: Number(r.comissao_valor),
       regraAplicada: r.regra_aplicada,
       detalheSemanas: (r.detalhe_semanas ?? null) as ComissaoMensal['detalheSemanas'],
+      faixaAlcancada: faixaPorVendedor.get(r.codigo_vendedor) ?? null,
     }));
   }
 

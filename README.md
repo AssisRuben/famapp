@@ -133,6 +133,13 @@ Componentes:
       `supabase/seed_profiles.sql`) — sem isso, `login()` falha com
       "Usuário sem perfil cadastrado" mesmo com e-mail/senha corretos no
       Supabase Auth.
+- [ ] Rodar [`supabase/migracao_push_comissao.sql`](supabase/migracao_push_comissao.sql)
+      no projeto real e importar/ativar
+      [`coletor/notificacao_comissao.n8n.json`](coletor/notificacao_comissao.n8n.json)
+      no n8n — ver seção "Notificação push de 'subiu de faixa'" abaixo.
+      Precisa também da credencial FCM V1 configurada no EAS
+      (`eas credentials` → Android → Push Notifications) pra push
+      chegar de verdade no Android.
 
 O desenvolvimento do app PODE COMEÇAR JÁ, em paralelo à liberação da API,
 usando mocks no formato exato dos DTOs reais abaixo.
@@ -373,6 +380,117 @@ em `src/types/domain.ts` (`FaixaComissao`, `ComissaoMensal`) e método
 usa a margem bruta % do dia como proxy (mock não tem livro-razão do mês
 inteiro); na Frente 2 (`supabaseRepository.ts`, ver seção abaixo) já é
 exato, direto de `vw_metas_comissao`.
+
+### Notificação push de "subiu de faixa" (gamificação)
+
+Adicionado 07/08/2026. Diferente do lembrete do Checklist (local, agendado
+no próprio celular — `src/lib/notifications.ts` `sincronizarNotificacoesChecklist`),
+esta é push de verdade, mandada pelo n8n via Expo Push API, e exige
+FCM configurado no EAS (Firebase Cloud Messaging — sem isso a notificação
+não chega no Android; ver `eas credentials`).
+
+- `profiles.expo_push_token`: gravado pelo app no login (`AuthContext`
+  → `obterPushToken()` em `src/lib/notifications.ts`) — coluna liberada
+  por `GRANT UPDATE` específico (não a linha inteira), então o vendedor
+  só consegue escrever nesse campo em si mesmo.
+- `vw_faixa_comissao_atual`: faixa "se fechasse agora" (3/5/7/8/10%,
+  direto de `faixas_comissao` pelo % da meta mensal batido) — mais
+  simples que `vw_metas_comissao.percentual_comissao` de propósito
+  (aquela é uma média ponderada das 4 semanas, só vira número limpo no
+  caso flat 100%).
+- `comissao_faixa_alcancada`: ratchet (só sobe, nunca desce, nunca
+  guarda o piso de 3%) da maior faixa já alcançada no mês por vendedor
+  — serve tanto pra medalha 🥉🥈🥇🏆 mostrada em Meta/Metas
+  (`badgeFaixaComissao` em `src/lib/metas.ts`) quanto pra evitar
+  mandar o mesmo push duas vezes.
+- [`coletor/notificacao_comissao.n8n.json`](coletor/notificacao_comissao.n8n.json):
+  workflow agendado (a cada 20 min, 08h-20h) que detecta quem subiu de
+  faixa desde o último registro, manda o push via Expo Push API
+  (`https://exp.host/--/api/v2/push/send`) e atualiza
+  `comissao_faixa_alcancada` — mesmo padrão de
+  `coletor/fechamento_comissao.n8n.json` (nó Postgres + agendamento).
+- Migração standalone: [`supabase/migracao_push_comissao.sql`](supabase/migracao_push_comissao.sql).
+
+### Mensagens WhatsApp via n8n (Evolution API)
+
+Adicionado 08/08/2026. Farmácia já roda Evolution API em outros fluxos —
+estes workflows terminam num nó placeholder (`noOp`) onde entra o nó de
+envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
+
+- [`coletor/whatsapp_performance_diaria.n8n.json`](coletor/whatsapp_performance_diaria.n8n.json):
+  todo dia às 22:20, uma mensagem só com o resumo de TODOS os
+  vendedores ativos (`vw_vendedores_ativos`, mesmo sem venda/meta
+  cadastrada hoje — antes um `where meta_mensal is not null` fazia
+  vendedor sem meta sumir da lista inteira, corrigido 09/08/2026) —
+  margem e % da meta do dia, margem e % da meta da semana com a faixa
+  de comissão da semana (🥉🥈🥇🏆, mesma escala de `badgeFaixaComissao`),
+  as vendas do dia separadas em 3 (com cliente real identificado, no
+  CPF do próprio vendedor — mesma comparação de
+  `vw_vendas_sem_identificacao_comprador` — e sem cliente nenhum), e se
+  o vendedor lançou alguma falta ou fez contato (whatsapp/ligação) hoje
+  (`produtos_em_falta`/`contatos_clientes`). Todo o cálculo (meta
+  diária = mensal/dias do mês, semana = bucket 1-7/8-14/15-21/22-fim)
+  replica a mesma lógica já usada no app — ver comentários no próprio
+  workflow. Usa `at time zone 'America/Sao_Paulo'` explicitamente em vez
+  de `current_date` cru, porque às 22:20 local já é depois da meia-noite
+  em UTC (mesmo cuidado do `notificacao_comissao.n8n.json`) — e o
+  workflow em si tem `settings.timezone = "America/Sao_Paulo"` (assim
+  como os outros 4 workflows do `coletor/`), porque o Schedule Trigger
+  usa o timezone configurado na INSTÂNCIA do n8n por padrão (achado
+  09/08/2026: a instância estava em `America/New_York`, então "22:20"
+  disparava 1h mais tarde no horário de Brasília). "Acessou o app hoje"
+  foi cogitado mas descartado — não existe tracking de abertura, só
+  `last_sign_in_at` do Supabase Auth (marca login, não abertura;
+  usuário com sessão persistida pode não atualizar isso há dias).
+- [`coletor/whatsapp_faltas.n8n.json`](coletor/whatsapp_faltas.n8n.json): a
+  cada 7 dias às 08:00, 1 mensagem de texto com os **produtos em
+  falta** registrados desde o envio anterior (`produtos_em_falta`,
+  janela de exatamente 7 dias — 6 dias atrás + hoje — pra não repetir
+  nem pular nenhum dia; ajustar `interval` na query junto com o
+  `daysInterval` do gatilho se mudar a cadência de novo, são dois
+  lugares separados).
+- [`coletor/whatsapp_pendencias.n8n.json`](coletor/whatsapp_pendencias.n8n.json):
+  a cada 2 dias, 08:00, mas manda **1 mensagem de mídia
+  por pendência em aberto** (`pendencias.baixada = false`, sem janela —
+  continua aparecendo até alguém dar baixa), com a foto + legenda
+  (produtos/observações, responsável, data, quantos dias em aberto, ⚠️
+  se passou de 7 dias). O bucket `pendencias` é privado, então tem um
+  nó extra (`Gerar link da foto`) chamando a API de Storage do Supabase
+  pra gerar um link temporário antes de montar a legenda — precisa da
+  credencial de Header Auth **"Supabase Service Role"** (Name=`apikey`,
+  Value=a `service_role` key do projeto; se o Supabase recusar com
+  401/403, adiciona também um header manual `Authorization: Bearer
+  <mesma key>` — não dá pra deixar isso pronto no workflow porque é
+  segredo). Pendência sem foto passa direto (nó `Tem foto?`) e a
+  mensagem final sai só com o texto.
+- Outras ideias discutidas, ainda não implementadas: resumo semanal,
+  aviso de comissão fechada no mês, aviso de receita pendente
+  acumulando, follow-up de antibiótico, aviso de "subiu de faixa" pro
+  grupo (em vez de só push individual).
+
+### Carteira de clientes
+
+Adicionado 09/08/2026 — substitui o antigo card de aniversário em
+Alertas. Lista curada MANUALMENTE pelo vendedor (busca por nome/CPF pra
+adicionar, botão de excluir pra remover) — diferente de todas as outras
+listas de cliente do app, que são derivadas de histórico de compra.
+
+- Nova aba **"Carteira de clientes"** (`CarteiraClientesScreen`) no
+  menu sanduíche, pros dois papéis. Vendedor gerencia só a própria;
+  gestor tem um seletor de vendedor (igual em Metas/Check list) pra
+  gerenciar a de qualquer um.
+- `carteira_clientes`: só o vínculo vendedor↔cliente (tabela
+  `supabase/schema.sql`). `vw_carteira_clientes` enriquece com
+  `valor_6_meses`/`comprado_este_mes` somando QUALQUER vendedor (mesmo
+  raciocínio de `vw_clientes_valor_geral` — mede o engajamento real do
+  cliente) — controle de acesso feito no WHERE da view, não por
+  `security_invoker`, mesma família de `vw_produtos_promocao_clientes`.
+- Card em Alertas (`getCarteiraClientes(profile)` sem `codigoVendedor`
+  — vendedor vê a própria, gestor vê a soma de todos): mostra valor
+  total vendido (6 meses), quantidade de clientes na carteira e
+  quantos já compraram esse mês, além da lista com os botões de
+  contato padrão do app.
+- Migração standalone: [`supabase/migracao_carteira_clientes.sql`](supabase/migracao_carteira_clientes.sql).
 
 ## Frente 2 — SupabaseRepository (app consumindo dado real)
 

@@ -6,7 +6,10 @@
       "name": "Todo dia às 22:30",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-320, 460],
+      "position": [
+        -320,
+        460
+      ],
       "parameters": {
         "rule": {
           "interval": [
@@ -25,13 +28,18 @@
       "name": "Fechar comissão (se for o último dia do mês)",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [0, 460],
+      "position": [
+        0,
+        460
+      ],
       "parameters": {
         "operation": "executeQuery",
         "query": "select fechar_comissoes_se_ultimo_dia_do_mes();"
       },
       "credentials": {
-        "postgres": { "name": "Supabase Postgres" }
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
       }
     }
   ],
@@ -39,12 +47,19 @@
     "Todo dia às 22:30": {
       "main": [
         [
-          { "node": "Fechar comissão (se for o último dia do mês)", "type": "main", "index": 0 }
+          {
+            "node": "Fechar comissão (se for o último dia do mês)",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     }
   },
   "active": false,
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
   "pinData": {}
 }

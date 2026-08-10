@@ -5,6 +5,8 @@ import {
   Campanha,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
+  ClienteBusca,
+  ClienteCarteira,
   ClienteCompradorPromocao,
   ClienteDoVendedor,
   ClienteInatividade,
@@ -84,6 +86,7 @@ const CAMPANHAS_VENDA_ADICIONAL_KEY = '@farmapp/campanhas_venda_adicional';
 const CONTATOS_CLIENTES_KEY = '@farmapp/contatos_clientes';
 const PRODUTOS_EM_FALTA_KEY = '@farmapp/produtos_em_falta';
 const PENDENCIAS_KEY = '@farmapp/pendencias';
+const CARTEIRA_CLIENTES_KEY = '@farmapp/carteira_clientes';
 const SIMULATED_LATENCY_MS = 350;
 
 interface ReceitaOverride {
@@ -302,6 +305,22 @@ async function salvarPendenciasStore(itens: Pendencia[]): Promise<void> {
   await AsyncStorage.setItem(PENDENCIAS_KEY, JSON.stringify(itens));
 }
 
+interface CarteiraClienteRaw {
+  id: string;
+  codigoVendedor: number;
+  codigoCliente: number;
+  criadoEm: string;
+}
+
+async function getCarteiraClientesStore(): Promise<CarteiraClienteRaw[]> {
+  const raw = await AsyncStorage.getItem(CARTEIRA_CLIENTES_KEY);
+  return raw ? (JSON.parse(raw) as CarteiraClienteRaw[]) : [];
+}
+
+async function salvarCarteiraClientesStore(itens: CarteiraClienteRaw[]): Promise<void> {
+  await AsyncStorage.setItem(CARTEIRA_CLIENTES_KEY, JSON.stringify(itens));
+}
+
 class MockRepository implements DataRepository {
   async login(email: string, senha: string): Promise<Profile> {
     if (senha !== MOCK_PASSWORD) {
@@ -331,6 +350,10 @@ class MockRepository implements DataRepository {
     const raw = await AsyncStorage.getItem(SESSION_KEY);
     return raw ? (JSON.parse(raw) as Profile) : null;
   }
+
+  // Push de verdade não existe em mock (não tem servidor pra mandar) —
+  // no-op de propósito.
+  async salvarPushToken(_profile: Profile, _token: string): Promise<void> {}
 
   async getDesempenhoVendedorDiario(profile: Profile, dataEmissao: string): Promise<DesempenhoVendedorDiario[]> {
     const fator = fatorVariacaoPorData(dataEmissao);
@@ -520,6 +543,33 @@ class MockRepository implements DataRepository {
     const doVendedor = vendaItensDetalheSeed.filter((v) => v.codigoVendedor === profile.codigoVendedor);
     const porCliente = new Map<number, { valorTotal: number; ultimaCompra: string }>();
     for (const item of doVendedor) {
+      const produto = produtosSeed.find((p) => p.codigo === item.codigoProduto);
+      const valor = (produto?.precoAtual ?? 0) * item.quantidade;
+      const data = dataDiasAtras(item.diasAtras);
+      const atual = porCliente.get(item.codigoCliente);
+      porCliente.set(item.codigoCliente, {
+        valorTotal: round2((atual?.valorTotal ?? 0) + valor),
+        ultimaCompra: atual && atual.ultimaCompra > data ? atual.ultimaCompra : data,
+      });
+    }
+    const linhas = Array.from(porCliente.entries())
+      .map(([codigo, agregado]) => ({
+        codigo,
+        nome: nomeCliente(codigo),
+        telefone: telefoneCliente(codigo),
+        email: null,
+        dataNascimento: null,
+        ...agregado,
+      }))
+      .sort((a, b) => b.ultimaCompra.localeCompare(a.ultimaCompra));
+    return delay(linhas);
+  }
+
+  async getClientesValorGeral(_profile: Profile): Promise<ClienteDoVendedor[]> {
+    // Mesma conta de getClientesDoVendedor, mas somando QUALQUER
+    // vendedor (sem filtrar vendaItensDetalheSeed por codigoVendedor).
+    const porCliente = new Map<number, { valorTotal: number; ultimaCompra: string }>();
+    for (const item of vendaItensDetalheSeed) {
       const produto = produtosSeed.find((p) => p.codigo === item.codigoProduto);
       const valor = (produto?.precoAtual ?? 0) * item.quantidade;
       const data = dataDiasAtras(item.diasAtras);
@@ -865,6 +915,12 @@ class MockRepository implements DataRepository {
         detalheSemanas = semanas;
       }
 
+      // Mock não tem workflow n8n escrevendo o ratchet de verdade —
+      // aproxima pela faixa "se fechasse agora" (mesma lógica de
+      // vw_faixa_comissao_atual), sem guardar o piso de 3% como
+      // "alcançada".
+      const faixaAtual = faixaPara(percentualAtingido).percentualComissao;
+
       return {
         codigoVendedor: meta.codigoVendedor,
         nomeVendedor: meta.nomeVendedor,
@@ -878,6 +934,7 @@ class MockRepository implements DataRepository {
         comissaoValor,
         regraAplicada,
         detalheSemanas,
+        faixaAlcancada: faixaAtual > 3 ? faixaAtual : null,
       };
     });
 
@@ -1231,6 +1288,69 @@ class MockRepository implements DataRepository {
       existente.baixadaEm = new Date().toISOString();
     }
     await salvarPendenciasStore(itens);
+  }
+
+  async getCarteiraClientes(profile: Profile, codigoVendedor?: number): Promise<ClienteCarteira[]> {
+    const itens = await getCarteiraClientesStore();
+    const filtro = codigoVendedor ?? (profile.role === 'vendedor' ? profile.codigoVendedor : null);
+    const filtrados = filtro != null ? itens.filter((i) => i.codigoVendedor === filtro) : itens;
+
+    const hoje = new Date();
+    const seisMesesAtras = new Date(hoje);
+    seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+    const seisMesesAtrasIso = seisMesesAtras.toISOString().slice(0, 10);
+    const mesAtual = hoje.toISOString().slice(0, 7);
+
+    return delay(
+      filtrados.map((item) => {
+        // Soma QUALQUER vendedor (mesmo raciocínio de
+        // getClientesValorGeral) — não filtra vendaItensDetalheSeed por
+        // codigoVendedor.
+        const comprasDoCliente = vendaItensDetalheSeed.filter((v) => v.codigoCliente === item.codigoCliente);
+        let valor6Meses = 0;
+        let compradoEsteMes = false;
+        for (const compra of comprasDoCliente) {
+          const data = dataDiasAtras(compra.diasAtras);
+          if (data >= seisMesesAtrasIso) {
+            const produto = produtosSeed.find((p) => p.codigo === compra.codigoProduto);
+            valor6Meses += (produto?.precoAtual ?? 0) * compra.quantidade;
+          }
+          if (data.slice(0, 7) === mesAtual) compradoEsteMes = true;
+        }
+        return {
+          id: item.id,
+          codigoVendedor: item.codigoVendedor,
+          codigoCliente: item.codigoCliente,
+          nome: nomeCliente(item.codigoCliente),
+          telefone: telefoneCliente(item.codigoCliente),
+          valor6Meses: round2(valor6Meses),
+          compradoEsteMes,
+        };
+      })
+    );
+  }
+
+  async buscarClientesParaCarteira(termo: string): Promise<ClienteBusca[]> {
+    const termoLimpo = termo.trim().toLowerCase();
+    if (!termoLimpo) return delay([]);
+    return delay(
+      clientesSeed
+        .filter((c) => c.nome.toLowerCase().includes(termoLimpo))
+        .slice(0, 20)
+        .map((c) => ({ codigo: c.codigo, nome: c.nome, numeroCpfCnpj: null, telefone: c.telefone }))
+    );
+  }
+
+  async adicionarClienteCarteira(codigoVendedor: number, codigoCliente: number): Promise<void> {
+    const itens = await getCarteiraClientesStore();
+    if (itens.some((i) => i.codigoVendedor === codigoVendedor && i.codigoCliente === codigoCliente)) return;
+    itens.push({ id: `cart-${Date.now()}`, codigoVendedor, codigoCliente, criadoEm: new Date().toISOString() });
+    await salvarCarteiraClientesStore(itens);
+  }
+
+  async removerClienteCarteira(id: string): Promise<void> {
+    const itens = await getCarteiraClientesStore();
+    await salvarCarteiraClientesStore(itens.filter((i) => i.id !== id));
   }
 }
 

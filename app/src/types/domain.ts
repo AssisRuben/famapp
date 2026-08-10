@@ -120,6 +120,33 @@ export interface ClienteDoVendedor {
   ultimaCompra: string | null;
 }
 
+// ============================================================
+// CARTEIRA DE CLIENTES — lista curada manualmente pelo vendedor
+// (aba "Carteira de clientes"), substitui o antigo card de aniversário
+// em Alertas. valor6Meses/compradoEsteMes somam QUALQUER vendedor (ver
+// comentário de vw_carteira_clientes em schema.sql) — só o VÍNCULO à
+// carteira é que é por vendedor.
+// ============================================================
+export interface ClienteCarteira {
+  id: string;
+  codigoVendedor: number;
+  codigoCliente: number;
+  nome: string;
+  telefone: string | null;
+  valor6Meses: number;
+  compradoEsteMes: boolean;
+}
+
+// Resultado da busca por nome/CPF pra adicionar cliente na carteira —
+// espelha um subconjunto de `clientes` (tabela aberta pra leitura a
+// qualquer autenticado).
+export interface ClienteBusca {
+  codigo: number;
+  nome: string;
+  numeroCpfCnpj: string | null;
+  telefone: string | null;
+}
+
 // Espelha vw_historico_compras_cliente — histórico de compra por
 // PRODUTO (não por nota) do cliente inteiro (qualquer vendedor),
 // mostrado ao expandir um cliente na tela "Meus clientes" (só os
@@ -379,6 +406,10 @@ export interface ComissaoMensal {
   comissaoValor: number;
   regraAplicada: 'flat_10_mensal' | 'soma_semanal';
   detalheSemanas: DetalheSemanaComissao[] | null;
+  // Maior faixa (3/5/7/8/10) já alcançada no mês — ratchet, só sobe
+  // (ver comissao_faixa_alcancada) — usada pra medalha de gamificação
+  // 🔰🥉🥈🥇🏆. null = ainda não saiu do piso de 3% nenhuma vez.
+  faixaAlcancada: number | null;
 }
 
 // ============================================================

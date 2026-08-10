@@ -10,6 +10,23 @@ export function diasNoMes(ano: number, mes: number): number {
   return new Date(ano, mes, 0).getDate();
 }
 
+// Medalha de gamificação por faixa de comissão alcançada (5/7/8/10% —
+// o piso de 3% nunca aparece aqui, não é uma conquista, é o ponto de
+// partida). Mesma escala usada no push de "subiu de faixa" (n8n) e no
+// badge mostrado em Meta/Metas — ver comissao_faixa_alcancada no
+// schema.sql.
+const BADGES_FAIXA_COMISSAO: Record<number, string> = {
+  5: '🥉',
+  7: '🥈',
+  8: '🥇',
+  10: '🏆',
+};
+
+export function badgeFaixaComissao(faixaAlcancada: number | null): string | null {
+  if (faixaAlcancada == null) return null;
+  return BADGES_FAIXA_COMISSAO[faixaAlcancada] ?? null;
+}
+
 // Buckets fixos: 1–7, 8–14, 15–21, 22–fim do mês.
 export function semanaDoDia(dia: number): 1 | 2 | 3 | 4 {
   if (dia <= 7) return 1;

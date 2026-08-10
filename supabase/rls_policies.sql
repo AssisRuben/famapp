@@ -8,6 +8,11 @@ create table profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   codigo_vendedor integer references vendedores(codigo),
   role text not null check (role in ('vendedor', 'gestor')),
+  -- Expo push token do dispositivo — gravado pelo próprio app no login
+  -- (ver AuthContext/lib/notifications.ts obterPushToken), lido pelo
+  -- workflow n8n de notificação de comissão (roda como service_role,
+  -- ignora RLS). Não é sensível, mas só o dono deveria escrever nele.
+  expo_push_token text,
   created_at timestamptz default now()
 );
 
@@ -17,9 +22,21 @@ create policy "profiles: usuario le o proprio perfil"
 on profiles for select
 using (id = auth.uid());
 
--- Sem policies de insert/update/delete para authenticated: a
--- gestão de profiles (vincular vendedor, definir papel) é feita
--- via service_role (que ignora RLS), não pelo app.
+-- Sem policies de insert/delete para authenticated: a gestão de
+-- profiles (vincular vendedor, definir papel) é feita via service_role
+-- (que ignora RLS), não pelo app.
+--
+-- UPDATE é diferente: liberado, mas só pra coluna expo_push_token — o
+-- GRANT abaixo restringe quais colunas a policy de update alcança
+-- (mesmo com using/with check permissivos por linha, tentar escrever
+-- role/codigo_vendedor nessa mesma chamada falha por falta de
+-- privilégio na coluna, não só por RLS).
+grant update (expo_push_token) on profiles to authenticated;
+
+create policy "profiles: usuario atualiza o proprio push token"
+on profiles for update
+using (id = auth.uid())
+with check (id = auth.uid());
 
 -- ============================================================
 -- Clientes ativos vs inativos (sem compra nos últimos 60 dias), com o
@@ -581,6 +598,53 @@ using (exists (
   select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
 ));
 
+-- comissao_faixa_alcancada: escrita exclusiva do workflow n8n via
+-- service_role (nenhuma policy de insert/update/delete para
+-- authenticated) — vendedor só lê a própria, gestor lê todas. Mesmo
+-- padrão de sync_control/vendedores (dado sincronizado por fora, não
+-- editável pelo app).
+alter table comissao_faixa_alcancada enable row level security;
+
+create policy "comissao_faixa_alcancada: select proprio ou gestor"
+on comissao_faixa_alcancada for select
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = comissao_faixa_alcancada.codigo_vendedor)
+));
+
+-- carteira_clientes: vendedor gerencia (lê/adiciona/remove) só a
+-- própria carteira; gestor gerencia a de qualquer vendedor (seletor de
+-- vendedor na aba "Carteira de clientes"). A leitura enriquecida
+-- (valor_6_meses/comprado_este_mes) é feita via vw_carteira_clientes,
+-- que já tem seu próprio controle de acesso embutido no WHERE — essas
+-- policies aqui cobrem a tabela crua (usada por insert/delete direto).
+alter table carteira_clientes enable row level security;
+
+create policy "carteira_clientes: select proprio ou gestor"
+on carteira_clientes for select
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = carteira_clientes.codigo_vendedor)
+));
+
+create policy "carteira_clientes: insere proprio ou gestor"
+on carteira_clientes for insert
+with check (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = carteira_clientes.codigo_vendedor)
+));
+
+create policy "carteira_clientes: deleta proprio ou gestor"
+on carteira_clientes for delete
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (p.role = 'gestor' or p.codigo_vendedor = carteira_clientes.codigo_vendedor)
+));
+
 -- sync_control: escrita continua exclusiva do coletor via service_role
 -- (nenhuma policy de insert/update/delete para authenticated). Leitura
 -- liberada pra qualquer autenticado — usada pelo app pra mostrar "dados
@@ -631,6 +695,7 @@ alter view vw_receita_identificacao_comprador set (security_invoker = true);
 alter view vw_vendas_sem_identificacao_comprador set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);
 alter view vw_metas_comissao set (security_invoker = true);
+alter view vw_faixa_comissao_atual set (security_invoker = true);
 alter view vw_produto_fornecedor_recente set (security_invoker = true);
 alter view vw_produto_fornecedor_mais_barato set (security_invoker = true);
 alter view vw_venda_recente_produto set (security_invoker = true);
@@ -643,13 +708,16 @@ alter view vw_historico_compras_cliente set (security_invoker = true);
 alter view vw_clientes_produtos_vendedor set (security_invoker = true);
 alter view vw_clientes_produtos set (security_invoker = true);
 alter view vw_vendedores_ativos set (security_invoker = true);
--- vw_produtos_promocao_clientes, vw_clientes_inatividade e
--- vw_ranking_vendedores_dia ficam de propósito SEM security_invoker (ver
+-- vw_produtos_promocao_clientes, vw_clientes_inatividade,
+-- vw_ranking_vendedores_dia, vw_clientes_valor_geral e
+-- vw_carteira_clientes ficam de propósito SEM security_invoker (ver
 -- comentário de cada uma em schema.sql) — não é esquecimento. Gap
 -- corrigido nesta rodada: vw_ranking_vendedores_dia tinha
 -- security_invoker=true aqui antes, o que fazia um vendedor real só ver
 -- a própria linha do ranking (sempre em 1º, sozinho), diferente da tela
 -- "Ranking" do app, que mostra todo mundo de propósito (gamificação).
--- As duas primeiras fazem o próprio controle de acesso no WHERE
--- (checando profiles/auth.uid()) em vez de confiar na RLS automática das
--- tabelas base; a de ranking não precisa nem disso, roda liberada.
+-- vw_produtos_promocao_clientes/vw_clientes_inatividade/
+-- vw_carteira_clientes fazem o próprio controle de acesso no WHERE
+-- (checando profiles/auth.uid()) em vez de confiar na RLS automática
+-- das tabelas base; ranking e clientes_valor_geral não precisam nem
+-- disso, rodam liberadas.
