@@ -419,18 +419,29 @@ envio de mensagem de verdade; o texto pronto já chega em `$json.mensagem`.
 
 - [`coletor/whatsapp_performance_diaria.n8n.json`](coletor/whatsapp_performance_diaria.n8n.json):
   todo dia às 22:20, uma mensagem só com o resumo de TODOS os
-  vendedores ativos (`vw_vendedores_ativos`) — margem e % da meta do
-  dia, margem e % da meta da semana com a faixa de comissão da semana
-  (🥉🥈🥇🏆, mesma escala de `badgeFaixaComissao`), e as vendas do dia
-  separadas em 3: com cliente real identificado, no CPF do próprio
-  vendedor (mesma comparação de `vw_vendas_sem_identificacao_comprador`
-  — bate CPF do cliente contra o do vendedor) e sem cliente nenhum.
-  Todo o cálculo (meta
+  vendedores ativos (`vw_vendedores_ativos`, mesmo sem venda/meta
+  cadastrada hoje — antes um `where meta_mensal is not null` fazia
+  vendedor sem meta sumir da lista inteira, corrigido 09/08/2026) —
+  margem e % da meta do dia, margem e % da meta da semana com a faixa
+  de comissão da semana (🥉🥈🥇🏆, mesma escala de `badgeFaixaComissao`),
+  as vendas do dia separadas em 3 (com cliente real identificado, no
+  CPF do próprio vendedor — mesma comparação de
+  `vw_vendas_sem_identificacao_comprador` — e sem cliente nenhum), e se
+  o vendedor lançou alguma falta ou fez contato (whatsapp/ligação) hoje
+  (`produtos_em_falta`/`contatos_clientes`). Todo o cálculo (meta
   diária = mensal/dias do mês, semana = bucket 1-7/8-14/15-21/22-fim)
   replica a mesma lógica já usada no app — ver comentários no próprio
-  workflow. Usa `at time zone 'America/Fortaleza'` explicitamente em vez
+  workflow. Usa `at time zone 'America/Sao_Paulo'` explicitamente em vez
   de `current_date` cru, porque às 22:20 local já é depois da meia-noite
-  em UTC (mesmo cuidado do `notificacao_comissao.n8n.json`).
+  em UTC (mesmo cuidado do `notificacao_comissao.n8n.json`) — e o
+  workflow em si tem `settings.timezone = "America/Sao_Paulo"` (assim
+  como os outros 4 workflows do `coletor/`), porque o Schedule Trigger
+  usa o timezone configurado na INSTÂNCIA do n8n por padrão (achado
+  09/08/2026: a instância estava em `America/New_York`, então "22:20"
+  disparava 1h mais tarde no horário de Brasília). "Acessou o app hoje"
+  foi cogitado mas descartado — não existe tracking de abertura, só
+  `last_sign_in_at` do Supabase Auth (marca login, não abertura;
+  usuário com sessão persistida pode não atualizar isso há dias).
 - [`coletor/whatsapp_faltas.n8n.json`](coletor/whatsapp_faltas.n8n.json): a
   cada 7 dias às 08:00, 1 mensagem de texto com os **produtos em
   falta** registrados desde o envio anterior (`produtos_em_falta`,
