@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
@@ -7,6 +7,7 @@ import { MetricTile } from '../components/MetricTile';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { CorridaDeVendas } from '../components/CorridaDeVendas';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
 import { diasDecorridosNaSemana, faixaComissaoPara, metaDiaria, semanaDoDia, valoresDaMeta } from '../lib/metas';
 import {
@@ -110,7 +111,7 @@ export function DashboardScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }

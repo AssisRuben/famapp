@@ -425,16 +425,21 @@ class SupabaseRepository implements DataRepository {
       telefone: r.telefone,
       valor6Meses: Number(r.valor_6_meses),
       compradoEsteMes: r.comprado_este_mes,
+      valorMesAtual: Number(r.valor_mes_atual ?? 0),
     }));
   }
 
   async buscarClientesParaCarteira(termo: string): Promise<ClienteBusca[]> {
     const termoLimpo = termo.trim();
     if (!termoLimpo) return [];
+    const filtros = [`nome.ilike.%${termoLimpo}%`, `numero_cpf_cnpj.ilike.%${termoLimpo}%`];
+    // codigo é integer — só entra no OR quando o termo é só dígitos, senão o
+    // PostgREST rejeita o eq com "invalid input syntax for type integer".
+    if (/^\d+$/.test(termoLimpo)) filtros.push(`codigo.eq.${termoLimpo}`);
     const { data, error } = await supabase
       .from('clientes')
       .select('codigo, nome, numero_cpf_cnpj, fone')
-      .or(`nome.ilike.%${termoLimpo}%,numero_cpf_cnpj.ilike.%${termoLimpo}%`)
+      .or(filtros.join(','))
       .order('nome', { ascending: true })
       .limit(20);
     if (error) throw error;
@@ -1480,8 +1485,11 @@ class SupabaseRepository implements DataRepository {
 
   async getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]> {
     const [catalogoLinhas, vendaLinhas, campanhas] = await Promise.all([
+      // estoque_atual > 0: produto zerado não é candidato a reajuste de
+      // preço (sem estoque, ajustar preço não faz sentido — isso é
+      // assunto da aba Compras, não Precificação).
       this.buscarPaginado((inicio, fim) =>
-        this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
+        this.queryProdutoCatalogo('*').gt('estoque_atual', 0).order('codigo', { ascending: true }).range(inicio, fim)
       ),
       this.buscarPaginado((inicio, fim) =>
         supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)

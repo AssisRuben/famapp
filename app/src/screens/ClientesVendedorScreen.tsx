@@ -7,10 +7,12 @@ import { repository } from '../data';
 import { ClienteDoVendedor, ContatoCliente, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PhoneCallButton } from '../components/PhoneCallButton';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, nomeCurto } from '../lib/format';
 import { GRUPOS_FILTRO } from '../lib/gruposClientes';
 import { foiContatadoRecentemente } from '../lib/contatos';
+import { cacheGet, cacheSet } from '../lib/cache';
 
 // Substituiu a aba "Ranking" (01/08/2026) — o ranking virou parte do
 // Painel (card "🏆 Ranking"), e essa aba passou a mostrar a carteira
@@ -47,12 +49,26 @@ export function ClientesVendedorScreen() {
     setClientes(c);
     setProdutos(p);
     setContatos(ct);
+    cacheSet(`meusClientes:${profile.id}`, { c, p, ct });
   }, [profile]);
 
+  // Stale-while-revalidate (ver lib/cache.ts): mostra o último
+  // resultado da sessão na hora, sem spinner, e atualiza por trás.
   useEffect(() => {
-    setLoading(true);
+    if (!profile) return;
+    const cacheado = cacheGet<{ c: ClienteDoVendedor[]; p: ProdutoRecorrenteCliente[]; ct: ContatoCliente[] }>(
+      `meusClientes:${profile.id}`
+    );
+    if (cacheado) {
+      setClientes(cacheado.c);
+      setProdutos(cacheado.p);
+      setContatos(cacheado.ct);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     load().finally(() => setLoading(false));
-  }, [load]);
+  }, [load, profile]);
 
   // Deep-link do card "Uso contínuo atrasado" da aba Alertas
   // (navigation.navigate('MeusClientes', { apenasRecompra: true })) —
@@ -95,6 +111,7 @@ export function ClientesVendedorScreen() {
     if (!profile || !apenasRecompra) return;
     const produtoAtrasado = produtosPorCliente.get(codigoCliente)?.find((p) => p.atrasado);
     if (!produtoAtrasado) return;
+    const chaveCache = `meusClientes:${profile.id}`;
     const novo: ContatoCliente = {
       codigoCliente,
       motivo: 'uso_continuo',
@@ -102,6 +119,11 @@ export function ClientesVendedorScreen() {
       contatadoEm: new Date().toISOString(),
     };
     setContatos((atual) => [...atual, novo]);
+    const atualizarCache = (transformar: (ct: ContatoCliente[]) => ContatoCliente[]) => {
+      const cacheado = cacheGet<{ c: ClienteDoVendedor[]; p: ProdutoRecorrenteCliente[]; ct: ContatoCliente[] }>(chaveCache);
+      if (cacheado) cacheSet(chaveCache, { ...cacheado, ct: transformar(cacheado.ct) });
+    };
+    atualizarCache((ct) => [...ct, novo]);
     repository
       .registrarContato({
         codigoCliente,
@@ -110,7 +132,10 @@ export function ClientesVendedorScreen() {
         codigoProduto: produtoAtrasado.codigoProduto,
         codigoVendedor: profile.codigoVendedor,
       })
-      .catch(() => setContatos((atual) => atual.filter((c) => c !== novo)));
+      .catch(() => {
+        setContatos((atual) => atual.filter((c) => c !== novo));
+        atualizarCache((ct) => ct.filter((c) => c !== novo));
+      });
   };
 
   const grupoAtivo = GRUPOS_FILTRO.find((g) => g.chave === grupoSelecionado) ?? null;
@@ -143,7 +168,7 @@ export function ClientesVendedorScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }

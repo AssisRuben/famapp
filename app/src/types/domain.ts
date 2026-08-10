@@ -135,6 +135,7 @@ export interface ClienteCarteira {
   telefone: string | null;
   valor6Meses: number;
   compradoEsteMes: boolean;
+  valorMesAtual: number;
 }
 
 // Resultado da busca por nome/CPF pra adicionar cliente na carteira —
@@ -314,7 +315,7 @@ export interface VendaSemIdentificacaoComprador {
 // app só sabe que o discador/WhatsApp abriu, não que a ligação foi
 // atendida nem que a mensagem foi lida.
 // ============================================================
-export type MotivoContato = 'resgate' | 'aniversario' | 'uso_continuo' | 'alto_valor_sumindo' | 'promocao' | 'antibiotico';
+export type MotivoContato = 'resgate' | 'aniversario' | 'uso_continuo' | 'alto_valor_sumindo' | 'promocao' | 'antibiotico' | 'carteira';
 // 'nao_contatado': não é um jeito de contato de verdade, é o registro
 // automático de "passou 1 semana e ninguém ligou/mandou msg" (só usado
 // no motivo 'antibiotico' — ver antibioticosExpirados em AlertasScreen).

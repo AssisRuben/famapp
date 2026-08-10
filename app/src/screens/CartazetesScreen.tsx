@@ -7,6 +7,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, formatDateCurtoBR, formatDecimalBR, parseDateBR, parseDecimalBR } from '../lib/format';
 import { agruparParaCartazetes } from '../lib/cartazetes';
@@ -218,7 +219,7 @@ export function CartazetesScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }

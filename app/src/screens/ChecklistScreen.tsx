@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { alertar } from '../lib/alert';
 import { formatDateBR, todayISO } from '../lib/format';
@@ -57,7 +58,7 @@ export function ChecklistScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }

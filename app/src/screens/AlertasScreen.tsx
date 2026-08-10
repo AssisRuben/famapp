@@ -7,9 +7,11 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PhoneCallButton } from '../components/PhoneCallButton';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, nomeCurto, todayISO } from '../lib/format';
 import { existeRegistroContato, foiContatadoRecentemente } from '../lib/contatos';
+import { cacheGet, cacheSet } from '../lib/cache';
 import {
   agruparPorVendedor,
   campanhaAtiva,
@@ -271,6 +273,24 @@ interface AlertaCardInfo {
   cor: string;
 }
 
+// Tudo que load() busca, num objeto só — permite cachear o resultado
+// inteiro e reidratar a tela na hora ao reabrir (stale-while-revalidate,
+// ver lib/cache.ts), em vez de começar do zero toda vez.
+interface AlertasDados {
+  alertasPromocao: ProdutoPromocaoAlerta[];
+  clientes: ClienteDoVendedor[];
+  clientesValorGeral: ClienteDoVendedor[];
+  produtosRecorrentes: ProdutoRecorrenteCliente[];
+  receitas: VendaReceitaPendente[];
+  antimicrobianos: VendaAntimicrobianoRecente[];
+  identificacaoComprador: IdentificacaoCompradorVendedor[];
+  metas: MetaVendedor[];
+  contatos: ContatoCliente[];
+  carteiraClientes: ClienteCarteira[];
+  campanhasVendaAdicionalAtivas: CampanhaVendaAdicional[];
+  vendasVendaAdicionalPorCampanha: Record<string, VendaVendaAdicional[]>;
+}
+
 export function AlertasScreen() {
   const { profile } = useAuth();
   const navigation = useNavigation<any>();
@@ -297,6 +317,24 @@ export function AlertasScreen() {
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
 
+  // Chamadores só usam os setState — memoizado com [] porque os
+  // setters do useState são estáveis, e é chamado tanto na hidratação
+  // do cache quanto no fim de um load() de verdade.
+  const aplicarDados = useCallback((d: AlertasDados) => {
+    setAlertasPromocao(d.alertasPromocao);
+    setClientes(d.clientes);
+    setClientesValorGeral(d.clientesValorGeral);
+    setProdutosRecorrentes(d.produtosRecorrentes);
+    setReceitas(d.receitas);
+    setAntimicrobianos(d.antimicrobianos);
+    setIdentificacaoComprador(d.identificacaoComprador);
+    setMetas(d.metas);
+    setContatos(d.contatos);
+    setCarteiraClientes(d.carteiraClientes);
+    setCampanhasVendaAdicionalAtivas(d.campanhasVendaAdicionalAtivas);
+    setVendasVendaAdicionalPorCampanha(d.vendasVendaAdicionalPorCampanha);
+  }, []);
+
   const load = useCallback(async () => {
     if (!profile) return;
     const hoje = new Date();
@@ -315,16 +353,6 @@ export function AlertasScreen() {
       // — o detalhe por vendedor fica na aba "Carteira de clientes").
       repository.getCarteiraClientes(profile),
     ]);
-    setAlertasPromocao(promocao);
-    setClientes(cli);
-    setClientesValorGeral(valorGeral);
-    setProdutosRecorrentes(prod);
-    setReceitas(rec);
-    setAntimicrobianos(antim);
-    setIdentificacaoComprador(ident);
-    setMetas(met);
-    setContatos(cont);
-    setCarteiraClientes(carteira);
 
     // Venda adicional: só as campanhas ativas hoje interessam pro card
     // de Alertas — busca as vendas de cada uma já aqui (não é lazy
@@ -339,9 +367,24 @@ export function AlertasScreen() {
         vendasPorCampanhaVA[c.id] = await repository.getVendasVendaAdicional(profile, c.id);
       })
     );
-    setCampanhasVendaAdicionalAtivas(ativasVA);
-    setVendasVendaAdicionalPorCampanha(vendasPorCampanhaVA);
-  }, [profile]);
+
+    const dados: AlertasDados = {
+      alertasPromocao: promocao,
+      clientes: cli,
+      clientesValorGeral: valorGeral,
+      produtosRecorrentes: prod,
+      receitas: rec,
+      antimicrobianos: antim,
+      identificacaoComprador: ident,
+      metas: met,
+      contatos: cont,
+      carteiraClientes: carteira,
+      campanhasVendaAdicionalAtivas: ativasVA,
+      vendasVendaAdicionalPorCampanha: vendasPorCampanhaVA,
+    };
+    aplicarDados(dados);
+    cacheSet(`alertas:${profile.id}`, dados);
+  }, [profile, aplicarDados]);
 
   // Registra a tentativa de contato e já suprime da lista na hora
   // (otimista) — ver lib/contatos.ts pra janela de cada motivo.
@@ -352,17 +395,34 @@ export function AlertasScreen() {
     codigoProduto: number | null = null
   ) => {
     if (!profile) return;
+    const chaveCache = `alertas:${profile.id}`;
     const novo: ContatoCliente = { codigoCliente, motivo, codigoProduto, contatadoEm: new Date().toISOString() };
     setContatos((atual) => [...atual, novo]);
+    const cacheado = cacheGet<AlertasDados>(chaveCache);
+    if (cacheado) cacheSet(chaveCache, { ...cacheado, contatos: [...cacheado.contatos, novo] });
     repository
       .registrarContato({ codigoCliente, motivo, tipoContato, codigoProduto, codigoVendedor: profile.codigoVendedor })
-      .catch(() => setContatos((atual) => atual.filter((c) => c !== novo)));
+      .catch(() => {
+        setContatos((atual) => atual.filter((c) => c !== novo));
+        const atual = cacheGet<AlertasDados>(chaveCache);
+        if (atual) cacheSet(chaveCache, { ...atual, contatos: atual.contatos.filter((c) => c !== novo) });
+      });
   };
 
+  // Stale-while-revalidate: se já tem resultado em cache dessa sessão
+  // (ver lib/cache.ts), mostra na hora sem spinner e atualiza por trás;
+  // só bloqueia a tela com loading na primeira vez sem nada em cache.
   useEffect(() => {
-    setLoading(true);
+    if (!profile) return;
+    const cacheado = cacheGet<AlertasDados>(`alertas:${profile.id}`);
+    if (cacheado) {
+      aplicarDados(cacheado);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     load().finally(() => setLoading(false));
-  }, [load]);
+  }, [load, profile, aplicarDados]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -380,17 +440,32 @@ export function AlertasScreen() {
     [produtosRecorrentes, contatos]
   );
 
-  // Estatísticas do card "Carteira de clientes" — valor somado é o
+  // Estatísticas do card "Carteira de clientes" — valorTotal é o
   // valor6Meses de cada cliente (já soma qualquer vendedor, ver
-  // comentário de vw_carteira_clientes), não all-time.
-  const carteiraStats = useMemo(
-    () => ({
+  // comentário de vw_carteira_clientes), não all-time. valorMesAtual é
+  // só o mês corrente (diferente do 6 meses). contatadosEsteMes conta
+  // cliente distinto contatado (ligação/whatsapp) por motivo 'carteira'
+  // dentro do mês corrente — não usa foiContatadoRecentemente porque
+  // aqui não é suspensão de lista, é estatística pura (10/08/2026).
+  const carteiraStats = useMemo(() => {
+    const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).getTime();
+    const clientesDaCarteira = new Set(carteiraClientes.map((c) => c.codigoCliente));
+    const contatadosEsteMes = new Set(
+      contatos
+        .filter(
+          (c) =>
+            c.motivo === 'carteira' && clientesDaCarteira.has(c.codigoCliente) && new Date(c.contatadoEm).getTime() >= inicioMes
+        )
+        .map((c) => c.codigoCliente)
+    ).size;
+    return {
       valorTotal: carteiraClientes.reduce((soma, c) => soma + c.valor6Meses, 0),
+      valorMesAtual: carteiraClientes.reduce((soma, c) => soma + c.valorMesAtual, 0),
       totalClientes: carteiraClientes.length,
       compraramEsteMes: carteiraClientes.filter((c) => c.compradoEsteMes).length,
-    }),
-    [carteiraClientes]
-  );
+      contatadosEsteMes,
+    };
+  }, [carteiraClientes, contatos, hoje]);
 
   const diaDoMes = hoje.getDate();
   const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
@@ -527,7 +602,7 @@ export function AlertasScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }
@@ -637,6 +712,16 @@ export function AlertasScreen() {
               <Text style={styles.carteiraStatLabel}>Compraram este mês</Text>
             </View>
           </View>
+          <View style={styles.carteiraStatsRow}>
+            <View style={styles.carteiraStatItem}>
+              <Text style={styles.carteiraStatValor}>{formatBRL(carteiraStats.valorMesAtual)}</Text>
+              <Text style={styles.carteiraStatLabel}>Comprado este mês</Text>
+            </View>
+            <View style={styles.carteiraStatItem}>
+              <Text style={styles.carteiraStatValor}>{carteiraStats.contatadosEsteMes}</Text>
+              <Text style={styles.carteiraStatLabel}>Contatados este mês</Text>
+            </View>
+          </View>
           {carteiraClientes.length === 0 ? (
             <Text style={styles.empty}>Nenhum cliente na carteira ainda — adiciona na aba "Carteira de clientes".</Text>
           ) : (
@@ -646,8 +731,11 @@ export function AlertasScreen() {
                 codigoCliente={cliente.codigoCliente}
                 nome={cliente.nome}
                 telefone={cliente.telefone}
-                detalhe={`${formatBRL(cliente.valor6Meses)} (últ. 6 meses)${cliente.compradoEsteMes ? ' · comprou este mês ✅' : ''}`}
+                detalhe={`${formatBRL(cliente.valor6Meses)} (últ. 6 meses)${
+                  cliente.compradoEsteMes ? ` · ${formatBRL(cliente.valorMesAtual)} este mês ✅` : ''
+                }`}
                 mensagemWhatsapp={`Oi, ${nomeCurto(cliente.nome)}! Tudo bem? Aqui é da Farmácia Conviva Parquelândia. Passando pra saber se você precisa de alguma coisa 🙂`}
+                onContato={(tipo) => registrarContatoAlerta('carteira', cliente.codigoCliente, tipo)}
               />
             ))
           )}

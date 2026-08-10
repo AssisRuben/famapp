@@ -6,6 +6,7 @@ import { repository } from '../data';
 import { ClienteInatividade, ContatoCliente, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PhoneCallButton } from '../components/PhoneCallButton';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { formatDateBR, nomeCurto } from '../lib/format';
 import { GRUPOS_FILTRO } from '../lib/gruposClientes';
@@ -124,7 +125,7 @@ export function ClientesScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }

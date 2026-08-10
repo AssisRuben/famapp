@@ -18,9 +18,11 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { formatBRL, todayISO } from '../lib/format';
 import { LIMIAR_DIAS_PARADO } from '../lib/precificacao';
+import { calcularMargemPct } from '../lib/campanhas';
 import { gerarCsvPrecificacao } from '../lib/precificacaoCsv';
 import { gerarTxtTrier } from '../lib/trierTxt';
 import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
@@ -72,6 +74,15 @@ function precoAlterado(precoAtual: number, digitado: string | undefined): number
   const numero = Number(digitado.replace(',', '.'));
   if (!Number.isFinite(numero) || numero <= 0) return null;
   return numero.toFixed(2) === precoAtual.toFixed(2) ? null : numero;
+}
+
+// Diferente de precoAlterado: aqui um valor igual ao preço atual
+// continua "válido" (só serve pra recalcular a margem exibida em
+// tempo real enquanto digita, não pra decidir quem entra no .txt).
+function parsePrecoDigitado(digitado: string | undefined): number | null {
+  if (digitado === undefined || digitado.trim() === '') return null;
+  const numero = Number(digitado.replace(',', '.'));
+  return Number.isFinite(numero) && numero > 0 ? numero : null;
 }
 
 function TagBadge({ tag }: { tag: TagPrecificacao }) {
@@ -154,7 +165,7 @@ export function PrecificacaoScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }
@@ -255,57 +266,70 @@ export function PrecificacaoScreen() {
     );
   };
 
-  const renderItem = ({ item }: ListRenderItemInfo<ItemPrecificacao>) => (
-    <Card>
-      <Text style={styles.itemNome} numberOfLines={2}>{item.produto.nome}</Text>
-      <Text style={styles.itemCategoria}>{labelGrupoCompleto(item.produto.grupo)}</Text>
+  const renderItem = ({ item }: ListRenderItemInfo<ItemPrecificacao>) => {
+    // Margem exibida acompanha o "Novo preço" em tempo real enquanto o
+    // gestor digita (preview de antes de gerar o .txt) — sem edição
+    // válida, cai de volta pra margem atual calculada no carregamento.
+    const precoDigitado = parsePrecoDigitado(novoPreco[item.produto.codigo]);
+    const margemExibida =
+      precoDigitado != null ? calcularMargemPct(precoDigitado, item.produto.custoMedio) : item.margemAtualPct;
 
-      <View style={styles.badgesRow}>
-        {item.tags.map((tag) => (
-          <TagBadge key={tag} tag={tag} />
-        ))}
-      </View>
+    return (
+      <Card style={styles.cardCompacta}>
+        <Text style={styles.itemNome} numberOfLines={1}>{item.produto.nome}</Text>
+        <Text style={styles.itemCategoria}>{labelGrupoCompleto(item.produto.grupo)}</Text>
 
-      <View style={styles.detalhesGrid}>
-        <View style={styles.detalheItem}>
-          <Text style={styles.detalheLabel}>Giro (30d)</Text>
-          <Text style={styles.detalheValor}>{item.quantidadeVendida30d} un.</Text>
-        </View>
-        <View style={styles.detalheItem}>
-          <Text style={styles.detalheLabel}>Dias sem venda</Text>
-          <Text style={styles.detalheValor}>{item.diasSemVenda ?? '—'}</Text>
-        </View>
-        <View style={styles.detalheItem}>
-          <Text style={styles.detalheLabel}>Margem atual</Text>
-          <Text style={styles.detalheValor}>{item.margemAtualPct.toFixed(1)}%</Text>
-        </View>
-        <View style={styles.detalheItem}>
-          <Text style={styles.detalheLabel}>Preço de compra</Text>
-          <Text style={styles.detalheValor}>{formatBRL(item.produto.custoMedio)}</Text>
-        </View>
-        <View style={styles.detalheItem}>
-          <Text style={styles.detalheLabel}>Preço de venda</Text>
-          <Text style={styles.detalheValor}>{formatBRL(item.produto.precoVenda)}</Text>
-        </View>
-        <View style={styles.detalheItem}>
-          <Text style={styles.detalheLabel}>Em estoque</Text>
-          <Text style={styles.detalheValor}>{item.produto.estoqueAtual} un.</Text>
-        </View>
-      </View>
+        {item.tags.length > 0 && (
+          <View style={styles.badgesRow}>
+            {item.tags.map((tag) => (
+              <TagBadge key={tag} tag={tag} />
+            ))}
+          </View>
+        )}
 
-      <View style={styles.novoPrecoRow}>
-        <Text style={styles.itemLabel}>Novo preço</Text>
-        <TextInput
-          style={styles.inputNovoPreco}
-          keyboardType="numeric"
-          placeholder={item.produto.precoVenda.toFixed(2)}
-          placeholderTextColor={colors.textMuted}
-          value={novoPreco[item.produto.codigo] ?? ''}
-          onChangeText={(texto) => ajustarNovoPreco(item.produto.codigo, texto)}
-        />
-      </View>
-    </Card>
-  );
+        <View style={styles.detalhesGrid}>
+          <View style={styles.detalheItem}>
+            <Text style={styles.detalheLabel}>Giro (30d)</Text>
+            <Text style={styles.detalheValor}>{item.quantidadeVendida30d} un.</Text>
+          </View>
+          <View style={styles.detalheItem}>
+            <Text style={styles.detalheLabel}>Dias parado</Text>
+            <Text style={styles.detalheValor}>{item.diasSemVenda ?? '—'}</Text>
+          </View>
+          <View style={styles.detalheItem}>
+            <Text style={styles.detalheLabel}>Margem</Text>
+            <Text style={[styles.detalheValor, precoDigitado != null && styles.detalheValorPrevisto]}>
+              {margemExibida.toFixed(1)}%
+            </Text>
+          </View>
+          <View style={styles.detalheItem}>
+            <Text style={styles.detalheLabel}>Compra</Text>
+            <Text style={styles.detalheValor}>{formatBRL(item.produto.custoMedio)}</Text>
+          </View>
+          <View style={styles.detalheItem}>
+            <Text style={styles.detalheLabel}>Venda</Text>
+            <Text style={styles.detalheValor}>{formatBRL(item.produto.precoVenda)}</Text>
+          </View>
+          <View style={styles.detalheItem}>
+            <Text style={styles.detalheLabel}>Estoque</Text>
+            <Text style={styles.detalheValor}>{item.produto.estoqueAtual} un.</Text>
+          </View>
+        </View>
+
+        <View style={styles.novoPrecoRow}>
+          <Text style={styles.itemLabel}>Novo preço</Text>
+          <TextInput
+            style={styles.inputNovoPreco}
+            keyboardType="numeric"
+            placeholder={item.produto.precoVenda.toFixed(2).replace('.', ',')}
+            placeholderTextColor={colors.textMuted}
+            value={novoPreco[item.produto.codigo] ?? ''}
+            onChangeText={(texto) => ajustarNovoPreco(item.produto.codigo, texto)}
+          />
+        </View>
+      </Card>
+    );
+  };
 
   return (
     <FlatList
@@ -547,28 +571,30 @@ const styles = StyleSheet.create({
   filtroChipAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
   filtroChipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
   filtroChipTextoAtivo: { color: colors.white },
+  cardCompacta: { padding: 14, marginBottom: 10 },
   itemNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
-  itemCategoria: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  badgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  itemCategoria: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
+  badgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   badgeTexto: { color: colors.white, fontSize: 11, fontWeight: '700' },
   detalhesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 12,
-    paddingTop: 10,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-  detalheItem: { width: '50%', marginBottom: 8 },
+  detalheItem: { width: '33.33%', marginBottom: 8 },
   detalheLabel: { fontSize: 11, color: colors.textSecondary },
   detalheValor: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginTop: 1 },
+  detalheValorPrevisto: { color: colors.navy },
   novoPrecoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    paddingTop: 10,
+    marginTop: 4,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },

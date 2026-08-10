@@ -17,9 +17,11 @@ import { useAuth } from '../context/AuthContext';
 import { alertar } from '../lib/alert';
 import { repository } from '../data';
 import { Card } from '../components/Card';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { formatDateBR } from '../lib/format';
 import { NOMES_MES } from '../lib/metas';
+import { cacheGet, cacheSet } from '../lib/cache';
 import { TIPO_RECEITA_LABEL } from '../data/mock/seed';
 import { VendaReceitaPendente } from '../types/domain';
 
@@ -43,13 +45,24 @@ export function ReceitasScreen() {
 
   const load = useCallback(async () => {
     if (!profile) return;
-    setItens(await repository.getVendasComReceita(profile));
+    const dados = await repository.getVendasComReceita(profile);
+    setItens(dados);
+    cacheSet(`receitas:${profile.id}`, dados);
   }, [profile]);
 
+  // Stale-while-revalidate (ver lib/cache.ts): mostra o último
+  // resultado da sessão na hora, sem spinner, e atualiza por trás.
   useEffect(() => {
-    setLoading(true);
+    if (!profile) return;
+    const cacheado = cacheGet<VendaReceitaPendente[]>(`receitas:${profile.id}`);
+    if (cacheado) {
+      setItens(cacheado);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     load().finally(() => setLoading(false));
-  }, [load]);
+  }, [load, profile]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -107,7 +120,7 @@ export function ReceitasScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }
@@ -189,70 +202,67 @@ export function ReceitasScreen() {
         </Card>
       ) : (
         itensFiltrados.map((item) => (
-          <Card key={item.itemId}>
+          <Card key={item.itemId} style={styles.cardCompacta}>
             {profile?.role === 'gestor' && (
               <View style={styles.vendedorTag}>
                 <Text style={styles.vendedorTagTexto}>{item.nomeVendedor}</Text>
               </View>
             )}
 
-            <View style={styles.headerRow}>
-              <Text style={styles.produtoNome}>{item.nomeProduto}</Text>
-              <View style={[styles.statusBadge, item.receitaAnexada ? styles.statusOk : styles.statusPendente]}>
-                <Text style={[styles.statusText, item.receitaAnexada ? styles.statusTextOk : styles.statusTextPendente]}>
-                  {item.receitaAnexada ? 'Receita anexada' : 'Receita pendente'}
+            <View style={styles.linhaPrincipal}>
+              <View style={styles.infoPrincipal}>
+                <Text style={styles.produtoNome} numberOfLines={1}>
+                  {item.nomeProduto}
                 </Text>
-              </View>
-            </View>
-
-            <Text style={styles.tipoReceita}>{TIPO_RECEITA_LABEL[item.tipoReceita]}</Text>
-
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Cliente</Text>
-              <Text style={styles.infoValor}>{item.nomeCliente}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Venda em</Text>
-              <Text style={styles.infoValor}>{formatDateBR(item.dataVenda)}</Text>
-            </View>
-
-            {item.receitaAnexada && (
-              <View style={styles.anexoBox}>
-                {item.receitaFotoUri ? (
-                  <Pressable onPress={() => setFotoAmpliada(item.receitaFotoUri)}>
-                    <Image source={{ uri: item.receitaFotoUri }} style={styles.anexoThumb} />
-                  </Pressable>
-                ) : (
-                  <Text style={styles.anexoIcone}>📄</Text>
-                )}
-                <View style={styles.anexoInfo}>
-                  <Text style={styles.anexoTexto}>
-                    Anexada em{' '}
-                    {item.receitaDataAnexo
-                      ? formatDateBR(item.receitaDataAnexo.slice(0, 10))
-                      : '—'}
+                <Text style={styles.detalheLinha} numberOfLines={1}>
+                  {TIPO_RECEITA_LABEL[item.tipoReceita]} · {item.nomeCliente}
+                </Text>
+                <View style={styles.statusRow}>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      styles.statusBadgeCompacta,
+                      item.receitaAnexada ? styles.statusOk : styles.statusPendente,
+                    ]}
+                  >
+                    <Text style={[styles.statusText, item.receitaAnexada ? styles.statusTextOk : styles.statusTextPendente]}>
+                      {item.receitaAnexada ? 'Receita anexada' : 'Receita pendente'}
+                    </Text>
+                  </View>
+                  <Text style={styles.dataLinha}>
+                    {item.receitaAnexada
+                      ? formatDateBR((item.receitaDataAnexo ?? item.dataVenda).slice(0, 10))
+                      : `venda ${formatDateBR(item.dataVenda)}`}
                   </Text>
-                  <Text style={styles.anexoTexto}>{TIPO_RECEITA_LABEL[item.tipoReceita]}</Text>
                 </View>
               </View>
-            )}
 
-            <Pressable
-              style={styles.cameraButton}
-              onPress={() => capturarFoto(item)}
-              disabled={capturandoId === item.itemId}
-            >
-              {capturandoId === item.itemId ? (
-                <ActivityIndicator color={colors.white} size="small" />
-              ) : (
-                <>
-                  <Text style={styles.cameraIcone}>📷</Text>
-                  <Text style={styles.cameraTexto}>
-                    {item.receitaAnexada ? 'Tirar nova foto' : 'Fotografar receita'}
-                  </Text>
-                </>
-              )}
-            </Pressable>
+              <View style={styles.fotoWrap}>
+                <Pressable
+                  style={[styles.fotoBotao, item.receitaFotoUri && styles.fotoBotaoComFoto]}
+                  onPress={() => (item.receitaFotoUri ? setFotoAmpliada(item.receitaFotoUri) : capturarFoto(item))}
+                  disabled={capturandoId === item.itemId}
+                >
+                  {capturandoId === item.itemId ? (
+                    <ActivityIndicator color={colors.white} size="small" />
+                  ) : item.receitaFotoUri ? (
+                    <Image source={{ uri: item.receitaFotoUri }} style={styles.fotoImagem} />
+                  ) : (
+                    <Ionicons name="camera" size={20} color={colors.white} />
+                  )}
+                </Pressable>
+                {item.receitaFotoUri && (
+                  <Pressable
+                    style={styles.fotoRetomar}
+                    onPress={() => capturarFoto(item)}
+                    disabled={capturandoId === item.itemId}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="camera" size={12} color={colors.white} />
+                  </Pressable>
+                )}
+              </View>
+            </View>
           </Card>
         ))
       )}
@@ -303,43 +313,45 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   vendedorTagTexto: { color: colors.white, fontSize: 11, fontWeight: '700' },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  produtoNome: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, flexShrink: 1, marginRight: 8 },
-  tipoReceita: { fontSize: 12, color: colors.textMuted, marginBottom: 10 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  cardCompacta: { paddingVertical: 12, paddingHorizontal: 14, marginBottom: 8 },
+  linhaPrincipal: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  infoPrincipal: { flex: 1 },
+  produtoNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
+  detalheLinha: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, alignSelf: 'flex-start' },
+  statusBadgeCompacta: { paddingHorizontal: 8, paddingVertical: 3 },
+  dataLinha: { fontSize: 11, color: colors.textMuted, flexShrink: 1 },
   statusOk: { backgroundColor: '#dcfce7' },
   statusPendente: { backgroundColor: '#fee2e2' },
   statusText: { fontSize: 11, fontWeight: '700' },
   statusTextOk: { color: colors.success },
   statusTextPendente: { color: colors.red },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  infoLabel: { fontSize: 13, color: colors.textSecondary },
-  infoValor: { fontSize: 13, color: colors.textPrimary, fontWeight: '500' },
-  anexoBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
+  fotoWrap: { position: 'relative' },
+  fotoBotao: {
+    width: 52,
+    height: 52,
     borderRadius: 10,
-    padding: 10,
-    marginTop: 10,
-    gap: 10,
-  },
-  anexoThumb: { width: 44, height: 44, borderRadius: 8 },
-  anexoIcone: { fontSize: 28, width: 44, textAlign: 'center' },
-  anexoInfo: { flexShrink: 1 },
-  anexoTexto: { fontSize: 12, color: colors.textSecondary },
-  cameraButton: {
-    flexDirection: 'row',
+    backgroundColor: colors.navy,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.navy,
-    borderRadius: 10,
-    paddingVertical: 11,
-    marginTop: 12,
-    gap: 8,
+    overflow: 'hidden',
   },
-  cameraIcone: { fontSize: 16 },
-  cameraTexto: { color: colors.white, fontWeight: '600', fontSize: 14 },
+  fotoBotaoComFoto: { backgroundColor: colors.background },
+  fotoImagem: { width: 52, height: 52 },
+  fotoRetomar: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.navy,
+    borderWidth: 2,
+    borderColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   webHint: { fontSize: 11, color: colors.textMuted, textAlign: 'center', marginBottom: 16 },
   modalFundo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', alignItems: 'center', justifyContent: 'center' },
   modalFoto: { width: '100%', height: '80%' },

@@ -588,7 +588,7 @@ create table vendas_vendedor_diario (
 create table contatos_clientes (
   id bigserial primary key,
   codigo_cliente integer not null references clientes(codigo),
-  motivo text not null check (motivo in ('resgate', 'aniversario', 'uso_continuo', 'alto_valor_sumindo', 'promocao', 'antibiotico')),
+  motivo text not null check (motivo in ('resgate', 'aniversario', 'uso_continuo', 'alto_valor_sumindo', 'promocao', 'antibiotico', 'carteira')),
   tipo_contato text not null check (tipo_contato in ('whatsapp', 'ligacao', 'nao_contatado')),
   codigo_produto integer,
   codigo_vendedor integer references vendedores(codigo),
@@ -882,7 +882,12 @@ select
   c.fone as telefone,
   cc.criado_em,
   coalesce(v6m.valor_total, 0) as valor_6_meses,
-  coalesce(vm.qtd_compras_mes, 0) > 0 as comprado_este_mes
+  coalesce(vm.qtd_compras_mes, 0) > 0 as comprado_este_mes,
+  -- Valor comprado NO MÊS CORRENTE (não confundir com valor_6_meses,
+  -- que é janela móvel de 6 meses) — card de Alertas usa isso pra
+  -- estatística "Comprado este mês" (10/08/2026). Mesma regra de soma
+  -- QUALQUER vendedor das outras colunas daqui.
+  coalesce(vm.valor_mes, 0) as valor_mes_atual
 from carteira_clientes cc
 join clientes c on c.codigo = cc.codigo_cliente
 left join lateral (
@@ -893,8 +898,9 @@ left join lateral (
     and v.data_emissao >= (current_date - interval '6 months')
 ) v6m on true
 left join lateral (
-  select count(*) as qtd_compras_mes
+  select count(distinct v.id) as qtd_compras_mes, sum(vi.valor_total_liquido) as valor_mes
   from vendas v
+  join venda_itens vi on vi.venda_id = v.id
   where v.codigo_cliente = c.codigo
     and date_trunc('month', v.data_emissao) = date_trunc('month', current_date)
 ) vm on true

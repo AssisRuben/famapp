@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
+import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { formatBRL, formatBRLSemCentavos, todayISO } from '../lib/format';
 import { badgeFaixaComissao, comissaoAproximada, diasDecorridosNaSemana, diasNoBucketSemana, semanaDoDia, valoresDaMeta } from '../lib/metas';
 import { ComissaoMensal, FaixaComissao, MetaVendedor, MetricasVendedorDiario } from '../types/domain';
@@ -61,7 +62,7 @@ export function MetaScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <LoadingFarmacia />
       </View>
     );
   }

@@ -13,7 +13,11 @@ import { ContatoCliente, MotivoContato } from '../types/domain';
 // contatado (ou marcado 'nao_contatado' pelo próprio app depois de 7
 // dias sem ação), aquela venda de antimicrobiano fica resolvida pra
 // sempre, não reaparece nunca mais. Ver existeRegistroContato abaixo.
-export const JANELA_DIAS_POR_MOTIVO: Record<Exclude<MotivoContato, 'antibiotico'>, number> = {
+// 'carteira' também fica de fora: diferente das outras listas (todas
+// derivadas de histórico de compra, onde contatar "resolve" e some da
+// lista até o critério valer de novo), a carteira é curada manualmente
+// pelo vendedor — contatar não deve nunca esconder o cliente dali.
+export const JANELA_DIAS_POR_MOTIVO: Record<Exclude<MotivoContato, 'antibiotico' | 'carteira'>, number> = {
   resgate: 30,
   uso_continuo: 30,
   alto_valor_sumindo: 30,

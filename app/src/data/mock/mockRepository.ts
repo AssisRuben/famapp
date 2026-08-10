@@ -1123,7 +1123,10 @@ class MockRepository implements DataRepository {
       campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
     );
 
-    const relatorio = calcularRelatorioPrecificacao(catalogoProdutosSeed, vendaPorProduto, codigosComDescontoAtivo);
+    // estoque_atual > 0: produto zerado não é candidato a reajuste de
+    // preço — mesmo critério da versão Supabase.
+    const catalogoComEstoque = catalogoProdutosSeed.filter((p) => p.estoqueAtual > 0);
+    const relatorio = calcularRelatorioPrecificacao(catalogoComEstoque, vendaPorProduto, codigosComDescontoAtivo);
     return delay(relatorio);
   }
 
@@ -1308,14 +1311,18 @@ class MockRepository implements DataRepository {
         // codigoVendedor.
         const comprasDoCliente = vendaItensDetalheSeed.filter((v) => v.codigoCliente === item.codigoCliente);
         let valor6Meses = 0;
+        let valorMesAtual = 0;
         let compradoEsteMes = false;
         for (const compra of comprasDoCliente) {
           const data = dataDiasAtras(compra.diasAtras);
+          const valorCompra = (produtosSeed.find((p) => p.codigo === compra.codigoProduto)?.precoAtual ?? 0) * compra.quantidade;
           if (data >= seisMesesAtrasIso) {
-            const produto = produtosSeed.find((p) => p.codigo === compra.codigoProduto);
-            valor6Meses += (produto?.precoAtual ?? 0) * compra.quantidade;
+            valor6Meses += valorCompra;
           }
-          if (data.slice(0, 7) === mesAtual) compradoEsteMes = true;
+          if (data.slice(0, 7) === mesAtual) {
+            compradoEsteMes = true;
+            valorMesAtual += valorCompra;
+          }
         }
         return {
           id: item.id,
@@ -1325,6 +1332,7 @@ class MockRepository implements DataRepository {
           telefone: telefoneCliente(item.codigoCliente),
           valor6Meses: round2(valor6Meses),
           compradoEsteMes,
+          valorMesAtual: round2(valorMesAtual),
         };
       })
     );
@@ -1335,7 +1343,7 @@ class MockRepository implements DataRepository {
     if (!termoLimpo) return delay([]);
     return delay(
       clientesSeed
-        .filter((c) => c.nome.toLowerCase().includes(termoLimpo))
+        .filter((c) => c.nome.toLowerCase().includes(termoLimpo) || String(c.codigo).includes(termoLimpo))
         .slice(0, 20)
         .map((c) => ({ codigo: c.codigo, nome: c.nome, numeroCpfCnpj: null, telefone: c.telefone }))
     );
