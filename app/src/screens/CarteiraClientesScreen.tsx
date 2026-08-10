@@ -9,6 +9,14 @@ import { formatBRL } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { ClienteBusca, ClienteCarteira, VendedorAtivo } from '../types/domain';
 
+function mensagemErro(erro: unknown): string {
+  if (erro instanceof Error && erro.message) return erro.message;
+  if (typeof erro === 'object' && erro !== null && 'message' in erro && (erro as { message?: unknown }).message) {
+    return String((erro as { message: unknown }).message);
+  }
+  return 'Tente novamente.';
+}
+
 export function CarteiraClientesScreen() {
   const { profile } = useAuth();
   const ehGestor = profile?.role === 'gestor';
@@ -38,6 +46,8 @@ export function CarteiraClientesScreen() {
     setLoading(true);
     try {
       setCarteira(await repository.getCarteiraClientes(profile, ehGestor ? vendedorSelecionado ?? undefined : undefined));
+    } catch (erro) {
+      alertar('Erro ao carregar carteira', mensagemErro(erro));
     } finally {
       setLoading(false);
     }
@@ -72,14 +82,15 @@ export function CarteiraClientesScreen() {
     setAdicionando(cliente.codigo);
     try {
       await repository.adicionarClienteCarteira(codigoVendedorAlvo, cliente.codigo);
-      setTermoBusca('');
-      setResultados([]);
-      await carregarCarteira();
     } catch (erro) {
-      alertar('Erro ao adicionar', erro instanceof Error ? erro.message : 'Tente novamente.');
-    } finally {
       setAdicionando(null);
+      alertar('Erro ao adicionar', mensagemErro(erro));
+      return;
     }
+    setTermoBusca('');
+    setResultados([]);
+    setAdicionando(null);
+    await carregarCarteira();
   };
 
   const remover = (item: ClienteCarteira) => {
@@ -89,10 +100,11 @@ export function CarteiraClientesScreen() {
       async () => {
         try {
           await repository.removerClienteCarteira(item.id);
-          await carregarCarteira();
         } catch (erro) {
-          alertar('Erro ao remover', erro instanceof Error ? erro.message : 'Tente novamente.');
+          alertar('Erro ao remover', mensagemErro(erro));
+          return;
         }
+        await carregarCarteira();
       },
       { textoConfirmar: 'Remover', destrutivo: true }
     );
@@ -123,7 +135,7 @@ export function CarteiraClientesScreen() {
           style={styles.input}
           value={termoBusca}
           onChangeText={setTermoBusca}
-          placeholder="Busca por nome ou CPF"
+          placeholder="Busca por nome, código ou CPF"
         />
         {buscando && <ActivityIndicator style={{ marginTop: 10 }} />}
         {!buscando &&
@@ -133,7 +145,10 @@ export function CarteiraClientesScreen() {
                 <Text style={styles.resultadoNome} numberOfLines={1}>
                   {cliente.nome}
                 </Text>
-                {cliente.numeroCpfCnpj ? <Text style={styles.resultadoCpf}>{cliente.numeroCpfCnpj}</Text> : null}
+                <Text style={styles.resultadoCpf}>
+                  Cód. {cliente.codigo}
+                  {cliente.numeroCpfCnpj ? ` · ${cliente.numeroCpfCnpj}` : ''}
+                </Text>
               </View>
               <Pressable
                 style={styles.botaoAdicionar}
@@ -168,8 +183,10 @@ export function CarteiraClientesScreen() {
                 <Text style={styles.itemNome} numberOfLines={1}>
                   {item.nome}
                 </Text>
+                <Text style={styles.itemCodigo}>Cód. {item.codigoCliente}</Text>
                 <Text style={styles.itemDetalhe}>
-                  {formatBRL(item.valor6Meses)} (últ. 6 meses){item.compradoEsteMes ? ' · comprou este mês ✅' : ''}
+                  {formatBRL(item.valor6Meses)} (últ. 6 meses)
+                  {item.compradoEsteMes ? ` · ${formatBRL(item.valorMesAtual)} este mês ✅` : ''}
                 </Text>
               </View>
               <Pressable onPress={() => remover(item)} hitSlop={8}>
@@ -234,5 +251,6 @@ const styles = StyleSheet.create({
   itemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   itemInfo: { flex: 1 },
   itemNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+  itemCodigo: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
   itemDetalhe: { fontSize: 12, color: colors.textSecondary, marginTop: 3 },
 });

@@ -94,7 +94,7 @@ function AppTabs() {
     { label: ehGestor ? 'Check list' : 'Meta', emoji: ehGestor ? '✅' : '🎯', onPress: () => irPara('Meta') },
     { label: 'Produto em falta', emoji: '📦', onPress: () => irPara('ProdutoEmFalta') },
     { label: 'Pendências', emoji: '🗒️', onPress: () => irPara('Pendencias') },
-    { label: 'Carteira de clientes', emoji: '👥', onPress: () => irPara('CarteiraClientes') },
+    { label: 'Carteira de clientes', emoji: '💼', onPress: () => irPara('CarteiraClientes') },
     ...(ehGestor
       ? [
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
@@ -218,7 +218,7 @@ function AppTabs() {
           component={CarteiraClientesScreen}
           options={{
             title: 'Carteira de clientes',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="👥" focused={focused} />,
+            tabBarIcon: ({ focused }) => <TabIcon emoji="💼" focused={focused} />,
             ...abaOculta(true),
           }}
         />
