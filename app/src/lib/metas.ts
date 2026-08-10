@@ -46,10 +46,38 @@ export function mesAnoLabel(ano: number, mes: number): string {
   return `${NOMES_MES[mes - 1]} de ${ano}`;
 }
 
-// Meta do dia não é cadastrada — é sempre a meta mensal dividida pela
-// quantidade de dias do mês (28/29 em fevereiro, 30 ou 31 nos demais).
-export function metaDiaria(valorMetaMensal: number, ano: number, mes: number): number {
-  return valorMetaMensal / diasNoMes(ano, mes);
+// [10/08/2026] Percentual fixo de cada bucket de semana sobre a meta
+// mensal, dado direto pelo usuário — substitui a tentativa anterior de
+// derivar isso proporcionalmente aos dias de cada bucket. Soma ~100%
+// (0,255+0,226+0,226+0,292), mas NÃO é dividido por 4 igual nem por
+// dias corridos — semana 4 pesa mais (bucket maior), semanas 2 e 3
+// pesam igual entre si.
+export const PESOS_SEMANA: [number, number, number, number] = [0.255, 0.226, 0.226, 0.292];
+
+// [10/08/2026] Divisor pra converter meta da SEMANA em meta do DIA —
+// dias de trabalho por semana, diferente por vendedor a pedido do
+// usuário. codigoVendedor 27 = Rafaela Braga de Freitas (confirmado
+// nos dados reais da análise de perfil de vendedores, 08/2026).
+const CODIGO_VENDEDOR_RAFAELA = 27;
+const DIAS_TRABALHO_SEMANA_RAFAELA = 6;
+const DIAS_TRABALHO_SEMANA_PADRAO = 6.5;
+
+export function diasTrabalhoSemana(codigoVendedor: number | null): number {
+  return codigoVendedor === CODIGO_VENDEDOR_RAFAELA ? DIAS_TRABALHO_SEMANA_RAFAELA : DIAS_TRABALHO_SEMANA_PADRAO;
+}
+
+// Meta do dia não é cadastrada — deriva da meta DA SEMANA em que "hoje"
+// cai (bucket de semanaDoDia), dividida pelos dias de trabalho daquele
+// vendedor (ver diasTrabalhoSemana) — não mais mensal ÷ dias do mês.
+// Harmoniza os 3 níveis: bater a diária todo dia de trabalho da semana
+// fecha exatamente a meta semanal, que por sua vez já soma exatamente a
+// mensal (ver PESOS_SEMANA). Usa a meta semanal JÁ SALVA (meta.semanas),
+// não recalcula com PESOS_SEMANA de novo — respeita ajuste manual do
+// gestor se ele tiver editado a semana individualmente.
+export function metaDiaria(meta: MetaVendedor, hoje: Date = new Date()): number {
+  const semana = semanaDoDia(hoje.getDate());
+  const metaSemana = meta.semanas.find((s) => s.semana === semana)?.valorMeta ?? 0;
+  return metaSemana / diasTrabalhoSemana(meta.codigoVendedor);
 }
 
 // Dias decorridos dentro de um bucket de semana (ver semanaDoDia) até
@@ -99,7 +127,7 @@ export function valoresDaMeta(
   if (periodo === 'dia') {
     return {
       label: 'Meta de margem do dia',
-      valorMeta: metaDiaria(meta.valorMetaMensal, meta.ano, meta.mes),
+      valorMeta: metaDiaria(meta),
       valorRealizado: realizadoHoje,
     };
   }

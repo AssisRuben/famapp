@@ -710,14 +710,20 @@ export interface ParametrosCompra {
   diasSeguranca: number;
   diasCobertura: number;
   // Janela de venda usada pra calcular a demanda média diária (padrão
-  // 30 — mesmo recorte histórico de Campanhas/Precificação). No mock,
-  // o total vendido (quantidadeVendida30d) continua fixo em 30 dias —
-  // só o divisor muda, então é uma aproximação; no real, viria de uma
-  // agregação configurável sobre venda_itens.
+  // 30 — mesmo recorte histórico de Campanhas/Precificação, que
+  // continuam fixas em 30 dias). [10/08/2026] Implementado de verdade
+  // no real via fn_venda_periodo_produto(dias) — antes só mudava o
+  // divisor da média mantendo o total sempre de 30 dias, dando
+  // demanda/quantidade sugerida erradas pra qualquer valor diferente
+  // de 30. No mock continua sendo uma aproximação (quantidadeVendida30d
+  // fixo, só o divisor muda) — sem dado transacional pra agregar por
+  // período no seed.
   diasBaseVenda: number;
-  // Filtra por produto_catalogo.grupo (categoria de produto de fato,
-  // ex. "ETICO", "PERFUMARIA") — não por categoria (tipo de uso).
-  grupo?: string;
+  // [10/08/2026] Filtra por MACRO-grupo (valores de MacroGrupo em
+  // lib/macroGrupo.ts — "genericos", "similares" etc.), não pelo grupo
+  // bruto do catálogo — dá pra marcar mais de um (ex.: só genérico, ou
+  // genérico + similar). Vazio/undefined = todos os grupos.
+  macroGrupos?: string[];
 }
 
 // ============================================================

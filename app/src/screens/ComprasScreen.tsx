@@ -11,17 +11,30 @@ import { formatBRL, todayISO } from '../lib/format';
 import { gerarCsvSugestaoCompras } from '../lib/comprasCsv';
 import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
 import { alertar } from '../lib/alert';
+import { ORDEM_MACRO_GRUPOS, MACRO_GRUPO_LABEL, MacroGrupo } from '../lib/macroGrupo';
 import { SugestaoCompra } from '../types/domain';
+
+// "outros_administrativo" nunca aparece na sugestão (doseCerta.ts já
+// filtra fora, é serviço/ajuste de sistema, não produto pra repor) —
+// não faz sentido oferecer como opção de filtro aqui.
+const GRUPOS_SELECIONAVEIS = ORDEM_MACRO_GRUPOS.filter((g) => g !== 'outros_administrativo');
 
 export function ComprasScreen() {
   const { profile } = useAuth();
   const [diasSeguranca, setDiasSeguranca] = useState('7');
   const [diasCobertura, setDiasCobertura] = useState('15');
   const [diasBaseVenda, setDiasBaseVenda] = useState('30');
+  const [macroGruposSelecionados, setMacroGruposSelecionados] = useState<MacroGrupo[]>([]);
   const [itens, setItens] = useState<SugestaoCompra[] | null>(null);
   const [expandido, setExpandido] = useState<number | null>(null);
   const [gerando, setGerando] = useState(false);
   const [exportando, setExportando] = useState(false);
+
+  // Toque pra marcar, toque de novo pra tirar — dá pra marcar mais de
+  // um (mesma dinâmica do filtro de vendedor no Checklist).
+  const alternarMacroGrupo = (grupo: MacroGrupo) => {
+    setMacroGruposSelecionados((atual) => (atual.includes(grupo) ? atual.filter((g) => g !== grupo) : [...atual, grupo]));
+  };
 
   const gerar = async () => {
     if (!profile) return;
@@ -31,6 +44,7 @@ export function ComprasScreen() {
         diasSeguranca: Math.max(0, Number(diasSeguranca.replace(/\D/g, '')) || 0),
         diasCobertura: Math.max(0, Number(diasCobertura.replace(/\D/g, '')) || 0),
         diasBaseVenda: Math.max(1, Number(diasBaseVenda.replace(/\D/g, '')) || 30),
+        macroGrupos: macroGruposSelecionados,
       };
       const sugestoes = await repository.gerarSugestaoCompras(profile, params);
       setItens(sugestoes);
@@ -120,6 +134,30 @@ export function ComprasScreen() {
           <Text style={styles.explicacaoDestaque}>Base de vendas: </Text>
           janela de dias usada pra calcular a demanda média diária de cada produto (padrão 30).
         </Text>
+
+        <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Grupos</Text>
+        <Text style={styles.grupoHint}>
+          Toque pra selecionar, toque de novo pra tirar — dá pra marcar mais de um. Nenhum selecionado = todos.
+        </Text>
+        <View style={styles.grupoGrid}>
+          <Pressable
+            style={[styles.chip, macroGruposSelecionados.length === 0 && styles.chipAtivo]}
+            onPress={() => setMacroGruposSelecionados([])}
+          >
+            <Text style={[styles.chipTexto, macroGruposSelecionados.length === 0 && styles.chipTextoAtivo]}>Todos</Text>
+          </Pressable>
+          {GRUPOS_SELECIONAVEIS.map((grupo) => (
+            <Pressable
+              key={grupo}
+              style={[styles.chip, macroGruposSelecionados.includes(grupo) && styles.chipAtivo]}
+              onPress={() => alternarMacroGrupo(grupo)}
+            >
+              <Text style={[styles.chipTexto, macroGruposSelecionados.includes(grupo) && styles.chipTextoAtivo]}>
+                {MACRO_GRUPO_LABEL[grupo]}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
 
         <Text style={styles.aviso}>
           A compra sugerida repõe até {Number(diasSeguranca || '0') + Number(diasCobertura || '0')} dias de estoque, com base
@@ -277,6 +315,20 @@ const styles = StyleSheet.create({
   },
   campoLabel: { fontSize: 11, color: colors.textSecondary, marginBottom: 4, marginTop: 8 },
   campoSomenteLeitura: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
+  grupoLabelEspacado: { marginTop: 14 },
+  grupoHint: { fontSize: 11, color: colors.textMuted, marginBottom: 8, lineHeight: 15 },
+  grupoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
+  chipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+  chipTextoAtivo: { color: colors.white },
   input: {
     backgroundColor: colors.background,
     borderRadius: 8,

@@ -535,11 +535,16 @@ export function AlertasScreen() {
   // Trier, a entrada mal cadastrada é a que aparece na venda). Dedupe
   // por (cliente, produto) — se comprou o mesmo antibiótico 2x na
   // janela, mantém só a venda mais recente pra contagem de dias.
-  // telefone vem de `clientes` (mesma fonte vendedor-escopada usada
-  // por aniversário/alto-valor-sumindo nesta tela); sem telefone, a
-  // linha ainda aparece, só sem os botões de contato.
+  // [10/08/2026] telefone vem de `clientesValorGeral` (QUALQUER
+  // vendedor, ver getClientesValorGeral), não de `clientes` — esse é
+  // escopado só pro vendedor logado (vw_clientes_por_vendedor), mas a
+  // lista de antibiótico mostra venda de QUALQUER vendedor da equipe.
+  // Usar `clientes` fazia o telefone sumir sempre que o antibiótico foi
+  // vendido por outro vendedor (cliente não constava no mapa, mesmo
+  // tendo telefone cadastrado) — mesmo bug já corrigido antes pro card
+  // "Cliente de alto valor sumindo" (ver getClientesValorGeral).
   const antibioticosPorCliente = useMemo(() => {
-    const clientesPorCodigo = new Map(clientes.map((c) => [c.codigo, c]));
+    const clientesPorCodigo = new Map(clientesValorGeral.map((c) => [c.codigo, c]));
     const porChave = new Map<
       string,
       { codigoCliente: number; codigoProduto: number; nomeCliente: string; nomeProduto: string; telefone: string | null; dias: number }
@@ -562,7 +567,7 @@ export function AlertasScreen() {
     }
     return Array.from(porChave.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [antimicrobianos, clientes]);
+  }, [antimicrobianos, clientesValorGeral]);
 
   const antibioticosRecentes = useMemo(
     () =>

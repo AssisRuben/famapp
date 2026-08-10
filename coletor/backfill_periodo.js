@@ -470,11 +470,19 @@ async function sincronizarVendas(client) {
     // produção: 28.643 itens duplicados, 30,5% da tabela — ver
     // migracao_coletor.sql item 5). Em vez disso: apaga todos os itens
     // da venda antes de reinserir os itens atuais — imune à ordem.
+    // [10/08/2026] NÃO deduplicar itens dentro da mesma nota — item
+    // "repetido" (mesmo produto/valor 2x numa nota) pode ser venda real
+    // (operador bipou 2x em vez de usar quantidade 2), não bug de sync.
+    // Confirmado direto na tela da Trier pra nota 749414 (produto 3730,
+    // Rafaela): as 2 linhas existem DE VERDADE no sistema deles, Total
+    // da Nota = soma das duas. Uma tentativa anterior de deduplicar
+    // aqui foi revertida por isso.
     const linhasItens = [];
     for (const v of lote) {
       const vendaId = idPorChave.get(chaveVenda(v.numeroNota, v.codFilial, v.serNotaFiscal));
       if (!vendaId) continue; // não deveria acontecer — venda não retornou id
       totalVendas += 1;
+
       (v.itens || []).forEach((item, indice) => {
         const vendaComDescontoBool = item.vendaComDesconto != null && item.vendaComDesconto !== item.valorTotalLiquido;
         linhasItens.push([

@@ -173,8 +173,8 @@ function visivelParaPerfil<T extends { codigoVendedor: number }>(profile: Profil
 // sem variação por data, o Dashboard mostrava o mesmo faturamento
 // (e, por tabela, o mesmo "realizado" na meta do dia) não importa qual
 // dataEmissao fosse pedida, dando a impressão de que a meta diária
-// nunca muda. A meta (alvo) em si é igual em todo dia do mês por
-// design (valorMetaMensal ÷ dias do mês — ver metaDiaria() em
+// nunca muda. A meta (alvo) em si varia por bucket de semana + vendedor
+// por design (meta da semana ÷ dias de trabalho — ver metaDiaria() em
 // lib/metas.ts, isso está correto); o que faltava era o REALIZADO
 // reagir à data. Aplica uma variação determinística pelo dia do mês
 // (mesmo dia = mesmo valor sempre, dia diferente = valor diferente) —

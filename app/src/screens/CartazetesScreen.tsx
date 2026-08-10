@@ -11,7 +11,7 @@ import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, formatDateCurtoBR, formatDecimalBR, parseDateBR, parseDecimalBR } from '../lib/format';
 import { agruparParaCartazetes } from '../lib/cartazetes';
-import { gerarHtmlCartazes } from '../lib/cartazHtml';
+import { CartazesPorPagina, gerarHtmlCartazes } from '../lib/cartazHtml';
 import { gerarTxtTrier } from '../lib/trierTxt';
 import { imprimirHtmlNoWeb } from '../lib/printWeb';
 import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
@@ -37,6 +37,7 @@ export function CartazetesScreen() {
   const [expandido, setExpandido] = useState<number | null>(null);
   const [buffers, setBuffers] = useState<Record<string, Partial<Record<CampoEditavel, string>>>>({});
   const [processando, setProcessando] = useState<'pdf' | 'txt' | null>(null);
+  const [cartazesPorPagina, setCartazesPorPagina] = useState<CartazesPorPagina>(1);
 
   const carregar = useCallback(async () => {
     if (!profile) return;
@@ -175,7 +176,7 @@ export function CartazetesScreen() {
     if (!campanhaSelecionada || grupos.length === 0) return;
     setProcessando('pdf');
     try {
-      const html = gerarHtmlCartazes(grupos);
+      const html = gerarHtmlCartazes(grupos, cartazesPorPagina);
       if (Platform.OS === 'web') {
         imprimirHtmlNoWeb(html);
       } else {
@@ -366,6 +367,23 @@ export function CartazetesScreen() {
           </View>
         ))}
 
+        <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Cartazes por página</Text>
+        <Text style={styles.grupoHint}>
+          1 = cartaz grande (A5), um por página. Mais por página = cartaz menor numa folha A4, útil pra imprimir bastante
+          produto de uma vez.
+        </Text>
+        <View style={styles.grupoGrid}>
+          {([1, 2, 4, 6, 8, 10] as const).map((opcao) => (
+            <Pressable
+              key={opcao}
+              style={[styles.chip, cartazesPorPagina === opcao && styles.chipAtivo]}
+              onPress={() => setCartazesPorPagina(opcao)}
+            >
+              <Text style={[styles.chipTexto, cartazesPorPagina === opcao && styles.chipTextoAtivo]}>{opcao}</Text>
+            </Pressable>
+          ))}
+        </View>
+
         <Pressable style={styles.botaoPrimario} onPress={imprimir} disabled={processando !== null}>
           {processando === 'pdf' ? (
             <ActivityIndicator color={colors.white} />
@@ -431,6 +449,20 @@ const styles = StyleSheet.create({
   },
   campoLabel: { fontSize: 11, color: colors.textSecondary, marginBottom: 4, marginTop: 8 },
   campoSomenteLeitura: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
+  grupoLabelEspacado: { marginTop: 14 },
+  grupoHint: { fontSize: 11, color: colors.textMuted, marginBottom: 8, lineHeight: 15 },
+  grupoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
+  chipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
+  chipTextoAtivo: { color: colors.white },
   input: {
     backgroundColor: colors.background,
     borderRadius: 8,

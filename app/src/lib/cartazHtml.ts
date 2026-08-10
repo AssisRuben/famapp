@@ -78,21 +78,103 @@ function cartazHtml(grupo: GrupoCartazete): string {
     </div>`;
 }
 
-// Gera o HTML completo (1 página por cartaz, repetido conforme a
-// quantidade configurada em cada grupo) pronto pra passar pro
-// expo-print. Cada grupo já veio agrupado por variante — ver
-// src/lib/cartazetes.ts.
-export function gerarHtmlCartazes(grupos: GrupoCartazete[]): string {
-  const paginas = grupos
-    .flatMap((grupo) => Array.from({ length: Math.max(grupo.quantidadeCartazes, 1) }, () => cartazHtml(grupo)))
-    .join('\n');
+// Área útil de um cartaz "tamanho grande" (o design original, pensado
+// pra A5 com 10mm de margem) — base fixa em mm usada pra calcular o
+// fator de escala quando mais de 1 cartaz entra na mesma página A4.
+const CARTAZ_LARGURA_MM = 128;
+const CARTAZ_ALTURA_MM = 190;
+const A4_MARGEM_MM = 10;
+const A4_LARGURA_UTIL_MM = 210 - A4_MARGEM_MM * 2;
+const A4_ALTURA_UTIL_MM = 297 - A4_MARGEM_MM * 2;
+
+// Preset de colunas/linhas por densidade — cobre o caso comum de
+// varejo (1 = cartaz grande, poucos produtos; 10 = muitos produtos,
+// cartaz pequeno). Densidade não listada cai pro preset mais próximo.
+//
+// O cartaz é bem retrato (128x190mm, quase o mesmo formato da própria
+// folha A4 útil). Por isso grades "quadradas" (colunas ≈ linhas)
+// aproveitam MUITO melhor o espaço que grades alongadas — ex.: pra 8,
+// uma grade 2x4 deixava metade de cada célula vazia (o cartaz "sobra"
+// largura, mas fica pequeno na altura); uma 3x3 (com 1 célula vazia)
+// rende um cartaz ~33% maior. Por isso alguns presets abaixo têm mais
+// células do que a densidade pedida — o excedente fica em branco.
+const PRESET_GRADE: Record<number, { colunas: number; linhas: number }> = {
+  1: { colunas: 1, linhas: 1 },
+  2: { colunas: 2, linhas: 1 },
+  4: { colunas: 2, linhas: 2 },
+  6: { colunas: 3, linhas: 2 },
+  8: { colunas: 3, linhas: 3 }, // 1 célula sobra vazia
+  10: { colunas: 4, linhas: 3 }, // 2 células sobram vazias
+};
+
+export type CartazesPorPagina = 1 | 2 | 4 | 6 | 8 | 10;
+
+// Gera o HTML completo pronto pra passar pro expo-print. Cada grupo já
+// veio agrupado por variante — ver src/lib/cartazetes.ts.
+// cartazesPorPagina=1 mantém o layout original (A5, 1 cartaz por
+// página, tamanho grande); valores maiores mudam pra A4 com uma grade
+// e escalam o cartaz proporcionalmente (transform: scale) pra caber —
+// mais cartazes por página = cartaz menor, útil quando tem muito
+// produto pra imprimir e não precisa do tamanho grande.
+export function gerarHtmlCartazes(grupos: GrupoCartazete[], cartazesPorPagina: CartazesPorPagina = 1): string {
+  const cartazesHtml = grupos.flatMap((grupo) =>
+    Array.from({ length: Math.max(grupo.quantidadeCartazes, 1) }, () => cartazHtml(grupo))
+  );
+
+  const corpoHtml =
+    cartazesPorPagina === 1
+      ? cartazesHtml.map((html) => `<div class="cartaz-pagina-unica">${html}</div>`).join('\n')
+      : gerarPaginasMultiplas(cartazesHtml, cartazesPorPagina);
+
+  // fator de escala pra caber cartazesPorPagina cartazes (tamanho
+  // original 128x190mm) numa grade A4 sem estourar a página.
+  const { colunas, linhas } = PRESET_GRADE[cartazesPorPagina] ?? PRESET_GRADE[1];
+  const celulaLarguraMm = A4_LARGURA_UTIL_MM / colunas;
+  const celulaAlturaMm = A4_ALTURA_UTIL_MM / linhas;
+  const escala = Math.min(celulaLarguraMm / CARTAZ_LARGURA_MM, celulaAlturaMm / CARTAZ_ALTURA_MM);
+
+  const paginaCss =
+    cartazesPorPagina === 1
+      ? `@page { size: A5 portrait; margin: 10mm; }
+  .cartaz-pagina-unica { width: 100%; page-break-after: always; }`
+      : `@page { size: A4 portrait; margin: ${A4_MARGEM_MM}mm; }
+  .pagina-grade {
+    display: grid;
+    grid-template-columns: repeat(${colunas}, 1fr);
+    grid-template-rows: repeat(${linhas}, 1fr);
+    width: 100%;
+    height: ${A4_ALTURA_UTIL_MM}mm;
+    page-break-after: always;
+  }
+  .celula-grade { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  /*
+    transform: scale() só encolhe a PINTURA — a caixa continua ocupando
+    o tamanho original (128x190mm) pro cálculo de layout/overflow do
+    grid. Sem isso, com 6/pág. só 4 cabiam antes de "estourar" a
+    página e empurrar o resto pra folhas extras. Por isso o shell tem
+    o tamanho JÁ reduzido (é o que reserva espaço na grade) e quem
+    escala é o filho .cartaz-scaler, com o cartaz original por dentro.
+  */
+  .cartaz-shell {
+    width: ${(CARTAZ_LARGURA_MM * escala).toFixed(2)}mm;
+    height: ${(CARTAZ_ALTURA_MM * escala).toFixed(2)}mm;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .cartaz-scaler {
+    width: ${CARTAZ_LARGURA_MM}mm;
+    height: ${CARTAZ_ALTURA_MM}mm;
+    transform: scale(${escala.toFixed(4)});
+    transform-origin: top left;
+  }
+  .cartaz-scaler .cartaz { height: 100%; }`;
 
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
 <style>
-  @page { size: A5; margin: 10mm; }
+  ${paginaCss}
   * {
     box-sizing: border-box;
     /* sem isso, o navegador some com as cores de fundo ao imprimir
@@ -108,7 +190,6 @@ export function gerarHtmlCartazes(grupos: GrupoCartazete[]): string {
     border: 1px solid #e5e7eb;
     border-radius: 14px;
     overflow: hidden;
-    page-break-after: always;
   }
   .faixa-oferta { background: #FFE600; text-align: center; padding: 18px 0; }
   .oferta-texto {
@@ -143,7 +224,23 @@ export function gerarHtmlCartazes(grupos: GrupoCartazete[]): string {
 </style>
 </head>
 <body>
-${paginas}
+${corpoHtml}
 </body>
 </html>`;
+}
+
+// Agrupa os cartazes em páginas de N (o preset de colunas/linhas de
+// PRESET_GRADE). O tamanho reduzido de cada cartaz vem das classes
+// .cartaz-shell/.cartaz-scaler (definidas em gerarHtmlCartazes, que já
+// calcula a escala) — aqui só monta a marcação.
+function gerarPaginasMultiplas(cartazesHtml: string[], cartazesPorPagina: CartazesPorPagina): string {
+  const paginas: string[] = [];
+  for (let inicio = 0; inicio < cartazesHtml.length; inicio += cartazesPorPagina) {
+    const doLote = cartazesHtml.slice(inicio, inicio + cartazesPorPagina);
+    const celulas = doLote
+      .map((html) => `<div class="celula-grade"><div class="cartaz-shell"><div class="cartaz-scaler">${html}</div></div></div>`)
+      .join('\n');
+    paginas.push(`<div class="pagina-grade">${celulas}</div>`);
+  }
+  return paginas.join('\n');
 }

@@ -1444,12 +1444,23 @@ class SupabaseRepository implements DataRepository {
   }
 
   async gerarSugestaoCompras(_profile: Profile, params: ParametrosCompra): Promise<SugestaoCompra[]> {
+    // Demanda vem de fn_venda_periodo_produto(dias), parametrizada pelo
+    // "Base de vendas p/ cálculo" da tela — diferente de
+    // vw_venda_recente_produto (janela FIXA de 30 dias, usada pelas
+    // outras telas). Sem isso, digitar qualquer valor diferente de 30
+    // nesse campo só mudava o divisor da média diária, não os dias de
+    // venda considerados — dava demanda/quantidade sugerida erradas
+    // (achado 10/08/2026).
+    const diasBase = Math.max(1, Math.round(params.diasBaseVenda));
     const [catalogoLinhas, vendaLinhas, fornecedorLinhas, fornecedorMaisBaratoLinhas] = await Promise.all([
       this.buscarPaginado((inicio, fim) =>
         this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
       ),
       this.buscarPaginado((inicio, fim) =>
-        supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
+        supabase
+          .rpc('fn_venda_periodo_produto', { dias: diasBase })
+          .order('codigo_produto', { ascending: true })
+          .range(inicio, fim)
       ),
       this.buscarPaginado((inicio, fim) =>
         supabase.from('vw_produto_fornecedor_recente').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
@@ -1465,7 +1476,7 @@ class SupabaseRepository implements DataRepository {
 
     const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
     const demandaPorProduto = new Map(
-      vendaLinhas.map((r: any) => [r.codigo_produto, { quantidadeVendidaPeriodo: Number(r.quantidade_vendida_30d) }])
+      vendaLinhas.map((r: any) => [r.codigo_produto, { quantidadeVendidaPeriodo: Number(r.quantidade_vendida) }])
     );
     const fornecedorPorProduto = new Map(
       fornecedorLinhas.map((r: any) => [

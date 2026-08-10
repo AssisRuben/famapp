@@ -40,7 +40,14 @@ export function calcularSugestaoCompras(
     // Precificação). Fora daqui igual "taxa de entrega" já é em
     // supabaseRepository.ts.
     .filter((produto) => macroGrupoDoProduto(produto.grupo) !== 'outros_administrativo')
-    .filter((produto) => !params.grupo || produto.grupo === params.grupo)
+    // [10/08/2026] Filtro por MACRO-grupo, multi-seleção (ex.: só
+    // genérico, ou genérico + similar) — vazio/undefined = todos.
+    .filter(
+      (produto) =>
+        !params.macroGrupos ||
+        params.macroGrupos.length === 0 ||
+        params.macroGrupos.includes(macroGrupoDoProduto(produto.grupo) ?? '')
+    )
     .map((produto) => {
       const demanda = demandaPorProduto.get(produto.codigo);
       const demandaMediaDiaria = demanda ? demanda.quantidadeVendidaPeriodo / Math.max(1, params.diasBaseVenda) : 0;

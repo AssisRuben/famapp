@@ -946,11 +946,12 @@ where v.codigo_cliente is not null;
 --   recorrente: comprou o mesmo produto 2+ vezes com esse vendedor.
 --   intervalo_medio_dias: média de dias entre as compras (só faz
 --     sentido quando recorrente).
---   atrasado: já passou 30% a mais do intervalo médio desde a última
---     compra — heurística de "já devia ter voltado a comprar" (ex.:
---     compra a cada 30 dias, se passar de 39 sem comprar de novo,
+--   atrasado: já passou o intervalo médio + 25 dias de folga fixa desde
+--     a última compra — heurística de "já devia ter voltado a comprar"
+--     (ex.: compra a cada 30 dias, se passar de 55 sem comprar de novo,
 --     entra aqui). Sinal mais forte pra lista de resgate do que só
---     "comprou uma vez uma categoria".
+--     "comprou uma vez uma categoria". [10/08/2026] Era intervalo médio
+--     × 1.3 (30% de tolerância) — trocado por folga fixa de 25 dias.
 create view vw_clientes_produtos_vendedor as
 with compras as (
   select
@@ -1007,7 +1008,7 @@ select
   (
     qtd_compras >= 2
     and intervalo_medio_dias is not null
-    and (current_date - ultima_compra) > intervalo_medio_dias * 1.3
+    and (current_date - ultima_compra) > intervalo_medio_dias + 25
   ) as atrasado
 from agregado;
 
@@ -1060,7 +1061,7 @@ select
   (
     qtd_compras >= 2
     and intervalo_medio_dias is not null
-    and (current_date - ultima_compra) > intervalo_medio_dias * 1.3
+    and (current_date - ultima_compra) > intervalo_medio_dias + 25
   ) as atrasado
 from agregado;
 
@@ -1134,6 +1135,27 @@ select
 from venda_itens vi
 join vendas v on v.id = vi.venda_id
 group by vi.codigo_produto;
+
+-- [10/08/2026] Mesma ideia de vw_venda_recente_produto, mas com janela
+-- PARAMETRIZADA — usada só pela geração de sugestão de compras
+-- (gerarSugestaoCompras), cujo campo "Base de vendas p/ cálculo (dias)"
+-- antes só mudava o divisor da média diária mantendo o total sempre
+-- de 30 dias (vw_venda_recente_produto), dando demanda/quantidade
+-- sugerida erradas pra qualquer valor diferente de 30. Campanhas e
+-- Precificação continuam na view fixa, sem mudança.
+create or replace function fn_venda_periodo_produto(dias integer)
+returns table (codigo_produto integer, quantidade_vendida numeric)
+language sql
+stable
+as $$
+  select
+    vi.codigo_produto,
+    sum(vi.quantidade_produtos) as quantidade_vendida
+  from venda_itens vi
+  join vendas v on v.id = vi.venda_id
+  where v.data_emissao >= current_date - make_interval(days => dias)
+  group by vi.codigo_produto;
+$$;
 
 -- vw_clientes_inatividade fica definida em rls_policies.sql, não aqui
 -- — ela depende da tabela `profiles` (criada lá) pro próprio controle

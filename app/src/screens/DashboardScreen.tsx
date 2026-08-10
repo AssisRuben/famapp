@@ -152,9 +152,10 @@ export function DashboardScreen() {
     return semana.valorRealizado * (taxa / 100);
   });
   // Dia: aproximação — não existe faixa "oficial" de dia na regra real,
-  // usa a meta diária (mensal / dias do mês) contra o realizado de hoje.
+  // usa a meta diária (derivada da semana, ver metaDiaria) contra o
+  // realizado de hoje.
   const comissaoDiaTotal = sum(metas, (m) => {
-    const metaHoje = metaDiaria(m.valorMetaMensal, m.ano, m.mes);
+    const metaHoje = metaDiaria(m);
     const realizadoHoje = realizadoHojePorVendedor.get(m.codigoVendedor) ?? 0;
     if (metaHoje <= 0) return 0;
     const percentual = (realizadoHoje / metaHoje) * 100;

@@ -7,7 +7,7 @@ import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { colors } from '../theme/colors';
 import { formatBRL } from '../lib/format';
-import { badgeFaixaComissao, mesAnoLabel, rotuloSemana } from '../lib/metas';
+import { badgeFaixaComissao, mesAnoLabel, PESOS_SEMANA, rotuloSemana } from '../lib/metas';
 import { alertar } from '../lib/alert';
 import { ComissaoMensal, MetaVendedor, VendedorAtivo } from '../types/domain';
 
@@ -153,10 +153,12 @@ export function MetasScreen() {
   };
 
   // Lançamento rápido: só a meta mensal por vendedor, sem detalhar
-  // semana a semana — divide em 4 partes iguais (o formulário de cima
-  // continua disponível pra quem precisar ajustar cada semana à mão).
-  // Vendedor com campo em branco é pulado (não zera meta de quem não
-  // for atualizado nesse lançamento).
+  // semana a semana — sugere as 4 semanas com os pesos fixos de
+  // PESOS_SEMANA (25,5% / 22,6% / 22,6% / 29,2%, dados pelo usuário),
+  // não mais 4 partes iguais nem proporcional aos dias corridos de cada
+  // bucket. O formulário de cima continua disponível pra quem precisar
+  // ajustar cada semana à mão. Vendedor com campo em branco é pulado
+  // (não zera meta de quem não for atualizado nesse lançamento).
   const salvarLote = async () => {
     const entradas = Object.entries(valoresLote).filter(([, texto]) => texto.trim() !== '');
     if (entradas.length === 0) {
@@ -174,13 +176,18 @@ export function MetasScreen() {
     try {
       for (const [codigo, texto] of entradas) {
         const mensal = Number(texto.replace(',', '.'));
-        const semana = Math.round((mensal / 4) * 100) / 100;
+        const semanas = PESOS_SEMANA.map((peso) => Math.round(mensal * peso * 100) / 100) as [
+          number,
+          number,
+          number,
+          number,
+        ];
         await repository.salvarMeta({
           codigoVendedor: Number(codigo),
           ano: anoLote,
           mes: mesLote,
           valorMetaMensal: mensal,
-          valoresMetaSemanal: [semana, semana, semana, semana],
+          valoresMetaSemanal: semanas,
         });
       }
       await carregarLote();
