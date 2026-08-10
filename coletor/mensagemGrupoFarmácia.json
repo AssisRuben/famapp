@@ -1,0 +1,289 @@
+{
+  "name": "mensagemGrupoFarmácia",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Faça um texto engajador com o tema abaixo:\nUse informações científicas relevantes. Fale de medicamentos que podem auxiliar.\nEssa mensagem será enviada para um grupo de WhatsApp de clientes.\n{{ $json.engajamento }}\n\n\n{{ $json.mensagem }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -96,
+        -48
+      ],
+      "id": "67232005-12c1-45d1-b20f-d376d7de308e",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -144,
+        192
+      ],
+      "id": "5655d8d8-3ffb-4f68-89db-bc8b3cac1756",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "kmMGxTfDic8jahYF",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -704,
+        -48
+      ],
+      "id": "d1a888f3-4a77-4d1e-9136-cb2ab41cc1c5",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "Assis Rubens",
+        "remoteJid": "558588503418@s.whatsapp.net",
+        "messageText": "={{ $json.output[0].content[0].text }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        752,
+        -48
+      ],
+      "id": "b0f7db61-6706-4fc0-b010-df71e439a55e",
+      "name": "Enviar texto",
+      "credentials": {
+        "evolutionApi": {
+          "id": "4KHj6VZl0o9j7a3Y",
+          "name": "Evolution Assis"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "=chat-agendado-diario",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        16,
+        208
+      ],
+      "id": "5d2dde59-5980-42a9-a92e-6ddc44d65bce",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-5-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-5-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=Prepare a mensagem da melhor forma para WhatsApp da Farmácia Conviva Realce:\n{{ $json.output }}\n\nUse tópicos e emojis.\n\nDeixe bem bonita e use gatilhos mentais efetivos.\n\nPara deixar em negrito não use ** **, use apenas * *.\n\nO foco é gerar uma mensagem de qualidade para um grupo de pessoas interessadas em nos comprar.\n\nNão faça mensagens longas."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -48
+      ],
+      "id": "24aa1d64-ff03-462e-bc52-a9d9b4fb5986",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "kmMGxTfDic8jahYF",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "conteúdo",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "data",
+              "keyValue": "={{$json[\"timestamp\"].split(\"T\")[0]}}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        -48
+      ],
+      "id": "d25844d3-88a5-4257-9eef-1c908381bd20",
+      "name": "Get a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "KxlDsVWIz3xJLbqL",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "841a37ce-15be-4b49-8c05-6b65f42fd8da",
+              "name": "engajamento",
+              "value": "={{ $json.engajamento }}",
+              "type": "string"
+            },
+            {
+              "id": "f1403978-c966-4e54-b788-51e7196d04ac",
+              "name": "mensagem",
+              "value": "={{ $json.mensagem }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -288,
+        -48
+      ],
+      "id": "ba53fe59-8267-413b-add2-f711c803bf70",
+      "name": "Edit Fields"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Enviar texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a row": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "America/Sao_Paulo",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "b26715e9-dc73-4759-83fb-08934a7a816c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3c6254208dfc25270c0f6139aedc58cb4cf18d05739e92e54e373b12bd587439"
+  },
+  "nodeGroups": [],
+  "id": "nG0TKN9NLDLR51Yy",
+  "tags": []
+}

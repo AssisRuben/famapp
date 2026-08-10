@@ -13,6 +13,12 @@ Worker foram descartados por esse motivo).
 - `testar_workflow.js` — script Node standalone que roda os Code nodes do
   workflow com dados falsos e imprime o SQL gerado, pra revisar depois de
   qualquer edição (`node coletor/testar_workflow.js`)
+- `mensagemGrupoFarmácia.json` — workflow n8n separado (não sincroniza
+  nada com o Supabase, só lê a tabela `conteúdo` já existente): todo dia
+  às 18h busca o tema do dia, gera um texto engajador via IA e manda pro
+  grupo de WhatsApp de **clientes**. Ver "Sugestão: treinamento diário do
+  balconista" abaixo pra uma ideia de workflow irmão, mesma arquitetura,
+  mas mandando dica de treinamento pro grupo **interno da equipe**.
 
 ## Passo a passo
 
@@ -413,3 +419,41 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
 - **Sem paginação real no incremental de 15 min** (`sgf-incremental.n8n.json`
   continua fixo em página 0 — ver seção 4 acima). `backfill_periodo.js`
   já tem paginação real, mas é script à parte, não o coletor recorrente.
+
+## Sugestão: workflow de treinamento diário do balconista (WhatsApp interno)
+
+Ideia de workflow irmão do `mensagemGrupoFarmácia.json` (mesma arquitetura:
+Schedule Trigger → busca o tema do dia numa tabela → AI Agent gera o texto →
+formata pro WhatsApp → envia), mas apontando pra um grupo interno da equipe
+em vez do grupo de clientes, com uma tabela de conteúdo própria (mesmos
+campos de `conteúdo`: `data`, `engajamento`, `mensagem`) — ainda não
+implementado, combinado gerar o SQL/JSON depois de validar os temas aqui.
+
+Os 3 primeiros temas (dias 2, 4 e 6) não são genéricos — vieram de uma
+análise real (08/2026) comparando, nos últimos 60 dias, os 5 vendedores com
+menor ticket médio contra os de maior ticket (dado agregado, sem apontar
+nome): itens por atendimento, mix de produto vendido (grupo/faturamento) e
+% de vendas sem identificação de comprador (cadastro de CPF). Os três
+formam um padrão único — atendimento mais raso, menos sugestão de item de
+maior valor e menos rigor de cadastro — por isso entraram como prioridade
+no treinamento em vez de tema aleatório.
+
+| data | engajamento | mensagem |
+|---|---|---|
+| dia 1 | Abordagem inicial ao cliente | Explique como cumprimentar e identificar a necessidade do cliente nos primeiros 10 segundos, evitando o clássico "posso ajudar?" seco. Dê um roteiro alternativo de abertura. |
+| dia 2 | O "e mais uma coisa": venda não acaba no que o cliente pediu | Dado real da farmácia: os vendedores com ticket médio mais baixo vendem em média 2,4–2,55 itens por atendimento, contra 2,9–3,3 dos de ticket mais alto — quase 1 item de diferença por venda. Ensine o hábito de sempre oferecer 1 complemento antes de fechar (ex: protetor labial com repelente, fio dental com escova, soro com antitérmico). |
+| dia 3 | Genérico x similar x referência | Explique a diferença técnica entre os três e como oferecer o genérico sem soar como "empurrar o mais barato" — foco em bioequivalência e economia real pro cliente. |
+| dia 4 | Controlado e uso contínuo também são ticket, não só burocracia | Dado real: os vendedores de melhor desempenho tiram ~20% do faturamento de produtos Controlados, contra ~6,6% dos de ticket mais baixo — que compensam vendendo proporcionalmente quase o dobro em perfumaria/itens de impulso. Ensine a perguntar ativamente "o(a) senhor(a) já está tomando algum controlado ou remédio de uso contínuo que precisa repor?" em vez de só vender o que foi pedido. |
+| dia 5 | Venda de controlados (regras) | Reforce as exigências legais de receituário (retenção, validade, tipo de receita por classe) e como orientar o cliente que esquece a receita sem violar a norma. |
+| dia 6 | Cadastrar o cliente é hábito, não só exigência do controlado | Dado real: vendedores com ticket mais baixo deixam de identificar o comprador (puxar o cadastro/CPF) em 47% das vendas, contra 38% dos de melhor desempenho — e isso não é só compliance, é a própria farmácia perdendo a chance de reativar esse cliente depois. Reforce: SEMPRE puxar o cliente do sistema pelo nome, mesmo quando o produto não é controlado. |
+| dia 7 | Escuta ativa com cliente idoso | Dicas de comunicação com público idoso: fala pausada, confirmar entendimento da posologia, checar se tem alguém que administra o medicamento em casa. |
+| dia 8 | Armazenamento e validade | Como checar validade no ato da venda, sinais de produto avariado, e o que fazer com produto próximo do vencimento na prateleira. |
+| dia 9 | Interações medicamentosas simples | Alertas comuns que o balconista deve saber sinalizar ao farmacêutico (ex: anticoagulante + AAS, antibiótico + álcool) — quando escalar, não diagnosticar. |
+| dia 10 | Objeção "tá caro" | Roteiro de resposta a reclamação de preço sem desmerecer a farmácia nem empurrar desconto automático — destacar programa de fidelidade/genérico. |
+| dia 11 | Perguntas que identificam sintomas | Perguntas seguras pra entender queixa (dor, febre, tempo de sintoma) sem invadir o papel do farmacêutico/médico. |
+| dia 12 | Fidelização e recompra | Como sugerir cadastro no programa de pontos e follow-up de medicamento de uso contínuo (ex: "sua caixa deve estar acabando"). |
+| dia 13 | Postura em reclamação | Como lidar com cliente insatisfeito sem levar pro pessoal — validar a queixa, oferecer solução, escalar se necessário. |
+| dia 14 | Perfumaria como venda casada, não como venda principal | Diferenças básicas entre linhas (hidratante, protetor, anti-idade) pra indicar com segurança. Perfumaria continua bem-vinda — o problema não é vender, é vender SÓ isso quando dava pra oferecer o item de uso contínuo também (ver dia 4). |
+| dia 15 | Organização de fila e prioridade | Boas práticas pra triar quem está com pressa/mal-estar/receita simples vs. atendimento mais demorado. |
+| dia 16 | Sigilo e discrição | Como tratar assuntos sensíveis (teste de gravidez, DSTs, saúde mental) com discrição no balcão. |
+| dia 17 | Meta e indicadores de verdade | Explique os 3 números que a farmácia acompanha e por que eles importam: itens por atendimento (venda casada), % de venda com cliente identificado (cadastro) e mix de controlado/uso contínuo (ticket) — não é cobrança, é o que separa quem vende mais de quem vende menos, com dado real da própria equipe. |
