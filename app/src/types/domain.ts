@@ -107,6 +107,39 @@ export interface MetricasVendedorSemanal {
   margemBrutaPct: number;
 }
 
+// Espelha fn_desempenho_vendedor_periodo — mesma conta de
+// DesempenhoVendedorDiario, agregada por um intervalo de datas
+// arbitrário (o seletor "Período" do Painel, 11/08/2026).
+export interface DesempenhoVendedorPeriodo {
+  dataInicio: string;
+  dataFim: string;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  quantidadeAtendimentos: number;
+  quantidadeItens: number;
+  itensPorAtendimento: number;
+}
+
+// Espelha fn_metricas_vendedor_periodo — mesma conta de
+// MetricasVendedorDiario, agregada por um intervalo de datas
+// arbitrário. Sem comissaoEstimada: comissão só existe pra bucket de
+// semana/mês fixo (regra real de negócio), não faz sentido pra um
+// período livre — ver comentário no card "Desempenho" do Painel.
+export interface MetricasVendedorPeriodo {
+  dataInicio: string;
+  dataFim: string;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  qtdNotas: number;
+  faturamentoLiquido: number;
+  faturamentoBruto: number;
+  totalDesconto: number;
+  taxaDescontoPct: number;
+  ticketMedio: number;
+  totalCusto: number;
+  margemBrutaPct: number;
+}
+
 // Espelha vw_clientes_por_vendedor — clientes distintos que o
 // vendedor já atendeu, com total gasto COM ELE especificamente (tela
 // "Meus clientes").

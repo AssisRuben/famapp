@@ -11,6 +11,7 @@ import {
   ContatoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
+  DesempenhoVendedorPeriodo,
   DesempenhoVendedorSemanal,
   FaixaComissao,
   HistoricoCompraCliente,
@@ -18,6 +19,7 @@ import {
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
+  MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
   ParametrosCompra,
   Pendencia,
@@ -79,6 +81,10 @@ export interface DataRepository {
   // "Desempenho" do Painel.
   getDesempenhoVendedorSemanal(profile: Profile, ano: number, mes: number, semana: 1 | 2 | 3 | 4): Promise<DesempenhoVendedorSemanal[]>;
   getMetricasVendedorSemanal(profile: Profile, ano: number, mes: number, semana: 1 | 2 | 3 | 4): Promise<MetricasVendedorSemanal[]>;
+  // Mesmas métricas, agregadas por um intervalo de datas livre (11/08/2026)
+  // — usadas pelo seletor "Período" (calendário) do card "Desempenho".
+  getDesempenhoVendedorPeriodo(profile: Profile, dataInicio: string, dataFim: string): Promise<DesempenhoVendedorPeriodo[]>;
+  getMetricasVendedorPeriodo(profile: Profile, dataInicio: string, dataFim: string): Promise<MetricasVendedorPeriodo[]>;
   getRankingVendedoresDia(profile: Profile, dataEmissao: string): Promise<RankingVendedorDia[]>;
   getClientesInatividade(profile: Profile): Promise<ClienteInatividade[]>;
   // Tela "Meus clientes" — clientes distintos que o vendedor logado já

@@ -12,9 +12,9 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { alertar } from '../lib/alert';
+import { escolherImagem, OrigemImagem } from '../lib/imagem';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { LoadingFarmacia } from '../components/LoadingFarmacia';
@@ -42,6 +42,7 @@ export function ReceitasScreen() {
   const [filtroStatus, setFiltroStatus] = useState<'pendente' | 'anexada' | null>(null);
   const [filtroMes, setFiltroMes] = useState<string | null>(null);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+  const [escolhaAnexoId, setEscolhaAnexoId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -70,19 +71,16 @@ export function ReceitasScreen() {
     setRefreshing(false);
   };
 
-  const capturarFoto = async (item: VendaReceitaPendente) => {
-    const permissao = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permissao.granted) {
-      alertar('Permissão necessária', 'Precisamos de acesso à câmera para fotografar a receita.');
-      return;
-    }
+  const anexarFoto = async (item: VendaReceitaPendente, origem: OrigemImagem) => {
+    setEscolhaAnexoId(null);
+    const mensagemPermissao =
+      origem === 'camera'
+        ? 'Precisamos de acesso à câmera para fotografar a receita.'
+        : 'Precisamos de acesso às fotos para anexar a receita.';
 
     setCapturandoId(item.itemId);
     try {
-      const resultado = await ImagePicker.launchCameraAsync({ quality: 0.6, allowsEditing: false });
-      if (resultado.canceled) return;
-
-      const uri = resultado.assets?.[0]?.uri;
+      const uri = await escolherImagem(origem, mensagemPermissao);
       if (!uri) return;
 
       await repository.anexarReceita(item.itemId, { tipo: item.tipoReceita, fotoUri: uri });
@@ -240,7 +238,9 @@ export function ReceitasScreen() {
               <View style={styles.fotoWrap}>
                 <Pressable
                   style={[styles.fotoBotao, item.receitaFotoUri && styles.fotoBotaoComFoto]}
-                  onPress={() => (item.receitaFotoUri ? setFotoAmpliada(item.receitaFotoUri) : capturarFoto(item))}
+                  onPress={() =>
+                    item.receitaFotoUri ? setFotoAmpliada(item.receitaFotoUri) : setEscolhaAnexoId(item.itemId)
+                  }
                   disabled={capturandoId === item.itemId}
                 >
                   {capturandoId === item.itemId ? (
@@ -248,17 +248,17 @@ export function ReceitasScreen() {
                   ) : item.receitaFotoUri ? (
                     <Image source={{ uri: item.receitaFotoUri }} style={styles.fotoImagem} />
                   ) : (
-                    <Ionicons name="camera" size={20} color={colors.white} />
+                    <Ionicons name="attach" size={20} color={colors.white} />
                   )}
                 </Pressable>
                 {item.receitaFotoUri && (
                   <Pressable
                     style={styles.fotoRetomar}
-                    onPress={() => capturarFoto(item)}
+                    onPress={() => setEscolhaAnexoId(item.itemId)}
                     disabled={capturandoId === item.itemId}
                     hitSlop={6}
                   >
-                    <Ionicons name="camera" size={12} color={colors.white} />
+                    <Ionicons name="attach" size={12} color={colors.white} />
                   </Pressable>
                 )}
               </View>
@@ -269,9 +269,45 @@ export function ReceitasScreen() {
 
       {Platform.OS === 'web' && (
         <Text style={styles.webHint}>
-          No navegador, o botão de câmera abre o seletor de arquivo/webcam do próprio browser.
+          No navegador, os botões abaixo abrem o seletor de arquivo/webcam do próprio browser.
         </Text>
       )}
+
+      <Modal
+        visible={escolhaAnexoId != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEscolhaAnexoId(null)}
+      >
+        <Pressable style={styles.modalFundo} onPress={() => setEscolhaAnexoId(null)}>
+          <Pressable style={styles.escolhaCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.escolhaTitulo}>Anexar receita</Text>
+            <Pressable
+              style={styles.escolhaOpcao}
+              onPress={() => {
+                const item = itens.find((i) => i.itemId === escolhaAnexoId);
+                if (item) anexarFoto(item, 'camera');
+              }}
+            >
+              <Ionicons name="camera" size={20} color={colors.navy} />
+              <Text style={styles.escolhaOpcaoTexto}>Tirar foto</Text>
+            </Pressable>
+            <Pressable
+              style={styles.escolhaOpcao}
+              onPress={() => {
+                const item = itens.find((i) => i.itemId === escolhaAnexoId);
+                if (item) anexarFoto(item, 'galeria');
+              }}
+            >
+              <Ionicons name="image" size={20} color={colors.navy} />
+              <Text style={styles.escolhaOpcaoTexto}>Escolher da galeria</Text>
+            </Pressable>
+            <Pressable style={styles.escolhaCancelar} onPress={() => setEscolhaAnexoId(null)}>
+              <Text style={styles.escolhaCancelarTexto}>Cancelar</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={fotoAmpliada != null} transparent animationType="fade" onRequestClose={() => setFotoAmpliada(null)}>
         <Pressable style={styles.modalFundo} onPress={() => setFotoAmpliada(null)}>
@@ -353,6 +389,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   webHint: { fontSize: 11, color: colors.textMuted, textAlign: 'center', marginBottom: 16 },
+  escolhaCard: {
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    padding: 16,
+    width: '80%',
+    maxWidth: 320,
+  },
+  escolhaTitulo: { fontSize: 14, fontWeight: '700', color: colors.textPrimary, marginBottom: 10 },
+  escolhaOpcao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  escolhaOpcaoTexto: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
+  escolhaCancelar: { alignItems: 'center', paddingTop: 14, marginTop: 4 },
+  escolhaCancelarTexto: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
   modalFundo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', alignItems: 'center', justifyContent: 'center' },
   modalFoto: { width: '100%', height: '80%' },
   modalFechar: { position: 'absolute', top: 48, right: 20, padding: 8 },

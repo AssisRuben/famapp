@@ -14,6 +14,7 @@ import {
   ContatoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
+  DesempenhoVendedorPeriodo,
   DesempenhoVendedorSemanal,
   FaixaComissao,
   HistoricoCompraCliente,
@@ -23,6 +24,7 @@ import {
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
+  MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
   ParametrosCompra,
   Pendencia,
@@ -423,6 +425,62 @@ class MockRepository implements DataRepository {
         totalDesconto,
         taxaDescontoPct: round2((totalDesconto / faturamentoBruto) * 100),
         comissaoEstimada,
+        ticketMedio: round2(faturamentoLiquido / qtdNotas),
+        totalCusto,
+        margemBrutaPct: round2(((faturamentoLiquido - totalCusto) / faturamentoLiquido) * 100),
+      };
+    });
+    return delay(visivelParaPerfil(profile, linhas));
+  }
+
+  // Seletor "Período" (calendário) do card "Desempenho" — mesma
+  // simulação de dia/semana/mês (taxa diária do seed × nº de dias),
+  // só que o intervalo vem direto das duas datas em vez de um bucket
+  // fixo (11/08/2026).
+  async getDesempenhoVendedorPeriodo(
+    profile: Profile,
+    dataInicio: string,
+    dataFim: string
+  ): Promise<DesempenhoVendedorPeriodo[]> {
+    const dias = diasNoIntervalo(dataInicio, dataFim);
+    const linhas = desempenhoSeedHoje.map((d) => {
+      const quantidadeAtendimentos = Math.max(1, Math.round(d.quantidadeAtendimentos * dias));
+      const quantidadeItens = Math.max(1, Math.round(d.quantidadeItens * dias));
+      return {
+        dataInicio,
+        dataFim,
+        codigoVendedor: d.codigoVendedor,
+        nomeVendedor: nomeVendedor(d.codigoVendedor),
+        quantidadeAtendimentos,
+        quantidadeItens,
+        itensPorAtendimento: round2(quantidadeItens / quantidadeAtendimentos),
+      };
+    });
+    return delay(visivelParaPerfil(profile, linhas));
+  }
+
+  async getMetricasVendedorPeriodo(
+    profile: Profile,
+    dataInicio: string,
+    dataFim: string
+  ): Promise<MetricasVendedorPeriodo[]> {
+    const dias = diasNoIntervalo(dataInicio, dataFim);
+    const linhas = metricasSeedHoje.map((m) => {
+      const qtdNotas = Math.max(1, Math.round(m.qtdNotas * dias));
+      const faturamentoLiquido = round2(m.faturamentoLiquido * dias);
+      const faturamentoBruto = round2(m.faturamentoBruto * dias);
+      const totalDesconto = round2(m.totalDesconto * dias);
+      const totalCusto = round2(m.totalCusto * dias);
+      return {
+        dataInicio,
+        dataFim,
+        codigoVendedor: m.codigoVendedor,
+        nomeVendedor: nomeVendedor(m.codigoVendedor),
+        qtdNotas,
+        faturamentoLiquido,
+        faturamentoBruto,
+        totalDesconto,
+        taxaDescontoPct: round2((totalDesconto / faturamentoBruto) * 100),
         ticketMedio: round2(faturamentoLiquido / qtdNotas),
         totalCusto,
         margemBrutaPct: round2(((faturamentoLiquido - totalCusto) / faturamentoLiquido) * 100),
@@ -1364,6 +1422,12 @@ class MockRepository implements DataRepository {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function diasNoIntervalo(dataInicio: string, dataFim: string): number {
+  const inicio = new Date(`${dataInicio}T00:00:00`);
+  const fim = new Date(`${dataFim}T00:00:00`);
+  return Math.max(1, Math.round((fim.getTime() - inicio.getTime()) / 86_400_000) + 1);
 }
 
 export const mockRepository = new MockRepository();

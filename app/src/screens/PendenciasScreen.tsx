@@ -13,8 +13,8 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
+import { escolherImagem, OrigemImagem } from '../lib/imagem';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
@@ -85,18 +85,15 @@ export function PendenciasScreen() {
     setClienteVinculado(false);
   };
 
-  const tirarFoto = async () => {
-    const permissao = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permissao.granted) {
-      alertar('Permissão necessária', 'Precisamos de acesso à câmera pra fotografar a pendência.');
-      return;
-    }
+  const escolherFoto = async (origem: OrigemImagem) => {
+    const mensagemPermissao =
+      origem === 'camera'
+        ? 'Precisamos de acesso à câmera pra fotografar a pendência.'
+        : 'Precisamos de acesso às fotos pra anexar a pendência.';
 
     setCapturando(true);
     try {
-      const resultado = await ImagePicker.launchCameraAsync({ quality: 0.6, allowsEditing: false });
-      if (resultado.canceled) return;
-      const uri = resultado.assets?.[0]?.uri;
+      const uri = await escolherImagem(origem, mensagemPermissao);
       if (uri) setFotoUri(uri);
     } finally {
       setCapturando(false);
@@ -176,19 +173,33 @@ export function PendenciasScreen() {
             </Pressable>
           </Pressable>
         ) : (
-          <Pressable style={styles.cameraButton} onPress={tirarFoto} disabled={capturando}>
-            {capturando ? (
-              <ActivityIndicator color={colors.white} size="small" />
-            ) : (
-              <>
-                <Text style={styles.cameraIcone}>📷</Text>
-                <Text style={styles.cameraTexto}>Tirar foto</Text>
-              </>
-            )}
-          </Pressable>
+          <View style={styles.fotoBotoesRow}>
+            <Pressable
+              style={[styles.cameraButton, styles.fotoBotaoMetade]}
+              onPress={() => escolherFoto('camera')}
+              disabled={capturando}
+            >
+              {capturando ? (
+                <ActivityIndicator color={colors.white} size="small" />
+              ) : (
+                <>
+                  <Text style={styles.cameraIcone}>📷</Text>
+                  <Text style={styles.cameraTexto}>Tirar foto</Text>
+                </>
+              )}
+            </Pressable>
+            <Pressable
+              style={[styles.cameraButton, styles.fotoBotaoMetade, styles.anexarButton]}
+              onPress={() => escolherFoto('galeria')}
+              disabled={capturando}
+            >
+              <Text style={styles.cameraIcone}>📎</Text>
+              <Text style={[styles.cameraTexto, styles.anexarTexto]}>Anexar</Text>
+            </Pressable>
+          </View>
         )}
         {Platform.OS === 'web' && (
-          <Text style={styles.webHint}>No navegador, o botão de câmera abre o seletor de arquivo/webcam.</Text>
+          <Text style={styles.webHint}>No navegador, os botões abrem o seletor de arquivo/webcam.</Text>
         )}
 
         <Text style={[styles.rotulo, styles.espacado]}>Nome do cliente</Text>
@@ -321,6 +332,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textMuted,
   },
+  fotoBotoesRow: { flexDirection: 'row', gap: 10 },
+  fotoBotaoMetade: { flex: 1 },
   cameraButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -330,6 +343,8 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     gap: 8,
   },
+  anexarButton: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.navy },
+  anexarTexto: { color: colors.navy },
   cameraIcone: { fontSize: 16 },
   cameraTexto: { color: colors.white, fontWeight: '600', fontSize: 14 },
   webHint: { fontSize: 11, color: colors.textMuted, marginTop: 6 },

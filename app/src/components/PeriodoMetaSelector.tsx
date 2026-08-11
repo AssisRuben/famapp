@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 
 export type PeriodoMeta = 'dia' | 'semana' | 'mes';
@@ -11,11 +12,21 @@ const OPCOES: { key: PeriodoMeta; label: string }[] = [
 ];
 
 interface PeriodoMetaSelectorProps {
-  value: PeriodoMeta;
+  // null = nenhum dos 3 ativo (ex.: card Desempenho com um período
+  // customizado escolhido no calendário, 11/08/2026).
+  value: PeriodoMeta | null;
   onChange: (periodo: PeriodoMeta) => void;
+  // 4º segmento opcional, dentro do MESMO grupo visual dos 3 tabs (ex.:
+  // botão de calendário do card Desempenho) — sem isso, o resto do
+  // seletor (Metas) fica intocado.
+  extra?: {
+    ativo: boolean;
+    icone: React.ComponentProps<typeof Ionicons>['name'];
+    onPress: () => void;
+  };
 }
 
-export function PeriodoMetaSelector({ value, onChange }: PeriodoMetaSelectorProps) {
+export function PeriodoMetaSelector({ value, onChange, extra }: PeriodoMetaSelectorProps) {
   return (
     <View style={styles.wrap}>
       {OPCOES.map((opcao) => (
@@ -27,6 +38,11 @@ export function PeriodoMetaSelector({ value, onChange }: PeriodoMetaSelectorProp
           <Text style={[styles.txt, value === opcao.key && styles.txtAtivo]}>{opcao.label}</Text>
         </Pressable>
       ))}
+      {extra && (
+        <Pressable style={[styles.btn, extra.ativo && styles.btnAtivo]} onPress={extra.onPress}>
+          <Ionicons name={extra.icone} size={15} color={extra.ativo ? colors.white : colors.textSecondary} />
+        </Pressable>
+      )}
     </View>
   );
 }

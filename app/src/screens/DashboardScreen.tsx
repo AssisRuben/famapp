@@ -7,6 +7,7 @@ import { MetricTile } from '../components/MetricTile';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { CorridaDeVendas } from '../components/CorridaDeVendas';
 import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelector';
+import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
 import { diasDecorridosNaSemana, faixaComissaoPara, metaDiaria, semanaDoDia, valoresDaMeta } from '../lib/metas';
@@ -14,17 +15,27 @@ import {
   ComissaoMensal,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
+  DesempenhoVendedorPeriodo,
   DesempenhoVendedorSemanal,
   FaixaComissao,
   IdentificacaoCompradorVendedor,
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
+  MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
   ResumoClientesInatividade,
   StatusSincronizacao,
 } from '../types/domain';
 import { colors } from '../theme/colors';
+
+type ModoDesempenho = PeriodoMeta | 'periodo';
+
+function diasNoIntervalo(dataInicio: string, dataFim: string): number {
+  const inicio = new Date(`${dataInicio}T00:00:00`);
+  const fim = new Date(`${dataFim}T00:00:00`);
+  return Math.max(1, Math.round((fim.getTime() - inicio.getTime()) / 86_400_000) + 1);
+}
 
 export function DashboardScreen() {
   const { profile } = useAuth();
@@ -41,7 +52,12 @@ export function DashboardScreen() {
   const [resumoClientes, setResumoClientes] = useState<ResumoClientesInatividade>({ total: 0, inativos: 0 });
   const [identificacaoComprador, setIdentificacaoComprador] = useState<IdentificacaoCompradorVendedor[]>([]);
   const [periodoMeta, setPeriodoMeta] = useState<PeriodoMeta>('mes');
-  const [periodoDesempenho, setPeriodoDesempenho] = useState<PeriodoMeta>('dia');
+  const [periodoDesempenho, setPeriodoDesempenho] = useState<ModoDesempenho>('dia');
+  // Período customizado (calendário) do card "Desempenho" — 11/08/2026.
+  const [periodoCustom, setPeriodoCustom] = useState<{ inicio: string; fim: string } | null>(null);
+  const [calendarioAberto, setCalendarioAberto] = useState(false);
+  const [metricasPeriodo, setMetricasPeriodo] = useState<MetricasVendedorPeriodo[]>([]);
+  const [desempenhoPeriodo, setDesempenhoPeriodo] = useState<DesempenhoVendedorPeriodo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // `new Date()`/`todayISO()` direto no corpo do componente só atualizam
@@ -66,7 +82,7 @@ export function DashboardScreen() {
     if (!profile) return;
     const ano = hoje.getFullYear();
     const mes = hoje.getMonth() + 1;
-    const [m, d, mm, dm, ms, ds, mt, cm, fx, ss, ci, ic] = await Promise.all([
+    const [m, d, mm, dm, ms, ds, mt, cm, fx, ss, ci, ic, mp, dp] = await Promise.all([
       repository.getMetricasVendedorDiario(profile, data),
       repository.getDesempenhoVendedorDiario(profile, data),
       repository.getMetricasVendedorMensal(profile, ano, mes),
@@ -82,6 +98,14 @@ export function DashboardScreen() {
       // mesma fonte do card "Venda sem comprador" em Alertas — aqui só
       // soma pra virar um indicador de tendência (06/08/2026).
       repository.getIdentificacaoCompradorPorVendedor(profile),
+      // Seletor "Período" (calendário) do card Desempenho — só busca
+      // quando um intervalo foi escolhido (11/08/2026).
+      periodoCustom
+        ? repository.getMetricasVendedorPeriodo(profile, periodoCustom.inicio, periodoCustom.fim)
+        : Promise.resolve([] as MetricasVendedorPeriodo[]),
+      periodoCustom
+        ? repository.getDesempenhoVendedorPeriodo(profile, periodoCustom.inicio, periodoCustom.fim)
+        : Promise.resolve([] as DesempenhoVendedorPeriodo[]),
     ]);
     setMetricas(m);
     setDesempenho(d);
@@ -95,7 +119,9 @@ export function DashboardScreen() {
     setStatusSync(ss);
     setResumoClientes(ci);
     setIdentificacaoComprador(ic);
-  }, [profile, data, semanaAtual]);
+    setMetricasPeriodo(mp);
+    setDesempenhoPeriodo(dp);
+  }, [profile, data, semanaAtual, periodoCustom]);
 
   useEffect(() => {
     setLoading(true);
@@ -229,6 +255,26 @@ export function DashboardScreen() {
   const diasNaSemana = diasDecorridosNaSemana(hoje.getFullYear(), hoje.getMonth() + 1, semanaAtual, hoje);
   const vendasPorDiaSemana = diasNaSemana > 0 ? totalNotasSemana / diasNaSemana : 0;
 
+  // Período customizado (calendário) — mesma ideia de "Desempenho do
+  // mês"/"da semana", só que o intervalo vem das duas datas escolhidas
+  // em vez de um bucket fixo (11/08/2026).
+  const totalFaturamentoPeriodo = sum(metricasPeriodo, (m) => m.faturamentoLiquido);
+  const totalBrutoPeriodo = sum(metricasPeriodo, (m) => m.faturamentoBruto);
+  const totalDescontoPeriodo = sum(metricasPeriodo, (m) => m.totalDesconto);
+  const totalCustoPeriodo = sum(metricasPeriodo, (m) => m.totalCusto);
+  const totalNotasPeriodo = sum(metricasPeriodo, (m) => m.qtdNotas);
+  const totalItensPeriodo = sum(desempenhoPeriodo, (d) => d.quantidadeItens);
+  const totalAtendimentosPeriodo = sum(desempenhoPeriodo, (d) => d.quantidadeAtendimentos);
+
+  const ticketMedioPeriodo = totalNotasPeriodo ? totalFaturamentoPeriodo / totalNotasPeriodo : 0;
+  const taxaDescontoPeriodo = totalBrutoPeriodo ? (totalDescontoPeriodo / totalBrutoPeriodo) * 100 : 0;
+  const margemBrutaPeriodo = totalFaturamentoPeriodo
+    ? ((totalFaturamentoPeriodo - totalCustoPeriodo) / totalFaturamentoPeriodo) * 100
+    : 0;
+  const itensPorAtendimentoPeriodo = totalAtendimentosPeriodo ? totalItensPeriodo / totalAtendimentosPeriodo : 0;
+  const diasSelecionados = periodoCustom ? diasNoIntervalo(periodoCustom.inicio, periodoCustom.fim) : 1;
+  const vendasPorDiaPeriodo = diasSelecionados > 0 ? totalNotasPeriodo / diasSelecionados : 0;
+
   // Card "Desempenho" unificado — o toggle Dia/Semana/Mês troca só os
   // dados exibidos, a estrutura dos tiles é a mesma nos 3 casos.
   const desempenho7 =
@@ -261,6 +307,24 @@ export function DashboardScreen() {
           vendasValor: vendasPorDiaSemana.toFixed(1),
           margemBruta: margemBrutaSemana,
           margemBrutaValor: totalFaturamentoSemana - totalCustoSemana,
+        }
+      : periodoDesempenho === 'periodo'
+      ? {
+          vazio: metricasPeriodo.length === 0,
+          faturamentoLabel: 'Venda líquida (período)',
+          faturamento: totalFaturamentoPeriodo,
+          ticketMedio: ticketMedioPeriodo,
+          itensPorAtendimento: itensPorAtendimentoPeriodo,
+          taxaDesconto: taxaDescontoPeriodo,
+          // Comissão real só existe por semana/mês fechado (regra de
+          // negócio confirmada) — um intervalo livre não tem meta pra
+          // comparar, então não dá pra estimar comissão de verdade aqui.
+          comissaoLabel: 'Comissão (sem meta p/ período)',
+          comissao: 0,
+          vendasLabel: 'Vendas / dia (média)',
+          vendasValor: vendasPorDiaPeriodo.toFixed(1),
+          margemBruta: margemBrutaPeriodo,
+          margemBrutaValor: totalFaturamentoPeriodo - totalCustoPeriodo,
         }
       : {
           vazio: metricasMes.length === 0,
@@ -335,7 +399,15 @@ export function DashboardScreen() {
 
       <Card>
         <Text style={styles.sectionTitle}>Desempenho</Text>
-        <PeriodoMetaSelector value={periodoDesempenho} onChange={setPeriodoDesempenho} />
+        <PeriodoMetaSelector
+          value={periodoDesempenho === 'periodo' ? null : periodoDesempenho}
+          onChange={setPeriodoDesempenho}
+          extra={{
+            ativo: periodoDesempenho === 'periodo',
+            icone: 'calendar-outline',
+            onPress: () => setCalendarioAberto(true),
+          }}
+        />
         {desempenho7.vazio ? (
           <Text style={styles.empty}>Sem vendas registradas nesse período.</Text>
         ) : (
@@ -413,6 +485,15 @@ export function DashboardScreen() {
         </Text>
         <CorridaDeVendas ranking={rankingAtual} meuCodigoVendedor={profile?.codigoVendedor} />
       </Card>
+
+      <CalendarioPeriodo
+        visible={calendarioAberto}
+        onClose={() => setCalendarioAberto(false)}
+        onConfirmar={(inicio, fim) => {
+          setPeriodoCustom({ inicio, fim });
+          setPeriodoDesempenho('periodo');
+        }}
+      />
     </ScrollView>
   );
 }

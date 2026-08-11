@@ -15,6 +15,7 @@ import {
   ContatoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
+  DesempenhoVendedorPeriodo,
   DesempenhoVendedorSemanal,
   FaixaComissao,
   HistoricoCompraCliente,
@@ -24,6 +25,7 @@ import {
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
+  MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
   ParametrosCompra,
   Pendencia,
@@ -227,6 +229,56 @@ class SupabaseRepository implements DataRepository {
       totalDesconto: Number(r.total_desconto),
       taxaDescontoPct: Number(r.taxa_desconto_pct ?? 0),
       comissaoEstimada: Number(r.comissao_estimada),
+      ticketMedio: Number(r.ticket_medio ?? 0),
+      totalCusto: Number(r.total_custo),
+      margemBrutaPct: Number(r.margem_bruta_pct ?? 0),
+    }));
+  }
+
+  // Seletor "Período" (calendário) do card "Desempenho" — intervalo de
+  // datas livre, via fn_metricas_vendedor_periodo/fn_desempenho_vendedor_periodo
+  // (11/08/2026, ver migracao_metricas_periodo_customizado.sql).
+  async getDesempenhoVendedorPeriodo(
+    _profile: Profile,
+    dataInicio: string,
+    dataFim: string
+  ): Promise<DesempenhoVendedorPeriodo[]> {
+    const { data, error } = await supabase.rpc('fn_desempenho_vendedor_periodo', {
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+    });
+    if (error) throw error;
+    return (data ?? []).map((r: any) => ({
+      dataInicio,
+      dataFim,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      quantidadeAtendimentos: r.quantidade_atendimentos,
+      quantidadeItens: r.quantidade_itens,
+      itensPorAtendimento: Number(r.itens_por_atendimento ?? 0),
+    }));
+  }
+
+  async getMetricasVendedorPeriodo(
+    _profile: Profile,
+    dataInicio: string,
+    dataFim: string
+  ): Promise<MetricasVendedorPeriodo[]> {
+    const { data, error } = await supabase.rpc('fn_metricas_vendedor_periodo', {
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+    });
+    if (error) throw error;
+    return (data ?? []).map((r: any) => ({
+      dataInicio,
+      dataFim,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      qtdNotas: r.qtd_notas,
+      faturamentoLiquido: Number(r.faturamento_liquido),
+      faturamentoBruto: Number(r.faturamento_bruto),
+      totalDesconto: Number(r.total_desconto),
+      taxaDescontoPct: Number(r.taxa_desconto_pct ?? 0),
       ticketMedio: Number(r.ticket_medio ?? 0),
       totalCusto: Number(r.total_custo),
       margemBrutaPct: Number(r.margem_bruta_pct ?? 0),
