@@ -233,7 +233,33 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
 
 ## Coisas que valem revisão futura
 
-- **[RESOLVIDO 12/08/2026] Vendas estornadas contando como venda normal
+- **[REVERTIDO 12/08/2026, mesmo dia] O fluxo "Cancelamento de venda"
+  descrito no item abaixo foi removido** — `tipoCancelamento='E'` do
+  endpoint `/venda/cancelamento/obter-alterados-v1` provou ser um sinal
+  ruim: ele marca qualquer nota que teve **algum estorno de pagamento**
+  no meio do caminho (bem provável: reprocessamento de autorização do
+  Farmácia Popular), não só venda genuinamente cancelada. Rodando o
+  backfill em produção, **100% do que ele marcou (7 de 7 notas) eram
+  vendas normais, finalizadas, sem nada de errado** — ex.: nota 750651,
+  R$114,24, "Finalizada Caixa" no relatório da Trier, sem nenhuma nota
+  de cancelamento, mesmo assim veio com `tipoCancelamento='E'`. Nenhuma
+  das notas genuinamente canceladas (750927/749665/750253) apareceu
+  marcada nunca — porque essas nunca sincronizam em primeiro lugar (ver
+  achado abaixo), então o `UPDATE` do backfill não tinha o que marcar
+  nelas. Ou seja: **o Painel já ficava correto sem esse fluxo** — venda
+  cancelada de verdade já não sincroniza via `/venda/obter-alterados-v1`
+  (confirmado com múltiplos exemplos reais, inclusive 5 vendas de teste
+  canceladas de propósito pelo usuário). Desfeito: nó "Cancelamento de
+  venda" removido de `sgf-incremental.n8n.json`; `UPDATE vendas SET
+  tipo_cancelamento = NULL WHERE tipo_cancelamento = 'E'` rodado em
+  produção pra desmarcar os falsos positivos. `backfill_cancelamentos.js`
+  e `migracao_exclui_estorno_desempenho.sql` ficam no repo só como
+  histórico — o filtro `tipo_cancelamento is null` nas views continua lá
+  (inofensivo, sempre verdadeiro agora que nada mais popula o campo),
+  mas não é mais necessário pra nada.
+
+- **[RESOLVIDO 12/08/2026, revertido no mesmo dia — ver item acima]
+  Vendas estornadas contando como venda normal
   no Painel**: achado investigando divergência entre o card Desempenho
   do app e o relatório "Totais por Vendedor" da Trier (mesmo período,
   01/08-12/08, filial 1) — banco com 1.799 vendas/R$109.085,82 contra

@@ -128,6 +128,13 @@ async function main() {
     })));
   }
   if (cancelamentosTrier.length > 0) {
+    const porTipo = new Map();
+    for (const c of cancelamentosTrier) {
+      const t = c.tipoCancelamento ?? '(nulo)';
+      porTipo.set(t, (porTipo.get(t) ?? 0) + 1);
+    }
+    console.log('Cancelamentos por tipoCancelamento:', Object.fromEntries(porTipo));
+    console.log('Números de nota do endpoint de cancelamento (todos):', cancelamentosTrier.map((v) => `${v.numeroNota}(${v.tipoCancelamento ?? '?'})`).join(', '));
     console.log('Exemplos do endpoint de cancelamento:', cancelamentosTrier.slice(0, 5).map((v) => ({
       numeroNota: v.numeroNota, numeroNotaOrigem: v.numeroNotaOrigem, tipoCancelamento: v.tipoCancelamento,
     })));
