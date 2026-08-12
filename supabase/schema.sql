@@ -644,6 +644,19 @@ join vendedores v on v.codigo = vvd.codigo_vendedor;
 -- A proporção varia por período (~6,5-8%) — 0.92 é aproximação, não
 -- fixo. Remover/ajustar esse fator se a Trier confirmar um jeito de
 -- pegar Custo de Aquisição direto pra venda recente.
+-- [12/08/2026] where vd.tipo_cancelamento is null — vendas
+-- estornadas/canceladas não contam como venda no Painel (decisão do
+-- usuário; substitui a escolha anterior de propositalmente não
+-- filtrar, documentada em migracao_metricas_periodo_customizado.sql).
+-- Ver migracao_exclui_estorno_desempenho.sql.
+-- [12/08/2026] total_custo/margem_bruta_pct agora vêm de
+-- produto_catalogo.custo_medio × quantidade (join por codigo_produto)
+-- em vez de venda_itens.valor_total_custo × 0.92 — confirmado direto
+-- na tela da Trier que custo_medio (valorCustoMedio da API) bate exato
+-- com o campo "Custo Aquisição" do cadastro do produto; o fator -8%
+-- era aproximação em cima do campo errado. Ver
+-- migracao_custo_aquisicao_desempenho.sql. Ressalva: custo_medio é o
+-- custo de aquisição ATUAL, não o vigente na data da venda antiga.
 create or replace view vw_metricas_vendedor_diario as
 select
   vd.data_emissao,
@@ -655,22 +668,24 @@ select
   round((sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido)) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
   sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
   round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
-  sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as total_custo,
+  sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)) as total_custo,
   round(
-    (sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92)
+    (sum(vi.valor_total_liquido) - sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)))
     / nullif(sum(vi.valor_total_liquido),0) * 100,
   2) as margem_bruta_pct,
   vend.nome as nome_vendedor
 from venda_itens vi
 join vendas vd on vd.id = vi.venda_id
 join vendedores vend on vend.codigo = vi.codigo_vendedor
+left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+where vd.tipo_cancelamento is null
 group by vd.data_emissao, vi.codigo_vendedor, vend.nome;
 
 -- Mesmas contas de vw_metricas_vendedor_diario, só que agrupado por
 -- mês inteiro em vez de dia exato — usado pelo card "Desempenho do
 -- mês" do Painel (faturamento/comissão acumulados, os demais já são
 -- proporção/média por natureza).
-create view vw_metricas_vendedor_mensal as
+create or replace view vw_metricas_vendedor_mensal as
 select
   extract(year from vd.data_emissao)::int as ano,
   extract(month from vd.data_emissao)::int as mes,
@@ -682,15 +697,17 @@ select
   round((sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido)) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
   sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
   round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
-  sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as total_custo,
+  sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)) as total_custo,
   round(
-    (sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92)
+    (sum(vi.valor_total_liquido) - sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)))
     / nullif(sum(vi.valor_total_liquido),0) * 100,
   2) as margem_bruta_pct,
   vend.nome as nome_vendedor
 from venda_itens vi
 join vendas vd on vd.id = vi.venda_id
 join vendedores vend on vend.codigo = vi.codigo_vendedor
+left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+where vd.tipo_cancelamento is null
 group by extract(year from vd.data_emissao), extract(month from vd.data_emissao), vi.codigo_vendedor, vend.nome;
 
 -- Mesma conta de vw_desempenho_vendedor_diario, agrupado por mês.
@@ -711,8 +728,9 @@ group by extract(year from vvd.data_emissao), extract(month from vvd.data_emissa
 -- Painel (calendário com dia único ou intervalo arrastando). Nenhuma
 -- view de dia/semana/mês aceita intervalo livre — por isso função, não
 -- view. Mesma fórmula de custo/margem de vw_metricas_vendedor_mensal
--- (ver migracao_metricas_periodo_customizado.sql) e mesmo critério das
--- outras views: NÃO filtra tipo_cancelamento (nenhuma delas filtra).
+-- (ver migracao_metricas_periodo_customizado.sql).
+-- [12/08/2026] tipo_cancelamento is null — ver nota em
+-- vw_metricas_vendedor_diario acima; migracao_exclui_estorno_desempenho.sql.
 create or replace function fn_metricas_vendedor_periodo(data_inicio date, data_fim date)
 returns table (
   codigo_vendedor integer,
@@ -736,15 +754,17 @@ language sql stable as $$
     sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido) as total_desconto,
     round((sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido)) / nullif(sum(vi.valor_total_bruto), 0) * 100, 2) as taxa_desconto_pct,
     round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id), 0), 2) as ticket_medio,
-    sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as total_custo,
+    sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)) as total_custo,
     round(
-      (sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92)
+      (sum(vi.valor_total_liquido) - sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)))
       / nullif(sum(vi.valor_total_liquido), 0) * 100,
     2) as margem_bruta_pct
   from venda_itens vi
   join vendas vd on vd.id = vi.venda_id
   join vendedores vend on vend.codigo = vi.codigo_vendedor
+  left join produto_catalogo pc on pc.codigo = vi.codigo_produto
   where vd.data_emissao between data_inicio and data_fim
+    and vd.tipo_cancelamento is null
   group by vi.codigo_vendedor, vend.nome;
 $$;
 
@@ -776,7 +796,7 @@ $$;
 -- — mesma definição de semanaDoDia() em app/src/lib/metas.ts, NÃO é
 -- janela móvel de 7 dias). Usadas pelo toggle Dia/Semana/Mês do card
 -- "Desempenho" do Painel.
-create view vw_metricas_vendedor_semanal as
+create or replace view vw_metricas_vendedor_semanal as
 select
   extract(year from vd.data_emissao)::int as ano,
   extract(month from vd.data_emissao)::int as mes,
@@ -794,15 +814,17 @@ select
   round((sum(vi.valor_total_bruto) - sum(vi.valor_total_liquido)) / nullif(sum(vi.valor_total_bruto),0) * 100, 2) as taxa_desconto_pct,
   sum(vi.valor_total_liquido * (vi.prc_comissao/100.0)) as comissao_estimada,
   round(sum(vi.valor_total_liquido) / nullif(count(distinct vd.id),0), 2) as ticket_medio,
-  sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as total_custo,
+  sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)) as total_custo,
   round(
-    (sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92)
+    (sum(vi.valor_total_liquido) - sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)))
     / nullif(sum(vi.valor_total_liquido),0) * 100,
   2) as margem_bruta_pct,
   vend.nome as nome_vendedor
 from venda_itens vi
 join vendas vd on vd.id = vi.venda_id
 join vendedores vend on vend.codigo = vi.codigo_vendedor
+left join produto_catalogo pc on pc.codigo = vi.codigo_produto
+where vd.tipo_cancelamento is null
 group by
   extract(year from vd.data_emissao),
   extract(month from vd.data_emissao),

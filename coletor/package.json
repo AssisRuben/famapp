@@ -1,7 +1,7 @@
 {
   "name": "farmapp-coletor",
   "private": true,
-  "description": "Scripts standalone do coletor (fora do n8n) — backfill_periodo.js e testar_workflow.js.",
+  "description": "Scripts standalone do coletor (fora do n8n) — backfill_periodo.js, testar_workflow.js, comparar_periodo.js e backfill_cancelamentos.js.",
   "dependencies": {
     "pg": "^8.13.1"
   }

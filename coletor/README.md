@@ -233,6 +233,64 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
 
 ## Coisas que valem revisão futura
 
+- **[RESOLVIDO 12/08/2026] Vendas estornadas contando como venda normal
+  no Painel**: achado investigando divergência entre o card Desempenho
+  do app e o relatório "Totais por Vendedor" da Trier (mesmo período,
+  01/08-12/08, filial 1) — banco com 1.799 vendas/R$109.085,82 contra
+  1.778/R$108.147,38 da Trier (que já desconta devolução), sobra de
+  ~R$938 espalhada em 5 de 7 vendedores, proporcional ao volume de cada
+  um. `tipo_cancelamento` sempre nulo na tabela inteira, mesmo pra notas
+  confirmadamente estornadas (checado no relatório "Vendas Excluídas" da
+  Trier, ex.: notas 750927/749665/750253 com "TRANSAÇÃO FPOP ESTORNADA").
+  Causa raiz confirmada com chamada direta na API:
+  `/venda/obter-alterados-v1` (o que o coletor sempre usou pra vendas)
+  **nunca** traz `tipoCancelamento`/`numeroNotaOrigem` preenchidos — 0 de
+  1.795 registros crus no teste. O dado só existe no endpoint separado
+  `/venda/cancelamento/obter-alterados-v1`, que devolveu exatamente 21
+  estornos pro mesmo período — o número que faltava pra fechar a conta
+  (comparando banco vs. API crua da Trier, sem o relatório subtrair
+  devolução, a diferença cai pra 4 notas/R$42, ruído normal de sync, não
+  sistêmico). Corrigido: novo fluxo "Cancelamento de venda" em
+  `sgf-incremental.n8n.json` (só `UPDATE` em `vendas.tipo_cancelamento`,
+  não insere venda nova) + `backfill_cancelamentos.js` pro que já tinha
+  sincronizado antes desse fluxo existir + `migracao_exclui_estorno_desempenho.sql`
+  filtrando `tipo_cancelamento is null` nas views de Desempenho do
+  Painel (decisão do usuário: estorno não deve contar na performance de
+  vendedor/vendas — isso substitui a escolha anterior, documentada em
+  `migracao_metricas_periodo_customizado.sql`, de propositalmente não
+  filtrar). **Reabre a pendência "resíduo de ~1,4%" abaixo** — a
+  descartada de "vendas canceladas" foi feita olhando pro mesmo campo
+  que agora sabemos que nunca vinha preenchido; vale reaplicar o mesmo
+  método (comparar banco vs. `/venda/cancelamento/obter-alterados-v1`
+  direto) pro período de julho/26 que gerou aquela investigação.
+
+- **[RESOLVIDO 12/08/2026] Margem bruta do Painel usava critério de
+  custo errado + fator de correção chutado (-8%)**: investigação
+  disparada pelo usuário perguntando se `vlr_custo_aquisicao` estava
+  vindo da API. Confirmado que não — nem esse nem `vlr_custo_produto`
+  jamais vêm preenchidos em `venda_itens` (0 de 3.739 itens testados,
+  período 01-12/08/2026). A API não tem nenhum campo chamado "custo de
+  aquisição" documentado (nem em `VendaItemIntegracaoDto`, nem em
+  `ProdutoIntegracaoDto`) — suporte da Trier sugeriu cruzar com
+  `/produto/obter-todos-v1`. Testado direto contra a tela da Trier
+  (Cadastros > Produtos > Glifage XR código 3434, aba "Inf.
+  Adicionais"): o campo lá chamado literalmente **"Custo Aquisição" =
+  R$6,95** bate exato com `produto_catalogo.custo_medio` (mapeado de
+  `valorCustoMedio` da API, já sincronizado). Corrigido em
+  `migracao_custo_aquisicao_desempenho.sql`: `total_custo`/
+  `margem_bruta_pct` em `vw_metricas_vendedor_diario/mensal/semanal` e
+  `fn_metricas_vendedor_periodo` agora vêm de
+  `produto_catalogo.custo_medio × quantidade` (join por
+  `codigo_produto`) em vez de `venda_itens.valor_total_custo × 0.92`
+  (fator -8% removido — não é mais aproximação, é o campo certo).
+  Ressalva aceita: `custo_medio` é o custo de aquisição **atual**
+  (última entrada registrada), não o vigente na data de uma venda
+  antiga — mesma natureza de aproximação que já existia, só que sobre
+  o campo certo agora. Também esclarecido nessa investigação: o campo
+  `valorCusto` da API (cotado como candidato alternativo) NÃO é o custo
+  de aquisição — bate com "Preço Custo"/Custo Gerencial da tela
+  (R$7,20 pro mesmo produto), um valor gerencial à parte.
+
 - **[PENDENTE — precisa de resposta da Trier] Perguntas em aberto pro
   suporte/sistema da Trier** (31/07/2026): consolidação das pendências
   abaixo que não dá pra resolver só com os dados que a API expõe —
@@ -244,15 +302,14 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
      API pro nosso token/escopo, ou o dado genuinamente não existe
      ainda (ex.: só fecha num batch noturno)? Abrindo uma nota recente
      na tela da Trier, esses campos aparecem preenchidos lá?
-  2. **`valor_total_custo` usa o critério errado de custo** — causa
-     raiz JÁ CONFIRMADA em 01/08/2026 (ver item de margem bruta
-     abaixo): esse campo bate com o critério "Custo do Cadastro de
-     Produtos" (padrão da tela de relatório da Trier), não com "Custo
-     de Aquisição" (o que a farmácia usa pra calcular margem de
-     verdade — ~6,5-8% mais baixo). O campo certo (`vlr_custo_aquisicao`)
-     vem `NULL` pra venda recente. Pergunta pra Trier: existe algum
-     parâmetro na chamada da API (ou outro endpoint) que devolva o
-     custo já no critério "Custo de Aquisição", em vez do padrão?
+  2. **[RESOLVIDO 12/08/2026, sem precisar de resposta da Trier]**
+     `valor_total_custo`/`vlr_custo_aquisicao` em `venda_itens` usavam
+     critério errado / sempre nulo — resolvido usando
+     `produto_catalogo.custo_medio` em vez disso (ver entrada RESOLVIDO
+     mais abaixo). Pergunta original pra Trier (API confirmou
+     `valorCustoMedio`/`valorCusto` do endpoint de produto sempre
+     preenchidos e conferidos contra a tela — não precisou de resposta
+     nova deles) fica só como histórico.
   3. **`modelo_venda` sempre `NULL`**: esperado vir vazio, ou é sinal
      de nota ainda não fiscalmente processada?
   4. **Resíduo de ~1,4% no faturamento mensal** (54 notas, R$4.652,76
