@@ -294,6 +294,7 @@ export function ClientesScreen() {
                       <WhatsAppButton
                         compact
                         telefone={item.telefone}
+                        codigoCliente={item.codigo}
                         mensagem={mensagemReativacao(item)}
                         onEnviado={() => registrarContatoResgate(item.codigo, 'whatsapp')}
                       />

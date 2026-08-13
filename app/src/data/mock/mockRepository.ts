@@ -1089,6 +1089,12 @@ class MockRepository implements DataRepository {
     return delay(linhas);
   }
 
+  async getStatusWhatsApp(_profile: Profile): Promise<Record<number, boolean>> {
+    // Mock não tem checagem real contra a Evolution API — devolve vazio,
+    // o app cai pro fallback de validar só o formato do telefone.
+    return delay({});
+  }
+
   async getCatalogoProdutos(_profile: Profile): Promise<ProdutoCatalogo[]> {
     return delay(catalogoProdutosSeed);
   }

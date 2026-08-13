@@ -96,6 +96,7 @@ function LinhaClienteComHistorico({
               <WhatsAppButton
                 compact
                 telefone={telefone}
+                codigoCliente={codigoCliente}
                 mensagem={mensagemWhatsapp}
                 onEnviado={() => onContato?.('whatsapp')}
               />

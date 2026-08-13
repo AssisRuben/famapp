@@ -32,6 +32,13 @@ create table clientes (
   cep text,
   estado text,
   fone text,
+  -- [12/08/2026] SEM equivalente na API SGF (ClienteIntegracaoDto só
+  -- tem "fone") -- confirmado checando os 3 endpoints de leitura de
+  -- cliente, nenhum devolve celular. Só entra por importação manual de
+  -- relatório da Trier (ver supabase/importar_celular_clientes.sql) --
+  -- a sincronização normal (coletor) nunca escreve nesta coluna, então
+  -- fica intacta entre syncs.
+  celular text,
   bairro text,
   logradouro text,
   numero_endereco text,
@@ -886,12 +893,15 @@ from vw_metricas_vendedor_diario;
 -- Inclui email/data_nascimento pro card da tela mostrar direto, sem
 -- precisar de outra consulta. Usada pra listar + buscar cliente
 -- (01/08/2026).
+-- [12/08/2026] coalesce(celular, fone) — celular, quando existe, é
+-- número real de mobile (bem mais provável de ter WhatsApp); fone
+-- sozinho às vezes é fixo antigo sem DDD. Ver coluna celular acima.
 create view vw_clientes_por_vendedor as
 select
   v.codigo_vendedor,
   c.codigo,
   c.nome,
-  c.fone as telefone,
+  coalesce(c.celular, c.fone) as telefone,
   c.email,
   c.data_nascimento,
   count(distinct v.id) as qtd_compras,
@@ -901,7 +911,7 @@ from vendas v
 join venda_itens vi on vi.venda_id = v.id
 join clientes c on c.codigo = v.codigo_cliente
 where v.codigo_vendedor is not null and v.codigo_cliente is not null
-group by v.codigo_vendedor, c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
+group by v.codigo_vendedor, c.codigo, c.nome, c.fone, c.celular, c.email, c.data_nascimento;
 
 -- Mesma conta de vw_clientes_por_vendedor, mas somando QUALQUER
 -- vendedor — usada só pelo card "Cliente de alto valor sumindo" em
@@ -920,7 +930,7 @@ create view vw_clientes_valor_geral as
 select
   c.codigo,
   c.nome,
-  c.fone as telefone,
+  coalesce(c.celular, c.fone) as telefone,
   c.email,
   c.data_nascimento,
   count(distinct v.id) as qtd_compras,
@@ -930,7 +940,7 @@ from vendas v
 join venda_itens vi on vi.venda_id = v.id
 join clientes c on c.codigo = v.codigo_cliente
 where v.codigo_cliente is not null
-group by c.codigo, c.nome, c.fone, c.email, c.data_nascimento;
+group by c.codigo, c.nome, c.fone, c.celular, c.email, c.data_nascimento;
 
 -- ============================================================
 -- CARTEIRA DE CLIENTES (09/08/2026) — lista curada manualmente pelo
@@ -965,7 +975,7 @@ select
   cc.codigo_vendedor,
   c.codigo as codigo_cliente,
   c.nome,
-  c.fone as telefone,
+  coalesce(c.celular, c.fone) as telefone,
   cc.criado_em,
   coalesce(v6m.valor_total, 0) as valor_6_meses,
   coalesce(vm.qtd_compras_mes, 0) > 0 as comprado_este_mes,
@@ -995,6 +1005,38 @@ where exists (
   where p.id = auth.uid()
     and (p.role = 'gestor' or p.codigo_vendedor = cc.codigo_vendedor)
 );
+
+-- [NOTA 12/08/2026] Este bloco documenta vw_clientes_inatividade, que
+-- na prática só existia em migracao_clientes_inativos_3000_dias.sql
+-- (schema.sql estava desatualizado nesse ponto — corrigido agora,
+-- junto da mudança de coalesce(celular, fone)). Cliente pra "resgate"
+-- (tela Clientes) — limite de 3000 dias sem comprar pra não trazer
+-- cadastro morto de anos atrás sem fim.
+create or replace view vw_clientes_inatividade as
+select
+  c.codigo,
+  c.nome,
+  coalesce(c.celular, c.fone) as telefone,
+  ultima_venda.data_emissao as ultima_compra,
+  (current_date - ultima_venda.data_emissao) as dias_sem_comprar,
+  case when ultima_venda.data_emissao < current_date - interval '60 days' then true else false end as inativo,
+  ultima_venda.codigo_vendedor,
+  vd.nome as nome_vendedor
+from clientes c
+join lateral (
+  select v.data_emissao, v.codigo_vendedor
+  from vendas v
+  where v.codigo_cliente = c.codigo
+  order by v.data_emissao desc, v.id desc
+  limit 1
+) ultima_venda on true
+left join vendedores vd on vd.codigo = ultima_venda.codigo_vendedor
+where exists (
+  select 1 from profiles p where p.id = auth.uid()
+)
+and (current_date - ultima_venda.data_emissao) <= 3000;
+
+alter view vw_clientes_inatividade set (security_invoker = false);
 
 -- Histórico de compra por PRODUTO (não por nota) — 1 linha por item
 -- vendido, com nome do produto (produto_catalogo, sincronizado da
@@ -1504,7 +1546,7 @@ select
   pp.percentual_desconto,
   c.codigo as codigo_cliente,
   c.nome as nome_cliente,
-  c.fone as telefone_cliente,
+  coalesce(c.celular, c.fone) as telefone_cliente,
   max(v.data_emissao) as ultima_compra_produto,
   sum(vi.quantidade_produtos) as quantidade_total,
   pp.exige_receita,
@@ -1514,7 +1556,7 @@ join venda_itens vi on vi.codigo_produto = pp.codigo_produto
 join vendas v on v.id = vi.venda_id
 join clientes c on c.codigo = v.codigo_cliente
 group by pp.codigo_produto, pp.nome_produto, pp.preco_atual, pp.preco_anterior, pp.percentual_desconto,
-  c.codigo, c.nome, c.fone, pp.exige_receita, pp.tipo_receita;
+  c.codigo, c.nome, c.fone, c.celular, pp.exige_receita, pp.tipo_receita;
 
 -- Progresso de metas (mensal e semanal) — tela "Metas" (gestor) e o
 -- bloco de metas no Dashboard (todos). O "realizado" é calculado na

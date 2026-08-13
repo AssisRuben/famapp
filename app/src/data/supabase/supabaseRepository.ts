@@ -1137,6 +1137,22 @@ class SupabaseRepository implements DataRepository {
       .not('nome', 'ilike', '%DELIVERY%');
   }
 
+  async getStatusWhatsApp(_profile: Profile): Promise<Record<number, boolean>> {
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase
+        .from('clientes')
+        .select('codigo, tem_whatsapp')
+        .not('tem_whatsapp', 'is', null)
+        .order('codigo', { ascending: true })
+        .range(inicio, fim)
+    );
+    const mapa: Record<number, boolean> = {};
+    for (const r of linhas as { codigo: number; tem_whatsapp: boolean }[]) {
+      mapa[r.codigo] = r.tem_whatsapp;
+    }
+    return mapa;
+  }
+
   async getCatalogoProdutos(_profile: Profile): Promise<ProdutoCatalogo[]> {
     const linhas = await this.buscarPaginado((inicio, fim) =>
       this.queryProdutoCatalogo('*')

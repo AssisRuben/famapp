@@ -326,6 +326,7 @@ export function ClientesVendedorScreen() {
                       <WhatsAppButton
                         compact
                         telefone={item.telefone}
+                        codigoCliente={item.codigo}
                         mensagem={`Olá, ${nomeCurto(item.nome)}! Aqui é ${nomeCurto(profile?.nome ?? '')} da Farmácia Conviva Parquelândia 💊 Tudo bem?`}
                         onEnviado={() => registrarContatoCliente(item.codigo, 'whatsapp')}
                       />

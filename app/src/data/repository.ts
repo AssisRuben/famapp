@@ -207,6 +207,11 @@ export interface DataRepository {
   // real seria sincronizado do ProdutoIntegracaoDto (Trier); não tem
   // API de escrita pra desconto/campanha, então "campanha" é uma
   // entidade nossa (não existe no Trier).
+  // Mapa codigo_cliente -> tem_whatsapp, só das linhas já checadas
+  // (código ausente do mapa = "ainda não checado", chamador decide o
+  // fallback). Ver migracao_whatsapp_status.sql e
+  // coletor/evolution_verificar_whatsapp.n8n.json.
+  getStatusWhatsApp(profile: Profile): Promise<Record<number, boolean>>;
   getCatalogoProdutos(profile: Profile): Promise<ProdutoCatalogo[]>;
   sugerirProdutosCampanha(profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]>;
   getCampanhas(profile: Profile): Promise<Campanha[]>;

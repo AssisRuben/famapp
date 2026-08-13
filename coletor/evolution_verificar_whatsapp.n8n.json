@@ -1,0 +1,189 @@
+{
+  "name": "Evolution API - Verificar WhatsApp dos clientes",
+  "nodes": [
+    {
+      "id": "nota-geral",
+      "name": "Leia antes de importar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -80
+      ],
+      "parameters": {
+        "width": 560,
+        "height": 380,
+        "content": "## Evolution API -> Supabase: tem_whatsapp\n\n[12/08/2026] Checa em lote se o telefone dos clientes tem WhatsApp de verdade, usando o endpoint /chat/whatsappNumbers da Evolution API (nao e API oficial da Meta -- e baseada em engenharia reversa do WhatsApp Web via Baileys). Preenche `clientes.tem_whatsapp`, que o app usa pra colorir/desabilitar o botao de WhatsApp (ver app/src/components/WhatsAppButton.tsx e app/src/lib/whatsappStatus.ts).\n\n**Antes de importar, confira:**\n- Credencial Header Auth (ex.: \"Header Auth Evolution\"): campo Name = `apikey` (literal, e o nome do cabecalho HTTP, nao um rotulo), Value = a chave da instancia.\n- URL base no node HTTP Request -- confirme se e a raiz do dominio (sem `/manager`).\n- Nome da instancia na URL -- \"Assis Rubens\" com espaco, ja vem URL-encoded (%20) no node.\n- Aplique `supabase/migracao_whatsapp_status.sql` antes de rodar.\n\n**[12/08/2026] Prefere `clientes.celular` a `clientes.fone`** quando os dois existem -- celular e mais provavel de ter WhatsApp de verdade (fone as vezes e fixo antigo sem DDD). Ver supabase/migracao_celular_clientes.sql e supabase/importar_celular_clientes.sql.\n\n**Gatilho MANUAL, de proposito** (decisao do usuario 12/08/2026): sem agendamento automatico -- roda so quando alguem clicar \"Execute workflow\". Cada execucao pega ate 500 clientes com tem_whatsapp NULL e fone preenchido (nao vazio). So processa quem nunca foi checado -- uma vez checado (TRUE ou FALSE), NUNCA mais entra de novo automaticamente (decisao do usuario: sem reverificacao periodica, so se pedir explicitamente no futuro). Cliente novo (fone preenchido depois) entra sozinho no proximo clique, porque tem_whatsapp comeca NULL por padrao.\n\n**Risco aceito**: e API nao-oficial -- uso excessivo/automatizado pode levar o numero conectado a alguma restricao do WhatsApp. Por isso o gatilho manual (controle de quando/quantas vezes rodar fica com quem executa), nao um agendamento tipo o coletor da Trier."
+      }
+    },
+    {
+      "id": "trigger-manual",
+      "name": "Quando clicar em \"Execute workflow\"",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        460
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "buscar-clientes",
+      "name": "Buscar clientes sem checagem",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select codigo, coalesce(celular, fone) as fone\nfrom clientes\nwhere coalesce(celular, fone) is not null\n  and coalesce(celular, fone) <> ''\n  and tem_whatsapp is null\norder by codigo\nlimit 500;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "montar-lista",
+      "name": "Montar lista de números",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "const linhas = $input.all().map((i) => i.json);\n\n// Mesma normalizacao de app/src/lib/whatsapp.ts (buildWhatsAppUrl) --\n// tem que ficar identica nos dois lugares, senao o app pode mostrar o\n// botao habilitado (tem_whatsapp=true) mas falhar ao montar o link de\n// verdade no clique.\n// 12/13 digitos = ja tem DDI; 10/11 = DDD+numero, prefixa 55; 8/9 =\n// numero local SEM DDD (achado 12/08/2026 verificando telefone real\n// de cliente -- cadastro antigo nao salvava DDD), prefixa DDD padrao\n// + 55; resto = formato nao reconhecido, fica tem_whatsapp NULL.\nconst DDD_PADRAO = '85'; // Fortaleza, onde a farmacia fica -- confirmado com o usuario\nfunction normalizarNumero(foneBruto) {\n  const digits = String(foneBruto ?? '').replace(/\\D/g, '');\n  if (digits.length === 12 || digits.length === 13) return digits;\n  if (digits.length === 10 || digits.length === 11) return `55${digits}`;\n  if (digits.length === 8 || digits.length === 9) return `55${DDD_PADRAO}${digits}`;\n  return null;\n}\n\n// numero normalizado -> lista de codigo_cliente (mais de um cliente\n// pode compartilhar o mesmo telefone -- ex.: familia. Todos recebem o\n// mesmo resultado da checagem, ninguem fica de fora por causa disso).\nconst mapa = {};\nfor (const linha of linhas) {\n  const numero = normalizarNumero(linha.fone);\n  if (!numero) continue;\n  (mapa[numero] = mapa[numero] || []).push(linha.codigo);\n}\nconst numbers = Object.keys(mapa); // ja deduplicado (chave do objeto)\n\nreturn [{ json: { numbers, mapa, quantidade: numbers.length } }];"
+      }
+    },
+    {
+      "id": "chamar-evolution",
+      "name": "Verificar números (Evolution API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://automacao-evolution-api.xwew8a.easypanel.host/chat/whatsappNumbers/Assis%20Rubens",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"numbers\": $json.numbers } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth Evolution"
+        }
+      }
+    },
+    {
+      "id": "processar-resultado",
+      "name": "Processar resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// [12/08/2026] Confirmado em producao (n8n 2.32.7): o HTTP Request\n// node separa a resposta da Evolution API em UM ITEM POR NUMERO\n// (cada item.json = {jid, exists, number}), nao um item so com\n// {numbers: [...]} como a documentacao da Evolution API sugeria --\n// por isso $input.all(), nao $input.first().\nconst itens = $input.all().map((i) => i.json);\nconst mapa = $('Montar lista de números').first().json.mapa;\n\nfunction limparDigitos(numero) {\n  return String(numero ?? '').replace(/\\D/g, '');\n}\n\nconst atualizacoes = [];\nfor (const item of itens) {\n  // \"number\" ja vem sem o sufixo \"@s.whatsapp.net\" do jid -- limparDigitos\n  // e so uma garantia extra, nao estritamente necessaria pro \"number\".\n  const numeroLimpo = limparDigitos(item.number ?? item.jid ?? '');\n  const codigos = mapa[numeroLimpo];\n  if (!codigos) continue; // resposta nao bateu com nenhum numero que mandamos\n  for (const codigo of codigos) atualizacoes.push({ codigo, existe: !!item.exists });\n}\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  return String(Number(v));\n}\n\nlet sql = 'SELECT 1';\nif (atualizacoes.length > 0) {\n  const valores = atualizacoes.map((a) => `(${pgVal(a.codigo)}, ${pgVal(a.existe)})`).join(',\\n');\n  sql = `UPDATE clientes SET tem_whatsapp = c.tem_whatsapp\nFROM (VALUES ${valores}) AS c(codigo, tem_whatsapp)\nWHERE clientes.codigo = c.codigo;`;\n}\n\nreturn [{ json: { sql, qtdAtualizados: atualizacoes.length } }];"
+      }
+    },
+    {
+      "id": "atualizar-clientes",
+      "name": "Atualizar clientes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1120,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Quando clicar em \"Execute workflow\"": {
+      "main": [
+        [
+          {
+            "node": "Buscar clientes sem checagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar clientes sem checagem": {
+      "main": [
+        [
+          {
+            "node": "Montar lista de números",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar lista de números": {
+      "main": [
+        [
+          {
+            "node": "Verificar números (Evolution API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar números (Evolution API)": {
+      "main": [
+        [
+          {
+            "node": "Processar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar resultado": {
+      "main": [
+        [
+          {
+            "node": "Atualizar clientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}
