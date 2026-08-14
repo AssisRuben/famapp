@@ -1,4 +1,5 @@
 import type { User } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
 import { File as ExpoFile } from 'expo-file-system';
 import { supabase } from './client';
 import { DataRepository } from '../repository';
@@ -66,6 +67,23 @@ import { todayISO } from '../../lib/format';
 
 function round2(valor: number): number {
   return Math.round(valor * 100) / 100;
+}
+
+// A API File do expo-file-system (usada abaixo pra ler foto local
+// antes de subir pro Storage) é nativa-only — no web (Safari/Chrome
+// via Expo Web) ela quebra com "this.validatePath is not a function"
+// assim que chama .arrayBuffer(), porque o shim de web da lib não
+// implementa esse método. fetch(uri).arrayBuffer() funciona bem no web
+// (a uri ali é blob:/data:, não um path de arquivo), mas foi
+// especificamente pouco confiável pra arquivo local NATIVO no SDK 57 —
+// por isso o native continua usando a File API, e só o web cai pro
+// fetch (achado 18/08/2026).
+async function lerFotoComoArrayBuffer(uri: string): Promise<ArrayBuffer> {
+  if (Platform.OS === 'web') {
+    const resposta = await fetch(uri);
+    return resposta.arrayBuffer();
+  }
+  return new ExpoFile(uri).arrayBuffer();
 }
 
 function mapearProdutoCatalogo(r: any): ProdutoCatalogo {
@@ -798,10 +816,7 @@ class SupabaseRepository implements DataRepository {
     let fotoUrl: string | null = null;
     if (info.fotoUri) {
       const path = `${item.codigo_vendedor}/${itemId}.jpg`;
-      // fetch(uri).blob() pra arquivo local ficou pouco confiável no
-      // SDK 57 (Nova Arquitetura) — usa a API nova do expo-file-system
-      // (File implementa Blob e expõe .arrayBuffer() direto).
-      const arrayBuffer = await new ExpoFile(info.fotoUri).arrayBuffer();
+      const arrayBuffer = await lerFotoComoArrayBuffer(info.fotoUri);
       const { error: uploadError } = await supabase.storage.from('receitas').upload(path, arrayBuffer, {
         contentType: 'image/jpeg',
         upsert: true,
@@ -1689,7 +1704,7 @@ class SupabaseRepository implements DataRepository {
     // (registro novo) nem "dono da venda", então não tem por que
     // organizar em pasta.
     const path = `${Date.now()}-${Math.round(Math.random() * 1e6)}.jpg`;
-    const arrayBuffer = await new ExpoFile(input.fotoUri).arrayBuffer();
+    const arrayBuffer = await lerFotoComoArrayBuffer(input.fotoUri);
     const { error: uploadError } = await supabase.storage.from('pendencias').upload(path, arrayBuffer, {
       contentType: 'image/jpeg',
       upsert: true,
