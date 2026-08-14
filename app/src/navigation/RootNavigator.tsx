@@ -19,6 +19,7 @@ import { CampanhasScreen } from '../screens/CampanhasScreen';
 import { CartazetesScreen } from '../screens/CartazetesScreen';
 import { ComprasScreen } from '../screens/ComprasScreen';
 import { VendaAdicionalScreen } from '../screens/VendaAdicionalScreen';
+import { VendasComplementaresScreen } from '../screens/VendasComplementaresScreen';
 import { ProdutoEmFaltaScreen } from '../screens/ProdutoEmFaltaScreen';
 import { PrecificacaoScreen } from '../screens/PrecificacaoScreen';
 import { PendenciasScreen } from '../screens/PendenciasScreen';
@@ -95,6 +96,7 @@ function AppTabs() {
     { label: 'Produto em falta', emoji: '📦', onPress: () => irPara('ProdutoEmFalta') },
     { label: 'Pendências', emoji: '🗒️', onPress: () => irPara('Pendencias') },
     { label: 'Carteira de clientes', emoji: '💼', onPress: () => irPara('CarteiraClientes') },
+    { label: 'Vendas Complementares', emoji: '🧩', onPress: () => irPara('VendasComplementares') },
     ...(ehGestor
       ? [
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
@@ -228,6 +230,15 @@ function AppTabs() {
           options={{
             title: 'Venda adicional',
             tabBarIcon: ({ focused }) => <TabIcon emoji="🎁" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="VendasComplementares"
+          component={VendasComplementaresScreen}
+          options={{
+            title: 'Vendas Complementares',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🧩" focused={focused} />,
             ...abaOculta(true),
           }}
         />

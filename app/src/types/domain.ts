@@ -675,6 +675,70 @@ export interface VendaVendaAdicional {
 }
 
 // ============================================================
+// VENDAS COMPLEMENTARES (13/08/2026) — vendedor marca manualmente quais
+// itens da própria venda de HOJE foram venda complementar (upsell).
+// Diferente de Venda Adicional acima (automática, por produto
+// pré-escolhido em campanha) — aqui não tem produto pré-definido, é o
+// vendedor quem decide item por item. Ranking/premiação por período,
+// configurado pelo gestor, calculado no app em cima da soma de valor
+// (reaproveita PremiacaoRankingItem de Venda Adicional).
+// ============================================================
+
+// Um item de venda do dia (de um vendedor específico), pra tela de
+// marcação — vem TODO item do dia, marcado ou não, o checkbox decide.
+export interface ItemVendaComplementar {
+  itemId: string;
+  vendaId: string;
+  numeroNota: number | null;
+  dataVenda: string;
+  codigoProduto: number;
+  nomeProduto: string;
+  valor: number;
+  codigoCliente: number | null;
+  nomeCliente: string | null;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  marcado: boolean;
+}
+
+// Espelha campanhas_complementares.
+export interface CampanhaComplementar {
+  id: string;
+  dataInicio: string;
+  dataFim: string;
+  // Em REAIS (soma de valor complementar no período pra concorrer) —
+  // diferente de minimoParaConcorrer de Venda Adicional, que é
+  // quantidade. Null = sem piso.
+  valorMinimo: number | null;
+  // Quantidade de itens marcados como complementar no período — os
+  // dois pisos (valor e quantidade) são independentes, quem tem os
+  // dois precisa bater ambos. Null = sem piso de quantidade.
+  quantidadeMinima: number | null;
+  premiacaoRanking: PremiacaoRankingItem[];
+}
+
+export interface SalvarCampanhaComplementarInput {
+  id?: string;
+  dataInicio: string;
+  dataFim: string;
+  valorMinimo: number | null;
+  quantidadeMinima: number | null;
+  premiacaoRanking: PremiacaoRankingItem[];
+}
+
+// Uma linha marcada como complementar, já dentro do período de uma
+// campanha — matéria-prima pro cálculo de ranking (soma de valor por
+// vendedor), feito no app, mesmo padrão de VendaVendaAdicional.
+export interface VendaComplementarMarcada {
+  itemId: string;
+  dataVenda: string;
+  valor: number;
+  codigoVendedor: number;
+  nomeVendedor: string;
+  nomeProduto: string;
+}
+
+// ============================================================
 // PRODUTOS EM FALTA (03/08/2026) — registro manual e rápido de "esse
 // produto está em falta hoje", feito por qualquer vendedor no balcão.
 // DIFERENTE de SugestaoCompra (calculada por demanda/estoque) — aqui

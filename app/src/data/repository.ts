@@ -1,6 +1,7 @@
 import {
   AtividadeChecklist,
   Campanha,
+  CampanhaComplementar,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteBusca,
@@ -16,6 +17,7 @@ import {
   FaixaComissao,
   HistoricoCompraCliente,
   ItemPrecificacao,
+  ItemVendaComplementar,
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
@@ -32,6 +34,7 @@ import {
   RankingVendedorDia,
   RegistrarContatoInput,
   ResumoClientesInatividade,
+  SalvarCampanhaComplementarInput,
   SalvarCampanhaInput,
   SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
@@ -43,6 +46,7 @@ import {
   SugestaoCompra,
   TipoReceita,
   VendaAntimicrobianoRecente,
+  VendaComplementarMarcada,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
   VendaVendaAdicional,
@@ -225,6 +229,24 @@ export interface DataRepository {
   salvarCampanhaVendaAdicional(input: SalvarCampanhaVendaAdicionalInput): Promise<void>;
   excluirCampanhaVendaAdicional(id: string): Promise<void>;
   getVendasVendaAdicional(profile: Profile, campanhaId: string): Promise<VendaVendaAdicional[]>;
+
+  // Vendas complementares — vendedor marca item por item na própria
+  // venda de HOJE (codigoVendedor sempre o do próprio, exceto quando
+  // chamado pelo gestor revisando outro vendedor). data é sempre
+  // passada pra tela também servir de consulta somente-leitura de dias
+  // passados (marcação real só é aceita pra hoje, mas isso é regra da
+  // tela/RLS, o método em si não recusa).
+  getItensVendaComplementarDia(profile: Profile, data: string, codigoVendedor: number): Promise<ItemVendaComplementar[]>;
+  salvarVendasComplementaresDia(
+    profile: Profile,
+    data: string,
+    codigoVendedor: number,
+    itemIdsMarcados: string[]
+  ): Promise<void>;
+  getCampanhasComplementares(profile: Profile): Promise<CampanhaComplementar[]>;
+  salvarCampanhaComplementar(input: SalvarCampanhaComplementarInput): Promise<void>;
+  excluirCampanhaComplementar(id: string): Promise<void>;
+  getVendasComplementaresCampanha(profile: Profile, campanhaId: string): Promise<VendaComplementarMarcada[]>;
 
   // Produto em falta — lista compartilhada, qualquer autenticado
   // reporta/edita/apaga (não é gestor-only, é registro rápido de

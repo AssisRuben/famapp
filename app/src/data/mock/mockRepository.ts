@@ -3,6 +3,7 @@ import { DataRepository } from '../repository';
 import {
   AtividadeChecklist,
   Campanha,
+  CampanhaComplementar,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteBusca,
@@ -20,6 +21,7 @@ import {
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
   ItemPrecificacao,
+  ItemVendaComplementar,
   MetaSemana,
   MetaVendedor,
   MetricasVendedorDiario,
@@ -37,6 +39,7 @@ import {
   RankingVendedorDia,
   RegistrarContatoInput,
   ResumoClientesInatividade,
+  SalvarCampanhaComplementarInput,
   SalvarCampanhaInput,
   SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
@@ -47,6 +50,7 @@ import {
   SugestaoCompra,
   TipoReceita,
   VendaAntimicrobianoRecente,
+  VendaComplementarMarcada,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
   VendaVendaAdicional,
@@ -85,6 +89,8 @@ const CHECKLIST_ATIVIDADES_KEY = '@farmapp/checklist_atividades';
 const CHECKLIST_RESPOSTAS_KEY = '@farmapp/checklist_respostas';
 const CAMPANHAS_KEY = '@farmapp/campanhas';
 const CAMPANHAS_VENDA_ADICIONAL_KEY = '@farmapp/campanhas_venda_adicional';
+const CAMPANHAS_COMPLEMENTARES_KEY = '@farmapp/campanhas_complementares';
+const VENDA_ITEM_COMPLEMENTAR_KEY = '@farmapp/venda_item_complementar';
 const CONTATOS_CLIENTES_KEY = '@farmapp/contatos_clientes';
 const PRODUTOS_EM_FALTA_KEY = '@farmapp/produtos_em_falta';
 const PENDENCIAS_KEY = '@farmapp/pendencias';
@@ -282,6 +288,26 @@ async function getCampanhasVendaAdicionalStore(): Promise<CampanhaVendaAdicional
 
 async function salvarCampanhasVendaAdicionalStore(campanhas: CampanhaVendaAdicional[]): Promise<void> {
   await AsyncStorage.setItem(CAMPANHAS_VENDA_ADICIONAL_KEY, JSON.stringify(campanhas));
+}
+
+async function getCampanhasComplementaresStore(): Promise<CampanhaComplementar[]> {
+  const raw = await AsyncStorage.getItem(CAMPANHAS_COMPLEMENTARES_KEY);
+  return raw ? (JSON.parse(raw) as CampanhaComplementar[]) : [];
+}
+
+async function salvarCampanhasComplementaresStore(campanhas: CampanhaComplementar[]): Promise<void> {
+  await AsyncStorage.setItem(CAMPANHAS_COMPLEMENTARES_KEY, JSON.stringify(campanhas));
+}
+
+// Marcação mock: só a lista de itemIds marcados (sem timestamp/autoria
+// — o dev mock não precisa disso, diferente do Supabase de verdade).
+async function getItensComplementarMarcadosStore(): Promise<string[]> {
+  const raw = await AsyncStorage.getItem(VENDA_ITEM_COMPLEMENTAR_KEY);
+  return raw ? (JSON.parse(raw) as string[]) : [];
+}
+
+async function salvarItensComplementarMarcadosStore(itemIds: string[]): Promise<void> {
+  await AsyncStorage.setItem(VENDA_ITEM_COMPLEMENTAR_KEY, JSON.stringify(itemIds));
 }
 
 async function getContatosStore(): Promise<ContatoCliente[]> {
@@ -1282,6 +1308,109 @@ class MockRepository implements DataRepository {
         outrosProdutosNaVenda: null,
       }));
 
+    return delay(linhas);
+  }
+
+  async getItensVendaComplementarDia(
+    _profile: Profile,
+    data: string,
+    codigoVendedor: number
+  ): Promise<ItemVendaComplementar[]> {
+    const marcados = new Set(await getItensComplementarMarcadosStore());
+    const itens: ItemVendaComplementar[] = vendaItensDetalheSeed
+      .filter((v) => v.codigoVendedor === codigoVendedor && dataDiasAtras(v.diasAtras) === data)
+      .map((v) => {
+        const produto = catalogoProdutosSeed.find((p) => p.codigo === v.codigoProduto);
+        return {
+          itemId: v.id,
+          vendaId: v.id,
+          numeroNota: null,
+          dataVenda: data,
+          codigoProduto: v.codigoProduto,
+          nomeProduto: produto?.nome ?? `Produto ${v.codigoProduto}`,
+          valor: (produto?.precoVenda ?? 0) * v.quantidade,
+          codigoCliente: v.codigoCliente,
+          nomeCliente: nomeCliente(v.codigoCliente),
+          codigoVendedor: v.codigoVendedor,
+          nomeVendedor: nomeVendedor(v.codigoVendedor),
+          marcado: marcados.has(v.id),
+        };
+      });
+    return delay(itens);
+  }
+
+  async salvarVendasComplementaresDia(
+    _profile: Profile,
+    data: string,
+    codigoVendedor: number,
+    itemIdsMarcados: string[]
+  ): Promise<void> {
+    // sincroniza só os itens DESSE dia/vendedor — não mexe na marcação
+    // de outros dias/vendedores já salva.
+    const idsDoContexto = new Set(
+      vendaItensDetalheSeed
+        .filter((v) => v.codigoVendedor === codigoVendedor && dataDiasAtras(v.diasAtras) === data)
+        .map((v) => v.id)
+    );
+    const atuais = await getItensComplementarMarcadosStore();
+    const foraDoContexto = atuais.filter((id) => !idsDoContexto.has(id));
+    await salvarItensComplementarMarcadosStore([...foraDoContexto, ...itemIdsMarcados]);
+  }
+
+  async getCampanhasComplementares(_profile: Profile): Promise<CampanhaComplementar[]> {
+    const campanhas = await getCampanhasComplementaresStore();
+    return delay([...campanhas].sort((a, b) => b.dataInicio.localeCompare(a.dataInicio)));
+  }
+
+  async salvarCampanhaComplementar(input: SalvarCampanhaComplementarInput): Promise<void> {
+    const campanhas = await getCampanhasComplementaresStore();
+    if (input.id) {
+      const existente = campanhas.find((c) => c.id === input.id);
+      if (!existente) throw new Error('Campanha não encontrada.');
+      existente.dataInicio = input.dataInicio;
+      existente.dataFim = input.dataFim;
+      existente.valorMinimo = input.valorMinimo;
+      existente.quantidadeMinima = input.quantidadeMinima;
+      existente.premiacaoRanking = input.premiacaoRanking;
+    } else {
+      campanhas.push({
+        id: `complementar-${Date.now()}`,
+        dataInicio: input.dataInicio,
+        dataFim: input.dataFim,
+        valorMinimo: input.valorMinimo,
+        quantidadeMinima: input.quantidadeMinima,
+        premiacaoRanking: input.premiacaoRanking,
+      });
+    }
+    await salvarCampanhasComplementaresStore(campanhas);
+  }
+
+  async excluirCampanhaComplementar(id: string): Promise<void> {
+    const campanhas = await getCampanhasComplementaresStore();
+    await salvarCampanhasComplementaresStore(campanhas.filter((c) => c.id !== id));
+  }
+
+  async getVendasComplementaresCampanha(_profile: Profile, campanhaId: string): Promise<VendaComplementarMarcada[]> {
+    const campanhas = await getCampanhasComplementaresStore();
+    const campanha = campanhas.find((c) => c.id === campanhaId);
+    if (!campanha) return delay([]);
+
+    const marcados = new Set(await getItensComplementarMarcadosStore());
+    const linhas: VendaComplementarMarcada[] = vendaItensDetalheSeed
+      .filter((v) => marcados.has(v.id))
+      .map((v) => ({ v, dataVenda: dataDiasAtras(v.diasAtras) }))
+      .filter(({ dataVenda }) => dataVenda >= campanha.dataInicio && dataVenda <= campanha.dataFim)
+      .map(({ v, dataVenda }) => {
+        const produto = catalogoProdutosSeed.find((p) => p.codigo === v.codigoProduto);
+        return {
+          itemId: v.id,
+          dataVenda,
+          valor: (produto?.precoVenda ?? 0) * v.quantidade,
+          codigoVendedor: v.codigoVendedor,
+          nomeVendedor: nomeVendedor(v.codigoVendedor),
+          nomeProduto: produto?.nome ?? `Produto ${v.codigoProduto}`,
+        };
+      });
     return delay(linhas);
   }
 

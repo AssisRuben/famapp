@@ -506,6 +506,57 @@ left join vendedores vd on vd.codigo = v.codigo_vendedor
 left join clientes c on c.codigo = v.codigo_cliente;
 
 -- ============================================================
+-- VENDAS COMPLEMENTARES (13/08/2026) — vendedor marca manualmente quais
+-- itens da própria venda do dia foram venda complementar (upsell, "e
+-- mais uma coisa"). DIFERENTE de Venda Adicional acima (automática,
+-- por produto pré-escolhido em campanha) — aqui é o vendedor quem
+-- decide e marca, item por item, sem produto pré-definido. Só edita o
+-- dia de hoje (regra da tela, não do banco).
+-- ============================================================
+create table venda_item_complementar (
+  id bigserial primary key,
+  venda_item_id bigint not null unique references venda_itens(id) on delete cascade,
+  codigo_vendedor integer not null references vendedores(codigo),
+  marcado_por uuid references auth.users(id),
+  marcado_em timestamptz not null default now()
+);
+
+create index idx_venda_item_complementar_vendedor on venda_item_complementar (codigo_vendedor);
+
+-- Config do ranking/premiação (gestor decide período) — valor_minimo é
+-- em REAIS (soma vendida em complementares pra concorrer), diferente
+-- do minimo_para_concorrer de venda_adicional (que é quantidade).
+create table campanhas_complementares (
+  id bigserial primary key,
+  data_inicio date not null,
+  data_fim date not null,
+  valor_minimo numeric(12,2) check (valor_minimo > 0),
+  quantidade_minima integer check (quantidade_minima > 0),
+  premiacao_ranking jsonb not null,
+  criado_por uuid references auth.users(id),
+  created_at timestamptz not null default now()
+);
+
+-- Vendas marcadas, já com valor e vendedor — matéria-prima do ranking.
+-- Propositalmente SEM security_invoker (mesma família de
+-- vw_ranking_vendedores_dia): todo vendedor precisa ver a linha de
+-- TODOS pra saber sua posição, não só a própria.
+create view vw_venda_complementar_marcada as
+select
+  vic.venda_item_id,
+  vic.codigo_vendedor,
+  vd.nome as nome_vendedor,
+  v.data_emissao,
+  vi.valor_total_liquido as valor,
+  vi.codigo_produto
+from venda_item_complementar vic
+join venda_itens vi on vi.id = vic.venda_item_id
+join vendas v on v.id = vi.venda_id
+left join vendedores vd on vd.codigo = vic.codigo_vendedor;
+
+alter view vw_venda_complementar_marcada set (security_invoker = false);
+
+-- ============================================================
 -- PRODUTOS EM FALTA (03/08/2026) — registro manual e rápido de "esse
 -- produto está em falta hoje", feito por qualquer vendedor no balcão.
 -- DIFERENTE de Compras/Dose Certa (sugestão automática por demanda e

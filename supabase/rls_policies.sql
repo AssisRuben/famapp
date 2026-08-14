@@ -363,6 +363,73 @@ using (exists (
   select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
 ));
 
+-- venda_item_complementar: marcação manual do vendedor (ver
+-- schema.sql). Select: qualquer autenticado lê (mesmo critério de
+-- campanhas_complementares — já é exposto pra todo mundo via
+-- vw_venda_complementar_marcada mesmo). Insert/delete: vendedor só no
+-- próprio; gestor em qualquer um (pedido explícito do usuário).
+alter table venda_item_complementar enable row level security;
+
+create policy "venda_item_complementar: autenticados leem"
+on venda_item_complementar for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "venda_item_complementar: vendedor marca o proprio ou gestor marca qualquer"
+on venda_item_complementar for insert
+with check (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (
+      p.role = 'gestor'
+      or (p.role = 'vendedor' and p.codigo_vendedor = venda_item_complementar.codigo_vendedor)
+    )
+));
+
+create policy "venda_item_complementar: vendedor desmarca o proprio ou gestor desmarca qualquer"
+on venda_item_complementar for delete
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (
+      p.role = 'gestor'
+      or (p.role = 'vendedor' and p.codigo_vendedor = venda_item_complementar.codigo_vendedor)
+    )
+));
+
+-- campanhas_complementares: mesmo critério de campanhas_venda_adicional
+-- — todo mundo lê (vendedor precisa ver o próprio ranking/prêmio), só
+-- gestor escreve.
+alter table campanhas_complementares enable row level security;
+
+create policy "campanhas_complementares: autenticados leem"
+on campanhas_complementares for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "campanhas_complementares: gestor insere"
+on campanhas_complementares for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "campanhas_complementares: gestor atualiza"
+on campanhas_complementares for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "campanhas_complementares: gestor apaga"
+on campanhas_complementares for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
 -- produtos_em_falta: lista compartilhada, não é log de auditoria — CRUD
 -- aberto pra qualquer autenticado, inclusive editar/apagar registro de
 -- outra pessoa (o objetivo é o time manter a lista do mês limpa).

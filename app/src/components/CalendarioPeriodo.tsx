@@ -8,6 +8,10 @@ interface CalendarioPeriodoProps {
   visible: boolean;
   onClose: () => void;
   onConfirmar: (dataInicio: string, dataFim: string) => void;
+  // Dashboard filtra desempenho passado (sem dado futuro pra mostrar);
+  // campanhas/ranking são majoritariamente pra frente — esse flag
+  // troca o calendário pro segundo caso sem duplicar o componente.
+  permitirDatasFuturas?: boolean;
 }
 
 const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
@@ -30,7 +34,7 @@ function paraIso(ano: number, mes: number, dia: number): string {
 // Monta as 42 células (6 semanas x 7 dias) do mês visível — null nas
 // pontas fora do mês e em dias futuros (sem dado de venda pra mostrar,
 // então não fazem sentido escolher).
-function montarGrade(ano: number, mes: number, hojeIso: string): (string | null)[] {
+function montarGrade(ano: number, mes: number, hojeIso: string, permitirDatasFuturas: boolean): (string | null)[] {
   const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
   const diasNoMes = new Date(ano, mes + 1, 0).getDate();
   const celulas: (string | null)[] = [];
@@ -38,14 +42,14 @@ function montarGrade(ano: number, mes: number, hojeIso: string): (string | null)
   for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
   for (let dia = 1; dia <= diasNoMes; dia++) {
     const iso = paraIso(ano, mes, dia);
-    celulas.push(iso > hojeIso ? null : iso);
+    celulas.push(!permitirDatasFuturas && iso > hojeIso ? null : iso);
   }
   while (celulas.length < LINHAS_GRADE * COLUNAS_GRADE) celulas.push(null);
 
   return celulas;
 }
 
-export function CalendarioPeriodo({ visible, onClose, onConfirmar }: CalendarioPeriodoProps) {
+export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatasFuturas = false }: CalendarioPeriodoProps) {
   const hoje = new Date();
   const [mesVisivel, setMesVisivel] = useState({ ano: hoje.getFullYear(), mes: hoje.getMonth() });
   const [ancora, setAncora] = useState<string | null>(null);
@@ -53,7 +57,11 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar }: CalendarioP
   const [larguraGrade, setLarguraGrade] = useState(0);
 
   const hojeIso = todayISO();
-  const grade = useMemo(() => montarGrade(mesVisivel.ano, mesVisivel.mes, hojeIso), [mesVisivel, hojeIso]);
+  const grade = useMemo(
+    () => montarGrade(mesVisivel.ano, mesVisivel.mes, hojeIso, permitirDatasFuturas),
+    [mesVisivel, hojeIso, permitirDatasFuturas]
+  );
+  const noMesAtual = mesVisivel.ano === hoje.getFullYear() && mesVisivel.mes === hoje.getMonth();
 
   const [inicio, fim] = ancora && foco ? [ancora, foco].sort() : [null, null];
 
@@ -134,15 +142,11 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar }: CalendarioP
             <Text style={styles.mesLabel}>
               {NOMES_MES_LONGO[mesVisivel.mes]} {mesVisivel.ano}
             </Text>
-            <Pressable
-              onPress={() => trocarMes(1)}
-              hitSlop={8}
-              disabled={mesVisivel.ano === hoje.getFullYear() && mesVisivel.mes === hoje.getMonth()}
-            >
+            <Pressable onPress={() => trocarMes(1)} hitSlop={8} disabled={!permitirDatasFuturas && noMesAtual}>
               <Ionicons
                 name="chevron-forward"
                 size={22}
-                color={mesVisivel.ano === hoje.getFullYear() && mesVisivel.mes === hoje.getMonth() ? colors.textMuted : colors.navy}
+                color={!permitirDatasFuturas && noMesAtual ? colors.textMuted : colors.navy}
               />
             </Pressable>
           </View>

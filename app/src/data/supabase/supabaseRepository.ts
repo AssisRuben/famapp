@@ -5,6 +5,7 @@ import { DataRepository } from '../repository';
 import {
   AtividadeChecklist,
   Campanha,
+  CampanhaComplementar,
   CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteBusca,
@@ -21,6 +22,7 @@ import {
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
   ItemPrecificacao,
+  ItemVendaComplementar,
   MetaSemana,
   MetaVendedor,
   MetricasVendedorDiario,
@@ -39,6 +41,7 @@ import {
   RegistrarContatoInput,
   ResumoClientesInatividade,
   Role,
+  SalvarCampanhaComplementarInput,
   SalvarCampanhaInput,
   SalvarCampanhaVendaAdicionalInput,
   SalvarMetaInput,
@@ -49,6 +52,7 @@ import {
   SugestaoCompra,
   TipoReceita,
   VendaAntimicrobianoRecente,
+  VendaComplementarMarcada,
   VendaReceitaPendente,
   VendaSemIdentificacaoComprador,
   VendaVendaAdicional,
@@ -1399,6 +1403,207 @@ class SupabaseRepository implements DataRepository {
       nomeCliente: r.nome_cliente,
       qtdItensNaVenda: Number(r.qtd_itens_na_venda),
       outrosProdutosNaVenda: r.outros_produtos_na_venda,
+    }));
+  }
+
+  async getItensVendaComplementarDia(
+    _profile: Profile,
+    data: string,
+    codigoVendedor: number
+  ): Promise<ItemVendaComplementar[]> {
+    const { data: linhas, error } = await supabase
+      .from('venda_itens')
+      .select(
+        'id, venda_id, codigo_produto, valor_total_liquido, codigo_vendedor, ' +
+          'vendedores(nome), ' +
+          'vendas!inner(numero_nota, data_emissao, codigo_cliente, clientes(nome))'
+      )
+      .eq('codigo_vendedor', codigoVendedor)
+      .eq('vendas.data_emissao', data)
+      .order('id', { ascending: true });
+    if (error) throw error;
+
+    const linhasArr = (linhas ?? []) as any[];
+
+    // Marcação buscada à parte (não embutida no select acima): RLS em
+    // embed aninhado (child(id) dentro do select da tabela pai) não é
+    // confiável — voltava sempre vazio pro gestor mesmo com a linha
+    // existindo, a marcação "sumia" ao reabrir mesmo já salva (achado
+    // 18/08/2026). Consulta direta na tabela, mesmo padrão já usado em
+    // salvarVendasComplementaresDia, funciona.
+    const idsItens = linhasArr.map((r) => Number(r.id));
+    let idsMarcados = new Set<number>();
+    if (idsItens.length > 0) {
+      const { data: marcas, error: erroMarcas } = await supabase
+        .from('venda_item_complementar')
+        .select('venda_item_id')
+        .in('venda_item_id', idsItens);
+      if (erroMarcas) throw erroMarcas;
+      // Number(...) explícito — bigint costuma vir como STRING do
+      // PostgREST (evita perda de precisão), então "as number" (só
+      // tipagem, não converte nada em runtime) deixava a comparação no
+      // Set falhando silenciosamente sempre que os dois lados vinham
+      // com tipos diferentes (achado 18/08/2026).
+      idsMarcados = new Set((marcas ?? []).map((m: any) => Number(m.venda_item_id)));
+    }
+
+    const codigosProduto = [...new Set(linhasArr.map((r) => r.codigo_produto))];
+    let nomePorCodigo = new Map<number, string>();
+    if (codigosProduto.length > 0) {
+      const { data: produtos, error: erroProdutos } = await supabase
+        .from('produto_catalogo')
+        .select('codigo, nome')
+        .in('codigo', codigosProduto);
+      if (erroProdutos) throw erroProdutos;
+      nomePorCodigo = new Map((produtos ?? []).map((p: any) => [p.codigo, p.nome]));
+    }
+
+    return linhasArr.map((r) => ({
+      itemId: String(r.id),
+      vendaId: String(r.venda_id),
+      numeroNota: r.vendas?.numero_nota ?? null,
+      dataVenda: r.vendas?.data_emissao ?? data,
+      codigoProduto: r.codigo_produto,
+      nomeProduto: nomePorCodigo.get(r.codigo_produto) ?? `Produto ${r.codigo_produto}`,
+      valor: Number(r.valor_total_liquido ?? 0),
+      codigoCliente: r.vendas?.codigo_cliente ?? null,
+      nomeCliente: r.vendas?.clientes?.nome ?? null,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.vendedores?.nome ?? `Vendedor ${r.codigo_vendedor}`,
+      marcado: idsMarcados.has(Number(r.id)),
+    }));
+  }
+
+  async salvarVendasComplementaresDia(
+    profile: Profile,
+    data: string,
+    codigoVendedor: number,
+    itemIdsMarcados: string[]
+  ): Promise<void> {
+    // universo de itens desse vendedor nesse dia — decide o que
+    // desmarcar (tudo que está fora da lista marcada agora).
+    const { data: linhas, error: erroLinhas } = await supabase
+      .from('venda_itens')
+      .select('id, vendas!inner(data_emissao)')
+      .eq('codigo_vendedor', codigoVendedor)
+      .eq('vendas.data_emissao', data);
+    if (erroLinhas) throw erroLinhas;
+
+    const idsDoContexto = (linhas ?? []).map((r: any) => r.id as number);
+    const idsMarcadosNum = new Set(itemIdsMarcados.map(Number));
+    const idsParaDesmarcar = idsDoContexto.filter((id) => !idsMarcadosNum.has(id));
+
+    if (idsParaDesmarcar.length > 0) {
+      const { error } = await supabase.from('venda_item_complementar').delete().in('venda_item_id', idsParaDesmarcar);
+      if (error) throw error;
+    }
+
+    // Só insere quem AINDA não tem linha — reenviar um item já marcado
+    // não deve tocar a linha existente. Upsert com onConflict faria um
+    // UPDATE no conflito, e não existe policy de UPDATE nessa tabela
+    // (existência da linha já É o "marcado", nunca precisa atualizar
+    // uma linha existente) — sem a policy o UPDATE é bloqueado pela
+    // RLS e a marcação "sumia" ao reabrir depois de marcar de novo
+    // (achado 18/08/2026).
+    let idsParaInserir: number[] = [];
+    if (idsMarcadosNum.size > 0) {
+      const { data: jaMarcados, error: erroJaMarcados } = await supabase
+        .from('venda_item_complementar')
+        .select('venda_item_id')
+        .in('venda_item_id', [...idsMarcadosNum]);
+      if (erroJaMarcados) throw erroJaMarcados;
+      const idsJaMarcados = new Set((jaMarcados ?? []).map((r: any) => r.venda_item_id as number));
+      idsParaInserir = [...idsMarcadosNum].filter((id) => !idsJaMarcados.has(id));
+    }
+
+    if (idsParaInserir.length > 0) {
+      const { error } = await supabase.from('venda_item_complementar').insert(
+        idsParaInserir.map((venda_item_id) => ({
+          venda_item_id,
+          codigo_vendedor: codigoVendedor,
+          marcado_por: profile.id,
+        }))
+      );
+      if (error) throw error;
+    }
+  }
+
+  async getCampanhasComplementares(_profile: Profile): Promise<CampanhaComplementar[]> {
+    const { data, error } = await supabase
+      .from('campanhas_complementares')
+      .select('id, data_inicio, data_fim, valor_minimo, quantidade_minima, premiacao_ranking')
+      .order('data_inicio', { ascending: false });
+    if (error) throw error;
+
+    return (data ?? []).map((c: any) => ({
+      id: String(c.id),
+      dataInicio: c.data_inicio,
+      dataFim: c.data_fim,
+      valorMinimo: c.valor_minimo != null ? Number(c.valor_minimo) : null,
+      quantidadeMinima: c.quantidade_minima != null ? Number(c.quantidade_minima) : null,
+      premiacaoRanking: c.premiacao_ranking ?? [],
+    }));
+  }
+
+  async salvarCampanhaComplementar(input: SalvarCampanhaComplementarInput): Promise<void> {
+    const payload = {
+      data_inicio: input.dataInicio,
+      data_fim: input.dataFim,
+      valor_minimo: input.valorMinimo,
+      quantidade_minima: input.quantidadeMinima,
+      premiacao_ranking: input.premiacaoRanking,
+    };
+
+    if (input.id) {
+      const { error } = await supabase.from('campanhas_complementares').update(payload).eq('id', Number(input.id));
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('campanhas_complementares').insert(payload);
+      if (error) throw error;
+    }
+  }
+
+  async excluirCampanhaComplementar(id: string): Promise<void> {
+    const { error } = await supabase.from('campanhas_complementares').delete().eq('id', Number(id));
+    if (error) throw error;
+  }
+
+  async getVendasComplementaresCampanha(_profile: Profile, campanhaId: string): Promise<VendaComplementarMarcada[]> {
+    const { data: campanhaRow, error: erroCampanha } = await supabase
+      .from('campanhas_complementares')
+      .select('data_inicio, data_fim')
+      .eq('id', Number(campanhaId))
+      .single();
+    if (erroCampanha || !campanhaRow) throw erroCampanha ?? new Error('Campanha não encontrada.');
+
+    const { data, error } = await supabase
+      .from('vw_venda_complementar_marcada')
+      .select('*')
+      .gte('data_emissao', campanhaRow.data_inicio)
+      .lte('data_emissao', campanhaRow.data_fim);
+    if (error) throw error;
+
+    const linhas = (data ?? []) as any[];
+    // codigo_produto não tem FK formal pra produto_catalogo (mesmo
+    // caso de getItensVendaComplementarDia) — busca os nomes à parte.
+    const codigosProduto = [...new Set(linhas.map((r) => r.codigo_produto))];
+    let nomePorCodigo = new Map<number, string>();
+    if (codigosProduto.length > 0) {
+      const { data: produtos, error: erroProdutos } = await supabase
+        .from('produto_catalogo')
+        .select('codigo, nome')
+        .in('codigo', codigosProduto);
+      if (erroProdutos) throw erroProdutos;
+      nomePorCodigo = new Map((produtos ?? []).map((p: any) => [p.codigo, p.nome]));
+    }
+
+    return linhas.map((r) => ({
+      itemId: String(r.venda_item_id),
+      dataVenda: r.data_emissao,
+      valor: Number(r.valor ?? 0),
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor ?? `Vendedor ${r.codigo_vendedor}`,
+      nomeProduto: nomePorCodigo.get(r.codigo_produto) ?? `Produto ${r.codigo_produto}`,
     }));
   }
 
