@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -249,24 +250,64 @@ function CardNota({
   );
 }
 
+const FRASES_SALVO = [
+  'Agora, você se garantiu! 🎉',
+  'Isso aí, mais um pra conta do prêmio! 💰',
+  'Vendeu, marcou, ganhou! 🏆',
+  'Boa! O ranking já sentiu essa. 📈',
+  'Na conta do prêmio, hein! 😎',
+  'Mandou bem — o pódio agradece. 🥇',
+];
+
+interface InfoModalSalvo {
+  quantidade: number;
+  valor: number;
+  frase: string;
+}
+
+function ModalSalvo({ info, onClose }: { info: InfoModalSalvo | null; onClose: () => void }) {
+  return (
+    <Modal visible={info != null} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalSalvoFundo} onPress={onClose}>
+        <Pressable style={styles.modalSalvoCartao} onPress={(e) => e.stopPropagation()}>
+          <Text style={styles.modalSalvoEmoji}>🎉</Text>
+          <Text style={styles.modalSalvoFrase}>{info?.frase}</Text>
+          {info && (
+            <Text style={styles.modalSalvoResumo}>
+              {info.quantidade} {info.quantidade === 1 ? 'item marcado' : 'itens marcados'} · {formatBRL(info.valor)}
+            </Text>
+          )}
+          <Pressable style={styles.modalSalvoBotao} onPress={onClose}>
+            <Text style={styles.botaoTexto}>Fechar</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // "Viewer": lista dos itens do dia (rolando dentro do próprio espaço)
 // com o botão Salvar fixo embaixo, fora da rolagem — reaproveitada
 // pelo vendedor (sempre o próprio código) e pelo gestor (ao abrir o
-// card de um vendedor).
+// card de um vendedor). onSalvar avisa o pai (ex.: pra atualizar o
+// CardResumoCampanha na hora, sem precisar sair e voltar da tela).
 function ItensDoDia({
   codigoVendedor,
   diaSelecionado,
   editavel,
+  onSalvar,
 }: {
   codigoVendedor: number;
   diaSelecionado: string;
   editavel: boolean;
+  onSalvar?: () => void;
 }) {
   const { profile } = useAuth();
   const [itens, setItens] = useState<ItemVendaComplementar[]>([]);
   const [marcados, setMarcados] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [modalSalvo, setModalSalvo] = useState<InfoModalSalvo | null>(null);
 
   const carregar = useCallback(async () => {
     if (!profile) return;
@@ -293,13 +334,28 @@ function ItensDoDia({
     });
   };
 
+  // Soma ao vivo do que está marcado agora — atualiza a cada toque,
+  // antes mesmo de salvar (pedido explícito do usuário).
+  const resumoSelecao = useMemo(() => {
+    const selecionados = itens.filter((i) => marcados.has(i.itemId));
+    return {
+      quantidade: selecionados.length,
+      valor: selecionados.reduce((soma, i) => soma + i.valor, 0),
+    };
+  }, [itens, marcados]);
+
   const salvar = async () => {
     if (!profile) return;
     setSalvando(true);
     try {
       await repository.salvarVendasComplementaresDia(profile, diaSelecionado, codigoVendedor, [...marcados]);
-      alertar('Salvo', 'Vendas complementares atualizadas.');
+      setModalSalvo({
+        quantidade: resumoSelecao.quantidade,
+        valor: resumoSelecao.valor,
+        frase: FRASES_SALVO[Math.floor(Math.random() * FRASES_SALVO.length)],
+      });
       await carregar();
+      onSalvar?.();
     } catch (erro) {
       alertar('Erro ao salvar', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
@@ -329,11 +385,17 @@ function ItensDoDia({
       />
       {editavel && itens.length > 0 && (
         <View style={styles.rodapeFixo}>
+          <Text style={styles.resumoSelecaoTexto}>
+            {resumoSelecao.quantidade > 0
+              ? `${resumoSelecao.quantidade} ${resumoSelecao.quantidade === 1 ? 'item selecionado' : 'itens selecionados'} · ${formatBRL(resumoSelecao.valor)}`
+              : 'Nenhum item selecionado ainda'}
+          </Text>
           <Pressable style={styles.botaoSalvar} onPress={salvar} disabled={salvando}>
             {salvando ? <ActivityIndicator color={colors.white} /> : <Text style={styles.botaoTexto}>Salvar</Text>}
           </Pressable>
         </View>
       )}
+      <ModalSalvo info={modalSalvo} onClose={() => setModalSalvo(null)} />
     </View>
   );
 }
@@ -400,18 +462,26 @@ function TelaVendedor({ codigoVendedor }: { codigoVendedor: number }) {
   const { inicio, fim, temCampanha, campanha } = usePeriodoVigente();
   const [diaSelecionado, setDiaSelecionado] = useDiaNoPeriodo(inicio, fim);
   const editavel = diaSelecionado === todayISO();
+  // Muda a cada "Salvar" bem-sucedido — vira key do card, forçando ele
+  // a buscar de novo e refletir na hora o que acabou de ser marcado.
+  const [versaoResumo, setVersaoResumo] = useState(0);
 
   return (
     <View style={styles.telaFlex}>
       <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
-      {campanha && <CardResumoCampanha campanha={campanha} />}
+      {campanha && <CardResumoCampanha key={versaoResumo} campanha={campanha} />}
       {!temCampanha && (
         <Text style={styles.hintSomenteLeitura}>Nenhum período de ranking cadastrado ainda — mostrando a semana atual.</Text>
       )}
       {!editavel && (
         <Text style={styles.hintSomenteLeitura}>Só é possível marcar/desmarcar o dia de hoje — isso aqui é só consulta.</Text>
       )}
-      <ItensDoDia codigoVendedor={codigoVendedor} diaSelecionado={diaSelecionado} editavel={editavel} />
+      <ItensDoDia
+        codigoVendedor={codigoVendedor}
+        diaSelecionado={diaSelecionado}
+        editavel={editavel}
+        onSalvar={() => setVersaoResumo((v) => v + 1)}
+      />
     </View>
   );
 }
@@ -454,6 +524,10 @@ function TelaGestorMarcar() {
   const [resumos, setResumos] = useState<ResumoVendedorDia[]>([]);
   const [loadingResumo, setLoadingResumo] = useState(true);
   const [vendedorAberto, setVendedorAberto] = useState<number | null>(null);
+  // Muda a cada "Salvar" bem-sucedido no viewer de um vendedor — vira
+  // key do card, forçando ele a buscar de novo assim que o gestor
+  // volta pra lista.
+  const [versaoResumo, setVersaoResumo] = useState(0);
 
   useEffect(() => {
     if (!profile) return;
@@ -493,7 +567,12 @@ function TelaGestorMarcar() {
           </Text>
         </Pressable>
         <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
-        <ItensDoDia codigoVendedor={vendedorAberto} diaSelecionado={diaSelecionado} editavel />
+        <ItensDoDia
+          codigoVendedor={vendedorAberto}
+          diaSelecionado={diaSelecionado}
+          editavel
+          onSalvar={() => setVersaoResumo((v) => v + 1)}
+        />
       </View>
     );
   }
@@ -501,7 +580,7 @@ function TelaGestorMarcar() {
   return (
     <View style={styles.telaFlex}>
       <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
-      {campanha && <CardResumoCampanha campanha={campanha} />}
+      {campanha && <CardResumoCampanha key={versaoResumo} campanha={campanha} />}
       {!temCampanha && (
         <Text style={styles.hintSomenteLeitura}>Nenhum período de ranking cadastrado ainda — mostrando a semana atual.</Text>
       )}
@@ -883,6 +962,32 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
+  },
+  resumoSelecaoTexto: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalSalvoFundo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  modalSalvoCartao: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 24,
+    width: '85%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  modalSalvoEmoji: { fontSize: 44, marginBottom: 10 },
+  modalSalvoFrase: { fontSize: 18, fontWeight: '700', color: colors.textPrimary, textAlign: 'center', marginBottom: 8 },
+  modalSalvoResumo: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 20 },
+  modalSalvoBotao: {
+    backgroundColor: colors.navy,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    alignItems: 'center',
   },
   seletorDiaWrap: { marginBottom: 12, flexGrow: 0 },
   seletorDiaConteudo: { gap: 8, paddingRight: 8 },
