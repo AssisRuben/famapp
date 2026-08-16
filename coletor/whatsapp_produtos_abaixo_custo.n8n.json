@@ -1,0 +1,114 @@
+{
+  "name": "WhatsApp - Produtos vendidos abaixo do custo",
+  "nodes": [
+    {
+      "id": "trigger-0810",
+      "name": "Todo dia às 08:10",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        460
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 8,
+              "triggerAtMinute": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "buscar-abaixo-custo",
+      "name": "Buscar produtos abaixo do custo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with vendas_recentes as (\n  select codigo_produto, quantidade_vendida_30d\n  from vw_venda_recente_produto\n  where quantidade_vendida_30d > 0\n)\nselect\n  pc.codigo as codigo_produto,\n  pc.nome as nome_produto,\n  pc.custo_medio,\n  pc.preco_venda,\n  round(((pc.preco_venda - pc.custo_medio) / nullif(pc.preco_venda, 0)) * 100, 1) as margem_pct,\n  round(vr.quantidade_vendida_30d)::int as quantidade_vendida_30d,\n  round((pc.custo_medio - pc.preco_venda) * vr.quantidade_vendida_30d, 2) as prejuizo_estimado_30d\nfrom produto_catalogo pc\njoin vendas_recentes vr on vr.codigo_produto = pc.codigo\nwhere pc.estoque_atual > 0\n  and pc.custo_medio > 0\n  and pc.preco_venda > 0\n  and pc.preco_venda < pc.custo_medio\nand upper(trim(pc.nome)) not like '%TAXA%'\n  and upper(trim(pc.grupo)) ~ '^(ETICO|GENERICO|SIMILAR|ORELHINHA|FRALDAS|PRODUTOS INFANTIS|CHOCOLATE|SORVETE|LEITES|REFRIGERANTES|CONVENIENCIA|PRODUTOS HOSPITALARES|LINHA GERAL|USO OU CONSUMO|PRODUTOS VARIADOS|PERFUMARIA)'\norder by prejuizo_estimado_30d desc;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "montar-mensagem-abaixo-custo",
+      "name": "Montar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Ordenado por PREJUÍZO EM R$ (não %) -- um produto a -90% que quase\n// não vende importa menos que um a -5% vendendo muito. Dispara todo\n// dia enquanto o preço não for corrigido, sem guardar estado de \"já\n// avisei\" (mesmo padrão dos outros alertas proativos).\nconst linhas = $input.all().map((i) => i.json);\nif (linhas.length === 0) {\n  return [];\n}\nconst hojeLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nfunction fmtBRL(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n\nconst blocos = linhas.map(\n  (p, i) =>\n    `${i + 1}. ${p.nome_produto} (cód. ${p.codigo_produto})\\n   Margem: ${p.margem_pct}% · ${fmtBRL(p.prejuizo_estimado_30d)} perdidos em 30d (${Math.round(Number(p.quantidade_vendida_30d))} ${Math.round(Number(p.quantidade_vendida_30d)) === 1 ? 'vendido' : 'vendidos'})`\n);\n\nconst prejuizoTotal = linhas.reduce((soma, p) => soma + Number(p.prejuizo_estimado_30d), 0);\n\nconst mensagem = `🔴 *Produtos vendidos abaixo do custo*\\n📅 ${hojeLabel}\\n\\n${blocos.join('\\n\\n')}\\n\\nPrejuízo estimado total: ${fmtBRL(prejuizoTotal)} nos últimos 30 dias`;\n\nreturn [{ json: { mensagem } }];"
+      }
+    },
+    {
+      "id": "enviar-evolution-abaixo-custo",
+      "name": "➡️ Enviar via Evolution API (troque por aqui)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        840,
+        460
+      ],
+      "notes": "Placeholder — troque este nó pelo nó de envio de mensagem da sua instância Evolution API. O texto pronto pra enviar chega em $json.mensagem.",
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Todo dia às 08:10": {
+      "main": [
+        [
+          {
+            "node": "Buscar produtos abaixo do custo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar produtos abaixo do custo": {
+      "main": [
+        [
+          {
+            "node": "Montar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar mensagem": {
+      "main": [
+        [
+          {
+            "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -153,6 +154,7 @@ export function PendenciasScreen() {
   };
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -290,10 +292,12 @@ export function PendenciasScreen() {
         </Pressable>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18, marginTop: 4 },
   empty: { color: colors.textSecondary },

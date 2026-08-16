@@ -387,6 +387,10 @@ create table campanha_produtos (
   preco_promocional numeric(12,2) not null check (preco_promocional > 0),
   percentual_desconto numeric(5,2) not null default 0,
   quantidade_cartazes integer not null default 1 check (quantidade_cartazes > 0),
+  -- Override de validade por item (editável em Cartazetes) — null =
+  -- sem override, segue a validade da campanha.
+  data_inicio date,
+  data_fim date,
   unique (campanha_id, codigo_produto)
 );
 
@@ -532,9 +536,27 @@ create table campanhas_complementares (
   data_fim date not null,
   valor_minimo numeric(12,2) check (valor_minimo > 0),
   quantidade_minima integer check (quantidade_minima > 0),
+  -- Meta de referência (não gate de premiação, só informativa) de
+  -- quantos clientes o vendedor deve oferecer o complementar por dia.
+  meta_clientes_ofertados_dia integer check (meta_clientes_ofertados_dia > 0),
   premiacao_ranking jsonb not null,
   criado_por uuid references auth.users(id),
   created_at timestamptz not null default now()
+);
+
+-- Contagem diária autodeclarada de quantos clientes o vendedor
+-- ofereceu o complementar — não dá pra verificar, é informativo. Ao
+-- contrário de venda_item_complementar, o VALOR muda entre saves do
+-- mesmo dia, então precisa de policy de UPDATE de verdade (ver
+-- rls_policies.sql).
+create table venda_complementar_oferta_diaria (
+  id bigserial primary key,
+  codigo_vendedor integer not null references vendedores(codigo),
+  data date not null,
+  clientes_ofertados integer not null default 0 check (clientes_ofertados >= 0),
+  atualizado_por uuid references auth.users(id),
+  atualizado_em timestamptz not null default now(),
+  unique (codigo_vendedor, data)
 );
 
 -- Vendas marcadas, já com valor e vendedor — matéria-prima do ranking.

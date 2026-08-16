@@ -247,6 +247,10 @@ export interface DataRepository {
   salvarCampanhaComplementar(input: SalvarCampanhaComplementarInput): Promise<void>;
   excluirCampanhaComplementar(id: string): Promise<void>;
   getVendasComplementaresCampanha(profile: Profile, campanhaId: string): Promise<VendaComplementarMarcada[]>;
+  // Contagem autodeclarada de clientes ofertados no dia — mesma lógica
+  // de "só hoje é editável pro vendedor" da tela, não do método em si.
+  getOfertaComplementarDia(profile: Profile, data: string, codigoVendedor: number): Promise<number>;
+  salvarOfertaComplementarDia(profile: Profile, data: string, codigoVendedor: number, clientesOfertados: number): Promise<void>;
 
   // Produto em falta — lista compartilhada, qualquer autenticado
   // reporta/edita/apaga (não é gestor-only, é registro rápido de

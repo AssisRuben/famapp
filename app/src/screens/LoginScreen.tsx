@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,6 +13,20 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
+import { buildWhatsAppUrl } from '../lib/whatsapp';
+import { alertar } from '../lib/alert';
+
+const WHATSAPP_SUPORTE = '85988503418';
+
+async function abrirWhatsAppSuporte() {
+  const url = buildWhatsAppUrl(WHATSAPP_SUPORTE, 'Olá, estou com problema pra fazer login no app.');
+  if (!url) return;
+  try {
+    await Linking.openURL(url);
+  } catch {
+    alertar('Não foi possível abrir o WhatsApp', 'Verifique se o WhatsApp está instalado.');
+  }
+}
 
 // Vendedor loga só com usuário (sem "@") — a Trier não tem e-mail
 // cadastrado pra ninguém, então a conta é criada com um e-mail interno
@@ -75,9 +90,10 @@ export function LoginScreen() {
           </Pressable>
 
           <Text style={styles.hint}>
-            Demo (dados mockados) — senha para todos: 123456{'\n'}
-            Gestor: gestor@farmacia.com{'\n'}
-            Vendedor: joao@farmacia.com
+            Problema no login, mande um{' '}
+            <Text style={styles.whatsappLink} onPress={abrirWhatsAppSuporte}>
+              WhatsApp
+            </Text>
           </Text>
         </View>
       </View>
@@ -122,4 +138,5 @@ const styles = StyleSheet.create({
   buttonText: { color: colors.white, fontWeight: '600', fontSize: 16 },
   error: { color: colors.red, marginBottom: 8 },
   hint: { color: colors.textMuted, fontSize: 12, marginTop: 20, lineHeight: 18 },
+  whatsappLink: { color: colors.success, fontWeight: '700' },
 });

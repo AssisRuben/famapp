@@ -540,8 +540,8 @@ export interface CampanhaProduto {
   quantidadeCartazes: number;
   // Validade por item — começa igual à da campanha, mas é editável
   // por produto na tela de Cartazetes (ex.: estender a validade de um
-  // item específico). É só pra impressão/txt desse momento — não é
-  // persistido de volta em `campanha_produtos` no Supabase real.
+  // item específico). Persiste em campanha_produtos (null = sem
+  // override, segue a campanha) — resolvido 18/08/2026.
   dataInicio: string;
   dataFim: string;
 }
@@ -714,6 +714,10 @@ export interface CampanhaComplementar {
   // dois pisos (valor e quantidade) são independentes, quem tem os
   // dois precisa bater ambos. Null = sem piso de quantidade.
   quantidadeMinima: number | null;
+  // Meta de referência (não é gate de premiação, só informa o alvo pro
+  // vendedor) de quantos clientes ele deve oferecer o complementar por
+  // dia — pedido explícito do usuário ("pelo menos 10"). Null = sem meta.
+  metaClientesOfertadosDia: number | null;
   premiacaoRanking: PremiacaoRankingItem[];
 }
 
@@ -723,6 +727,7 @@ export interface SalvarCampanhaComplementarInput {
   dataFim: string;
   valorMinimo: number | null;
   quantidadeMinima: number | null;
+  metaClientesOfertadosDia: number | null;
   premiacaoRanking: PremiacaoRankingItem[];
 }
 
@@ -736,6 +741,15 @@ export interface VendaComplementarMarcada {
   codigoVendedor: number;
   nomeVendedor: string;
   nomeProduto: string;
+}
+
+// Contagem diária autodeclarada de quantos clientes o vendedor
+// ofereceu o complementar — não dá pra verificar/controlar, é só
+// informativo (espelha venda_complementar_oferta_diaria).
+export interface OfertaComplementarDia {
+  codigoVendedor: number;
+  data: string;
+  clientesOfertados: number;
 }
 
 // ============================================================

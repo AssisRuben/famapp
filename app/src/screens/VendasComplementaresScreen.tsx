@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -295,16 +297,19 @@ function ItensDoDia({
   codigoVendedor,
   diaSelecionado,
   editavel,
+  metaClientesOfertadosDia,
   onSalvar,
 }: {
   codigoVendedor: number;
   diaSelecionado: string;
   editavel: boolean;
+  metaClientesOfertadosDia?: number | null;
   onSalvar?: () => void;
 }) {
   const { profile } = useAuth();
   const [itens, setItens] = useState<ItemVendaComplementar[]>([]);
   const [marcados, setMarcados] = useState<Set<string>>(new Set());
+  const [clientesOfertadosTexto, setClientesOfertadosTexto] = useState('0');
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [modalSalvo, setModalSalvo] = useState<InfoModalSalvo | null>(null);
@@ -313,9 +318,13 @@ function ItensDoDia({
     if (!profile) return;
     setLoading(true);
     try {
-      const dados = await repository.getItensVendaComplementarDia(profile, diaSelecionado, codigoVendedor);
+      const [dados, ofertados] = await Promise.all([
+        repository.getItensVendaComplementarDia(profile, diaSelecionado, codigoVendedor),
+        repository.getOfertaComplementarDia(profile, diaSelecionado, codigoVendedor),
+      ]);
       setItens(dados);
       setMarcados(new Set(dados.filter((d) => d.marcado).map((d) => d.itemId)));
+      setClientesOfertadosTexto(String(ofertados));
     } finally {
       setLoading(false);
     }
@@ -348,7 +357,11 @@ function ItensDoDia({
     if (!profile) return;
     setSalvando(true);
     try {
-      await repository.salvarVendasComplementaresDia(profile, diaSelecionado, codigoVendedor, [...marcados]);
+      const clientesOfertados = Math.max(0, Number(clientesOfertadosTexto.replace(/\D/g, '')) || 0);
+      await Promise.all([
+        repository.salvarVendasComplementaresDia(profile, diaSelecionado, codigoVendedor, [...marcados]),
+        repository.salvarOfertaComplementarDia(profile, diaSelecionado, codigoVendedor, clientesOfertados),
+      ]);
       setModalSalvo({
         quantidade: resumoSelecao.quantidade,
         valor: resumoSelecao.valor,
@@ -371,6 +384,26 @@ function ItensDoDia({
 
   return (
     <View style={styles.telaFlex}>
+      <Card>
+        <Text style={styles.rotulo}>Clientes ofertados hoje</Text>
+        {editavel ? (
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={clientesOfertadosTexto}
+            onChangeText={(texto) => setClientesOfertadosTexto(texto.replace(/\D/g, ''))}
+            placeholder="0"
+          />
+        ) : (
+          <Text style={styles.campoSomenteLeitura}>{clientesOfertadosTexto}</Text>
+        )}
+        {metaClientesOfertadosDia != null && (
+          <Text style={styles.hint}>
+            Meta da campanha: oferecer o complementar a pelo menos {metaClientesOfertadosDia}{' '}
+            {metaClientesOfertadosDia === 1 ? 'cliente' : 'clientes'} por dia.
+          </Text>
+        )}
+      </Card>
       <FlatList
         style={styles.listaFlex}
         contentContainerStyle={styles.listaConteudo}
@@ -383,7 +416,7 @@ function ItensDoDia({
           </Card>
         }
       />
-      {editavel && itens.length > 0 && (
+      {editavel && (
         <View style={styles.rodapeFixo}>
           <Text style={styles.resumoSelecaoTexto}>
             {resumoSelecao.quantidade > 0
@@ -430,6 +463,7 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
         ranking: {(campanha.premiacaoRanking ?? []).map((p) => `${p.posicao}º ${formatBRL(p.valor)}`).join(', ')}
         {campanha.valorMinimo != null ? ` · mínimo ${formatBRL(campanha.valorMinimo)}` : ''}
         {campanha.quantidadeMinima != null ? ` · mín. ${campanha.quantidadeMinima} itens` : ''}
+        {campanha.metaClientesOfertadosDia != null ? ` · meta ${campanha.metaClientesOfertadosDia} clientes/dia` : ''}
       </Text>
 
       {loading ? (
@@ -480,6 +514,7 @@ function TelaVendedor({ codigoVendedor }: { codigoVendedor: number }) {
         codigoVendedor={codigoVendedor}
         diaSelecionado={diaSelecionado}
         editavel={editavel}
+        metaClientesOfertadosDia={campanha?.metaClientesOfertadosDia}
         onSalvar={() => setVersaoResumo((v) => v + 1)}
       />
     </View>
@@ -571,6 +606,7 @@ function TelaGestorMarcar() {
           codigoVendedor={vendedorAberto}
           diaSelecionado={diaSelecionado}
           editavel
+          metaClientesOfertadosDia={campanha?.metaClientesOfertadosDia}
           onSalvar={() => setVersaoResumo((v) => v + 1)}
         />
       </View>
@@ -681,6 +717,7 @@ function TelaRankingGestor() {
   const [calendarioAberto, setCalendarioAberto] = useState(false);
   const [valorMinimo, setValorMinimo] = useState('');
   const [quantidadeMinima, setQuantidadeMinima] = useState('');
+  const [metaClientesOfertadosDia, setMetaClientesOfertadosDia] = useState('10');
   const [premios, setPremios] = useState(['200', '100', '50']);
   const [salvando, setSalvando] = useState(false);
 
@@ -705,6 +742,7 @@ function TelaRankingGestor() {
     setDataFim(somarDias(todayISO(), 30));
     setValorMinimo('');
     setQuantidadeMinima('');
+    setMetaClientesOfertadosDia('10');
     setPremios(['200', '100', '50']);
   };
 
@@ -720,6 +758,7 @@ function TelaRankingGestor() {
     setDataFim(campanha.dataFim);
     setValorMinimo(campanha.valorMinimo != null ? String(campanha.valorMinimo) : '');
     setQuantidadeMinima(campanha.quantidadeMinima != null ? String(campanha.quantidadeMinima) : '');
+    setMetaClientesOfertadosDia(campanha.metaClientesOfertadosDia != null ? String(campanha.metaClientesOfertadosDia) : '');
     const porPosicao = new Map((campanha.premiacaoRanking ?? []).map((p) => [p.posicao, p.valor]));
     setPremios([1, 2, 3].map((posicao) => String(porPosicao.get(posicao) ?? '')));
     setModo('nova');
@@ -751,6 +790,15 @@ function TelaRankingGestor() {
         return;
       }
     }
+    const metaClientesTexto = metaClientesOfertadosDia.trim();
+    let metaClientesInput: number | null = null;
+    if (metaClientesTexto) {
+      metaClientesInput = Math.trunc(Number(metaClientesTexto)) || 0;
+      if (metaClientesInput <= 0) {
+        alertar('Meta inválida', 'A meta de clientes ofertados por dia precisa ser maior que 0 (ou deixe em branco pra não ter meta).');
+        return;
+      }
+    }
 
     setSalvando(true);
     try {
@@ -760,6 +808,7 @@ function TelaRankingGestor() {
         dataFim,
         valorMinimo: valorMinimoInput,
         quantidadeMinima: quantidadeMinimaInput,
+        metaClientesOfertadosDia: metaClientesInput,
         premiacaoRanking,
       });
       setModo('lista');
@@ -845,6 +894,22 @@ function TelaRankingGestor() {
           <Text style={styles.hint}>Quem marcar menos itens que isso não entra no ranking (some com o valor mínimo, se os dois estiverem preenchidos).</Text>
         </Card>
 
+        <Card>
+          <Text style={styles.cardTitulo}>Meta de oferta</Text>
+          <Text style={styles.hint}>
+            Quantos clientes o vendedor deve oferecer o complementar por dia — informativo, não dá pra controlar se ele
+            realmente ofereceu. O próprio vendedor informa esse número na aba dele.
+          </Text>
+          <Text style={styles.rotulo}>Clientes ofertados por dia (opcional)</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={metaClientesOfertadosDia}
+            onChangeText={setMetaClientesOfertadosDia}
+            placeholder="10"
+          />
+        </Card>
+
         <Pressable style={styles.botaoSalvar} onPress={salvar} disabled={salvando}>
           {salvando ? (
             <ActivityIndicator color={colors.white} />
@@ -899,6 +964,7 @@ function TelaRankingGestor() {
               ranking: {(campanha.premiacaoRanking ?? []).map((p) => `${p.posicao}º ${formatBRL(p.valor)}`).join(', ')}
               {campanha.valorMinimo != null ? ` · mínimo ${formatBRL(campanha.valorMinimo)}` : ''}
               {campanha.quantidadeMinima != null ? ` · mín. ${campanha.quantidadeMinima} itens` : ''}
+              {campanha.metaClientesOfertadosDia != null ? ` · meta ${campanha.metaClientesOfertadosDia} clientes/dia` : ''}
             </Text>
             <AndamentoCampanha campanha={campanha} />
           </Card>
@@ -932,20 +998,22 @@ export function VendasComplementaresScreen() {
   const ehGestor = profile?.role === 'gestor';
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>🧩 Vendas Complementares</Text>
-      <Text style={styles.subtitle}>
-        {ehGestor
-          ? 'Acompanhe o que cada vendedor marcou como venda complementar, e configure o ranking de premiação.'
-          : 'Marque quais itens das suas vendas de hoje foram venda complementar (upsell).'}
-      </Text>
+    <KeyboardAvoidingView style={styles.telaFlex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <View style={styles.container}>
+        <Text style={styles.title}>🧩 Vendas Complementares</Text>
+        <Text style={styles.subtitle}>
+          {ehGestor
+            ? 'Acompanhe o que cada vendedor marcou como venda complementar, e configure o ranking de premiação.'
+            : 'Marque quais itens das suas vendas de hoje foram venda complementar (upsell).'}
+        </Text>
 
-      {ehGestor ? (
-        <TelaGestor />
-      ) : profile?.codigoVendedor != null ? (
-        <TelaVendedor codigoVendedor={profile.codigoVendedor} />
-      ) : null}
-    </View>
+        {ehGestor ? (
+          <TelaGestor />
+        ) : profile?.codigoVendedor != null ? (
+          <TelaVendedor codigoVendedor={profile.codigoVendedor} />
+        ) : null}
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1049,6 +1117,7 @@ const styles = StyleSheet.create({
   voltarTexto: { color: colors.navy, fontWeight: '600', fontSize: 14, flexShrink: 1 },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
   rotulo: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
+  campoSomenteLeitura: { fontSize: 15, color: colors.textPrimary, fontWeight: '700' },
   espacado: { marginTop: 10 },
   hint: { fontSize: 11, color: colors.textMuted, marginBottom: 8, lineHeight: 15 },
   input: {

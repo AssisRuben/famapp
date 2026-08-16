@@ -1213,7 +1213,7 @@ class SupabaseRepository implements DataRepository {
     let query = supabase
       .from('campanhas')
       .select(
-        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes)'
+        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim)'
       )
       .order('created_at', { ascending: false });
     if (filtroId !== undefined) query = query.eq('id', filtroId);
@@ -1249,8 +1249,12 @@ class SupabaseRepository implements DataRepository {
           precoPromocional,
           percentualDesconto,
           quantidadeCartazes: cp.quantidade_cartazes,
-          dataInicio: c.data_inicio,
-          dataFim: c.data_fim,
+          // null = sem override — segue a validade da campanha (mesmo
+          // espírito de precoRegular ser derivado, não uma cópia
+          // congelada: campanha antiga muda de validade, item
+          // não-customizado acompanha).
+          dataInicio: cp.data_inicio ?? c.data_inicio,
+          dataFim: cp.data_fim ?? c.data_fim,
         };
       }),
     }));
@@ -1293,6 +1297,11 @@ class SupabaseRepository implements DataRepository {
           preco_promocional: p.precoPromocional,
           percentual_desconto: p.percentualDesconto,
           quantidade_cartazes: p.quantidadeCartazes,
+          // Só grava override se o item realmente diverge da validade
+          // da campanha — igual vira null, e assim continua seguindo a
+          // campanha automaticamente se ela mudar de data depois.
+          data_inicio: p.dataInicio === input.dataInicio ? null : p.dataInicio,
+          data_fim: p.dataFim === input.dataFim ? null : p.dataFim,
         }))
       );
       if (error) throw error;
@@ -1546,7 +1555,7 @@ class SupabaseRepository implements DataRepository {
   async getCampanhasComplementares(_profile: Profile): Promise<CampanhaComplementar[]> {
     const { data, error } = await supabase
       .from('campanhas_complementares')
-      .select('id, data_inicio, data_fim, valor_minimo, quantidade_minima, premiacao_ranking')
+      .select('id, data_inicio, data_fim, valor_minimo, quantidade_minima, meta_clientes_ofertados_dia, premiacao_ranking')
       .order('data_inicio', { ascending: false });
     if (error) throw error;
 
@@ -1556,6 +1565,7 @@ class SupabaseRepository implements DataRepository {
       dataFim: c.data_fim,
       valorMinimo: c.valor_minimo != null ? Number(c.valor_minimo) : null,
       quantidadeMinima: c.quantidade_minima != null ? Number(c.quantidade_minima) : null,
+      metaClientesOfertadosDia: c.meta_clientes_ofertados_dia != null ? Number(c.meta_clientes_ofertados_dia) : null,
       premiacaoRanking: c.premiacao_ranking ?? [],
     }));
   }
@@ -1566,6 +1576,7 @@ class SupabaseRepository implements DataRepository {
       data_fim: input.dataFim,
       valor_minimo: input.valorMinimo,
       quantidade_minima: input.quantidadeMinima,
+      meta_clientes_ofertados_dia: input.metaClientesOfertadosDia,
       premiacao_ranking: input.premiacaoRanking,
     };
 
@@ -1620,6 +1631,39 @@ class SupabaseRepository implements DataRepository {
       nomeVendedor: r.nome_vendedor ?? `Vendedor ${r.codigo_vendedor}`,
       nomeProduto: nomePorCodigo.get(r.codigo_produto) ?? `Produto ${r.codigo_produto}`,
     }));
+  }
+
+  async getOfertaComplementarDia(_profile: Profile, data: string, codigoVendedor: number): Promise<number> {
+    const { data: linha, error } = await supabase
+      .from('venda_complementar_oferta_diaria')
+      .select('clientes_ofertados')
+      .eq('codigo_vendedor', codigoVendedor)
+      .eq('data', data)
+      .maybeSingle();
+    if (error) throw error;
+    return linha?.clientes_ofertados ?? 0;
+  }
+
+  async salvarOfertaComplementarDia(
+    profile: Profile,
+    data: string,
+    codigoVendedor: number,
+    clientesOfertados: number
+  ): Promise<void> {
+    // Diferente de venda_item_complementar: aqui o VALOR muda entre
+    // saves do mesmo dia, então upsert com update de verdade é correto
+    // (a tabela tem policy de UPDATE, ver rls_policies.sql).
+    const { error } = await supabase.from('venda_complementar_oferta_diaria').upsert(
+      {
+        codigo_vendedor: codigoVendedor,
+        data,
+        clientes_ofertados: clientesOfertados,
+        atualizado_por: profile.id,
+        atualizado_em: new Date().toISOString(),
+      },
+      { onConflict: 'codigo_vendedor,data' }
+    );
+    if (error) throw error;
   }
 
   async getProdutosEmFalta(_profile: Profile): Promise<ProdutoEmFalta[]> {

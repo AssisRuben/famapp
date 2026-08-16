@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -174,6 +176,7 @@ export function CampanhasScreen() {
 
   if (modo === 'nova') {
     return (
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={styles.container}>
         <Pressable style={styles.voltar} onPress={() => setModo('lista')} hitSlop={8}>
           <Ionicons name="arrow-back" size={18} color={colors.navy} />
@@ -302,6 +305,7 @@ export function CampanhasScreen() {
           </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -368,6 +372,7 @@ function mapearSugestaoParaItem(sugestao: ProdutoElegibilidade, dataInicio: stri
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },

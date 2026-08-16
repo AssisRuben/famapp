@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
@@ -200,6 +210,7 @@ export function MetasScreen() {
   const rotulos = useMemo(() => ([1, 2, 3, 4] as const).map((s) => rotuloSemana(s, ano, mes)), [ano, mes]);
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
       <Text style={styles.title}>🎯 Gestão da equipe</Text>
 
@@ -334,10 +345,12 @@ export function MetasScreen() {
         </Pressable>
       </Card>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 12 },
   mesSeletor: {

@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
@@ -130,6 +140,7 @@ export function ProdutoEmFaltaScreen() {
   const itensDoMes = itens.filter((i) => i.data.slice(0, 7) === mesAtual);
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView ref={scrollRef} style={styles.container}>
       <Text style={styles.subtitle}>Reporte rápido de produto que faltou no balcão — lista compartilhada, qualquer um edita ou apaga.</Text>
 
@@ -197,10 +208,12 @@ export function ProdutoEmFaltaScreen() {
         ))
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18, marginTop: 4 },
   empty: { color: colors.textSecondary },

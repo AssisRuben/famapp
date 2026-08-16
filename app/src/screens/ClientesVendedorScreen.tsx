@@ -1,5 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
@@ -182,6 +194,7 @@ export function ClientesVendedorScreen() {
   });
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <View style={styles.container}>
       <Text style={styles.title}>Meus clientes</Text>
       <Text style={styles.subtitle}>{clientes.length} cliente(s) atendido(s) por você</Text>
@@ -361,10 +374,12 @@ export function ClientesVendedorScreen() {
         }}
       />
     </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },

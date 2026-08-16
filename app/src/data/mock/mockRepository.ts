@@ -91,6 +91,7 @@ const CAMPANHAS_KEY = '@farmapp/campanhas';
 const CAMPANHAS_VENDA_ADICIONAL_KEY = '@farmapp/campanhas_venda_adicional';
 const CAMPANHAS_COMPLEMENTARES_KEY = '@farmapp/campanhas_complementares';
 const VENDA_ITEM_COMPLEMENTAR_KEY = '@farmapp/venda_item_complementar';
+const OFERTA_COMPLEMENTAR_DIARIA_KEY = '@farmapp/oferta_complementar_diaria';
 const CONTATOS_CLIENTES_KEY = '@farmapp/contatos_clientes';
 const PRODUTOS_EM_FALTA_KEY = '@farmapp/produtos_em_falta';
 const PENDENCIAS_KEY = '@farmapp/pendencias';
@@ -308,6 +309,16 @@ async function getItensComplementarMarcadosStore(): Promise<string[]> {
 
 async function salvarItensComplementarMarcadosStore(itemIds: string[]): Promise<void> {
   await AsyncStorage.setItem(VENDA_ITEM_COMPLEMENTAR_KEY, JSON.stringify(itemIds));
+}
+
+// chave "codigoVendedor:data" -> quantidade de clientes ofertados.
+async function getOfertaComplementarDiariaStore(): Promise<Record<string, number>> {
+  const raw = await AsyncStorage.getItem(OFERTA_COMPLEMENTAR_DIARIA_KEY);
+  return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+}
+
+async function salvarOfertaComplementarDiariaStore(mapa: Record<string, number>): Promise<void> {
+  await AsyncStorage.setItem(OFERTA_COMPLEMENTAR_DIARIA_KEY, JSON.stringify(mapa));
 }
 
 async function getContatosStore(): Promise<ContatoCliente[]> {
@@ -1371,6 +1382,7 @@ class MockRepository implements DataRepository {
       existente.dataFim = input.dataFim;
       existente.valorMinimo = input.valorMinimo;
       existente.quantidadeMinima = input.quantidadeMinima;
+      existente.metaClientesOfertadosDia = input.metaClientesOfertadosDia;
       existente.premiacaoRanking = input.premiacaoRanking;
     } else {
       campanhas.push({
@@ -1379,6 +1391,7 @@ class MockRepository implements DataRepository {
         dataFim: input.dataFim,
         valorMinimo: input.valorMinimo,
         quantidadeMinima: input.quantidadeMinima,
+        metaClientesOfertadosDia: input.metaClientesOfertadosDia,
         premiacaoRanking: input.premiacaoRanking,
       });
     }
@@ -1388,6 +1401,22 @@ class MockRepository implements DataRepository {
   async excluirCampanhaComplementar(id: string): Promise<void> {
     const campanhas = await getCampanhasComplementaresStore();
     await salvarCampanhasComplementaresStore(campanhas.filter((c) => c.id !== id));
+  }
+
+  async getOfertaComplementarDia(_profile: Profile, data: string, codigoVendedor: number): Promise<number> {
+    const mapa = await getOfertaComplementarDiariaStore();
+    return delay(mapa[`${codigoVendedor}:${data}`] ?? 0);
+  }
+
+  async salvarOfertaComplementarDia(
+    _profile: Profile,
+    data: string,
+    codigoVendedor: number,
+    clientesOfertados: number
+  ): Promise<void> {
+    const mapa = await getOfertaComplementarDiariaStore();
+    mapa[`${codigoVendedor}:${data}`] = clientesOfertados;
+    await salvarOfertaComplementarDiariaStore(mapa);
   }
 
   async getVendasComplementaresCampanha(_profile: Profile, campanhaId: string): Promise<VendaComplementarMarcada[]> {

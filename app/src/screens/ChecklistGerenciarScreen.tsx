@@ -1,5 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
@@ -208,6 +220,7 @@ export function ChecklistGerenciarScreen() {
   };
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
       <Card>
         <Text style={styles.cardTitulo}>Nova atividade</Text>
@@ -350,6 +363,7 @@ export function ChecklistGerenciarScreen() {
       </Modal>
 
       <Modal visible={edicao !== null} transparent animationType="fade" onRequestClose={() => setEdicao(null)}>
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={styles.modalFundo} onPress={() => setEdicao(null)}>
           <Pressable style={styles.modalConteudo} onPress={() => {}}>
             {edicao && (
@@ -433,12 +447,15 @@ export function ChecklistGerenciarScreen() {
             )}
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
   cardTituloEspacado: { marginTop: 14 },

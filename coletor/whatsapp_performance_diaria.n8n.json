@@ -54,7 +54,7 @@
       "parameters": {
         "language": "javaScript",
         "mode": "runOnceForAllItems",
-        "jsCode": "const todos = $input.all().map((i) => i.json);\n// Só quem trabalhou no dia: teve venda, lançou falta ou fez contato —\n// sem nenhum desses três, o vendedor some da mensagem (não é\n// \"zerado\", é \"sem atividade registrada hoje\").\nconst itens = todos.filter((v) => v.qtd_notas_dia > 0 || v.lancou_falta || v.fez_contato);\nconst hojeLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\n// Uma medalha só por vendedor: a posição do dia (ranking por margem_dia,\n// já que a lista vem ordenada assim). A faixa de comissão da semana\n// continua aparecendo, só que em texto (\"faixa X%\"), sem emoji próprio --\n// duas medalhas na mesma linha (posição + faixa) tava poluído.\nconst MEDALHA_POSICAO = ['🥇', '🥈', '🥉'];\n\nfunction fmtBRL(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n\nfunction marca(v) {\n  return v ? '✅' : '❌';\n}\n\nconst linhas = [`📊 *Performance do dia — ${hojeLabel}*`, ''];\n\nif (itens.length === 0) {\n  linhas.push('Ninguém registrou atividade hoje.');\n} else {\n  itens.forEach((v, idx) => {\n    const posicao = MEDALHA_POSICAO[idx] ?? '▪️';\n    const faixa = v.faixa_semana != null ? Number(v.faixa_semana) : 3;\n    linhas.push(`${posicao} *${v.nome_vendedor}*`);\n    linhas.push(`💰 Hoje: ${fmtBRL(v.margem_dia)} (${v.percentual_dia ?? 0}% da meta do dia)`);\n    linhas.push(`📅 Semana: ${fmtBRL(v.margem_semana)} (${v.percentual_semana ?? 0}% da meta) — faixa ${faixa}%`);\n    linhas.push(`🧾 ${v.qtd_notas_dia} venda(s) — ${v.vendas_cliente_real} com cliente, ${v.vendas_proprio_cpf} no CPF do vendedor, ${v.vendas_sem_cliente} sem cliente`);\n    linhas.push(`📦 Lançou falta: ${marca(v.lancou_falta)} · 📞 Fez contato: ${marca(v.fez_contato)}`);\n    // separador + linha em branco dupla -- mais respiro entre um vendedor e outro\n    linhas.push('┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');\n    linhas.push('');\n    linhas.push('');\n  });\n  // tira o respiro extra do final (depois do último vendedor não precisa)\n  while (linhas.length > 0 && linhas[linhas.length - 1] === '') linhas.pop();\n}\n\nreturn [{ json: { mensagem: linhas.join('\\n').trim() } }];"
+        "jsCode": "const todos = $input.all().map((i) => i.json);\n// Só quem trabalhou no dia: teve venda, lançou falta ou fez contato —\n// sem nenhum desses três, o vendedor some da mensagem (não é\n// \"zerado\", é \"sem atividade registrada hoje\").\nconst itens = todos.filter((v) => v.qtd_notas_dia > 0 || v.lancou_falta || v.fez_contato);\nconst hojeLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\n// Uma medalha só por vendedor: a posição do dia (ranking por margem_dia,\n// já que a lista vem ordenada assim). A faixa de comissão da semana\n// continua aparecendo, só que em texto (\"faixa X%\"), sem emoji próprio --\n// duas medalhas na mesma linha (posição + faixa) tava poluído.\nconst MEDALHA_POSICAO = ['🥇', '🥈', '🥉'];\n\nfunction fmtBRL(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n\nfunction marca(v) {\n  return v ? '✅' : '❌';\n}\n\nconst linhas = [`📊 *Performance do dia — ${hojeLabel}*`, ''];\n\nif (itens.length === 0) {\n  linhas.push('Ninguém registrou atividade hoje.');\n} else {\n  itens.forEach((v, idx) => {\n    const posicao = MEDALHA_POSICAO[idx] ?? '▪️';\n    const faixa = v.faixa_semana != null ? Number(v.faixa_semana) : 3;\n    linhas.push(`${posicao} *${v.nome_vendedor}*`);\n    linhas.push(`💰 Hoje: ${fmtBRL(v.margem_dia)} (${v.percentual_dia ?? 0}% da meta do dia)`);\n    linhas.push(`📅 Semana: ${fmtBRL(v.margem_semana)} (${v.percentual_semana ?? 0}% da meta): *faixa ${faixa}%*`);\n    linhas.push(`🧾 ${v.qtd_notas_dia} vendas: ${v.vendas_cliente_real} com cliente, ${v.vendas_proprio_cpf} no CPF do vendedor, ${v.vendas_sem_cliente} sem cliente`);\n    linhas.push(`📦 Lançou falta: ${marca(v.lancou_falta)}`);\n    linhas.push(`📞 Fez contato: ${marca(v.fez_contato)}`);\n    // separador + linha em branco dupla -- mais respiro entre um vendedor e outro\n    linhas.push('┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄');\n    linhas.push('');\n    linhas.push('');\n  });\n  // tira o respiro extra do final (depois do último vendedor não precisa)\n  while (linhas.length > 0 && linhas[linhas.length - 1] === '') linhas.pop();\n}\n\nreturn [{ json: { mensagem: linhas.join('\\n').trim() } }];"
       }
     },
     {
@@ -68,6 +68,52 @@
       ],
       "notes": "Placeholder — troque este nó pelo nó de envio de mensagem da sua instância Evolution API. O texto pronto pra enviar chega em $json.mensagem.",
       "parameters": {}
+    },
+    {
+      "id": "buscar-slump",
+      "name": "Buscar quem perdeu meta 2 dias seguidos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        700
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with parametros as (\n  select\n    (now() at time zone 'America/Sao_Paulo')::date as hoje,\n    (now() at time zone 'America/Sao_Paulo')::date - 1 as ontem\n),\ndias_no_mes as (\n  select extract(day from (date_trunc('month', p.hoje) + interval '1 month' - interval '1 day'))::int as total\n  from parametros p\n),\nmeta_mensal as (\n  select mp.codigo_vendedor, mp.valor_meta as meta_mensal\n  from vw_metas_progresso mp, parametros p\n  where mp.ano = extract(year from p.hoje) and mp.mes = extract(month from p.hoje) and mp.semana is null\n),\nmeta_dia as (\n  select mm.codigo_vendedor, round(mm.meta_mensal / nullif(dnm.total, 0), 2) as valor\n  from meta_mensal mm, dias_no_mes dnm\n),\nmargem_hoje as (\n  select vd.codigo as codigo_vendedor, coalesce(mv.faturamento_liquido, 0) - coalesce(mv.total_custo, 0) as margem\n  from vw_vendedores_ativos vd\n  cross join parametros p\n  left join vw_metricas_vendedor_diario mv on mv.codigo_vendedor = vd.codigo and mv.data_emissao = p.hoje\n),\nmargem_ontem as (\n  select vd.codigo as codigo_vendedor, coalesce(mv.faturamento_liquido, 0) - coalesce(mv.total_custo, 0) as margem\n  from vw_vendedores_ativos vd\n  cross join parametros p\n  left join vw_metricas_vendedor_diario mv on mv.codigo_vendedor = vd.codigo and mv.data_emissao = p.ontem\n)\nselect\n  vd.codigo as codigo_vendedor,\n  vd.nome as nome_vendedor,\n  mh.margem as margem_hoje,\n  mo.margem as margem_ontem,\n  md.valor as meta_dia\nfrom vw_vendedores_ativos vd\njoin margem_hoje mh on mh.codigo_vendedor = vd.codigo\njoin margem_ontem mo on mo.codigo_vendedor = vd.codigo\nleft join meta_dia md on md.codigo_vendedor = vd.codigo\nwhere mh.margem < coalesce(md.valor, 0)\n  and mo.margem < coalesce(md.valor, 0)\norder by vd.nome;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "montar-mensagem-slump",
+      "name": "Montar alerta de meta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        700
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Só chega aqui quem ficou 2 dias seguidos (hoje E ontem) com margem\n// abaixo da meta do dia — não distingue \"folga/dia livre\" de\n// \"desempenho fraco\" (não checa atividade, diferente da mensagem de\n// recap) — é uma primeira versão, calibrar depois se der falso positivo.\nconst linhas = $input.all().map((i) => i.json);\nif (linhas.length === 0) {\n  return [];\n}\nconst hojeLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nfunction fmtBRL(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n\nconst blocos = linhas.map(\n  (v) =>\n    `⚠️ *${v.nome_vendedor}*\\nHoje: ${fmtBRL(v.margem_hoje)} · Ontem: ${fmtBRL(v.margem_ontem)} (meta do dia: ${fmtBRL(v.meta_dia)})`\n);\n\nconst mensagem = `📉 *2 dias seguidos abaixo da meta — ${hojeLabel}*\\n\\n${blocos.join('\\n\\n')}`;\n\nreturn [{ json: { mensagem } }];"
+      }
+    },
+    {
+      "id": "enviar-evolution-slump",
+      "name": "➡️ Enviar via Evolution API (troque por aqui) - alerta de meta",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        840,
+        700
+      ],
+      "notes": "Placeholder — troque este nó pelo nó de envio de mensagem da sua instância Evolution API. O texto pronto pra enviar chega em $json.mensagem.",
+      "parameters": {}
     }
   ],
   "connections": {
@@ -76,6 +122,11 @@
         [
           {
             "node": "Buscar performance do dia",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar quem perdeu meta 2 dias seguidos",
             "type": "main",
             "index": 0
           }
@@ -98,6 +149,28 @@
         [
           {
             "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar quem perdeu meta 2 dias seguidos": {
+      "main": [
+        [
+          {
+            "node": "Montar alerta de meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar alerta de meta": {
+      "main": [
+        [
+          {
+            "node": "➡️ Enviar via Evolution API (troque por aqui) - alerta de meta",
             "type": "main",
             "index": 0
           }

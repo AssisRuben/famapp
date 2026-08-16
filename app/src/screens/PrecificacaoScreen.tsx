@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   ListRenderItemInfo,
   Platform,
   Pressable,
@@ -332,6 +333,7 @@ export function PrecificacaoScreen() {
   };
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <FlatList
       style={styles.container}
       contentContainerStyle={styles.listContent}
@@ -510,10 +512,12 @@ export function PrecificacaoScreen() {
         </Card>
       }
     />
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background },
   listContent: { padding: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },

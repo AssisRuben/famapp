@@ -1,5 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
@@ -143,6 +155,7 @@ export function ClientesScreen() {
     .sort((a, b) => (b.diasSemComprar ?? -1) - (a.diasSemComprar ?? -1));
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <View style={styles.container}>
       <Text style={styles.title}>Clientes em potencial</Text>
       <Text style={styles.subtitle}>
@@ -329,10 +342,12 @@ export function ClientesScreen() {
         }}
       />
     </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },

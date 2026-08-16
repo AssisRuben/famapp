@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -8,8 +18,8 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatBRL, todayISO } from '../lib/format';
-import { gerarCsvSugestaoCompras } from '../lib/comprasCsv';
-import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
+import { gerarXlsxSugestaoCompras } from '../lib/comprasXlsx';
+import { baixarArquivoBase64NoWeb } from '../lib/downloadWeb';
 import { alertar } from '../lib/alert';
 import { ORDEM_MACRO_GRUPOS, MACRO_GRUPO_LABEL, MacroGrupo } from '../lib/macroGrupo';
 import { SugestaoCompra } from '../types/domain';
@@ -68,35 +78,38 @@ export function ComprasScreen() {
   const totalItens = itens?.length ?? 0;
   const valorTotal = (itens ?? []).reduce((acc, i) => acc + i.quantidadeSugerida * i.custoMedio, 0);
 
-  const exportarCsv = async () => {
+  const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  const exportarXlsx = async () => {
     if (!itens || itens.length === 0) return;
     setExportando(true);
     try {
-      const conteudo = gerarCsvSugestaoCompras(itens);
-      const nomeArquivo = `lista-compras-${todayISO()}.csv`;
+      const base64 = gerarXlsxSugestaoCompras(itens);
+      const nomeArquivo = `lista-compras-${todayISO()}.xlsx`;
 
       if (Platform.OS === 'web') {
-        baixarArquivoTextoNoWeb(nomeArquivo, conteudo);
+        baixarArquivoBase64NoWeb(nomeArquivo, base64, MIME_XLSX);
         return;
       }
 
       const uri = `${FileSystem.documentDirectory}${nomeArquivo}`;
-      await FileSystem.writeAsStringAsync(uri, conteudo);
+      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
 
       const podeCompartilhar = await Sharing.isAvailableAsync();
       if (podeCompartilhar) {
-        await Sharing.shareAsync(uri, { mimeType: 'text/csv', dialogTitle: 'Exportar lista de compras' });
+        await Sharing.shareAsync(uri, { mimeType: MIME_XLSX, dialogTitle: 'Exportar lista de compras' });
       } else {
         alertar('Arquivo gerado', `Salvo em: ${uri}`);
       }
     } catch (erro) {
-      alertar('Erro ao exportar CSV', erro instanceof Error ? erro.message : 'Tente novamente.');
+      alertar('Erro ao exportar XLSX', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
       setExportando(false);
     }
   };
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
       <Text style={styles.title}>🛒 Sugestão de compras</Text>
       <Text style={styles.subtitle}>
@@ -190,19 +203,20 @@ export function ComprasScreen() {
             <Text style={styles.cardTitulo}>Resumo</Text>
             <Text style={styles.resumoLinha}>{totalItens} produtos · custo estimado {formatBRL(valorTotal)}</Text>
 
-            <Pressable style={styles.botaoSecundario} onPress={exportarCsv} disabled={exportando}>
+            <Pressable style={styles.botaoSecundario} onPress={exportarXlsx} disabled={exportando}>
               {exportando ? (
                 <ActivityIndicator color={colors.navy} />
               ) : (
                 <>
                   <Ionicons name="document-text-outline" size={18} color={colors.navy} />
-                  <Text style={styles.botaoSecundarioTexto}>Exportar CSV</Text>
+                  <Text style={styles.botaoSecundarioTexto}>Exportar XLSX</Text>
                 </>
               )}
             </Pressable>
             <Text style={styles.aviso}>
-              Fornecedor e fator de compra vêm da compra mais recente de cada produto — sem prazo de entrega/última cotação,
-              a Trier não expõe esses campos na integração.
+              O arquivo sai com uma aba "Todos" (visão completa) e uma aba por fornecedor, só com o essencial pra
+              cotação/pedido — pode mandar a aba direto pro fornecedor. Fornecedor e fator de compra vêm da compra mais
+              recente de cada produto — sem prazo de entrega/última cotação, a Trier não expõe esses campos na integração.
             </Text>
           </Card>
 
@@ -278,10 +292,12 @@ export function ComprasScreen() {
         </>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },

@@ -430,6 +430,47 @@ using (exists (
   select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
 ));
 
+-- venda_complementar_oferta_diaria: contagem diária autodeclarada.
+-- Select aberto (mesmo critério de campanhas_complementares).
+-- Insert/update: vendedor só o próprio, gestor qualquer um — e essa
+-- tabela PRECISA de policy de update de verdade (valor muda entre
+-- saves, diferente de venda_item_complementar).
+create policy "venda_complementar_oferta_diaria: autenticados leem"
+on venda_complementar_oferta_diaria for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid()
+));
+
+create policy "venda_complementar_oferta_diaria: vendedor grava o proprio ou gestor grava qualquer"
+on venda_complementar_oferta_diaria for insert
+with check (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (
+      p.role = 'gestor'
+      or (p.role = 'vendedor' and p.codigo_vendedor = venda_complementar_oferta_diaria.codigo_vendedor)
+    )
+));
+
+create policy "venda_complementar_oferta_diaria: vendedor atualiza o proprio ou gestor atualiza qualquer"
+on venda_complementar_oferta_diaria for update
+using (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (
+      p.role = 'gestor'
+      or (p.role = 'vendedor' and p.codigo_vendedor = venda_complementar_oferta_diaria.codigo_vendedor)
+    )
+))
+with check (exists (
+  select 1 from profiles p
+  where p.id = auth.uid()
+    and (
+      p.role = 'gestor'
+      or (p.role = 'vendedor' and p.codigo_vendedor = venda_complementar_oferta_diaria.codigo_vendedor)
+    )
+));
+
 -- produtos_em_falta: lista compartilhada, não é log de auditoria — CRUD
 -- aberto pra qualquer autenticado, inclusive editar/apagar registro de
 -- outra pessoa (o objetivo é o time manter a lista do mês limpa).

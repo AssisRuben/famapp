@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -36,8 +46,8 @@ export function CartazetesScreen() {
   const [itens, setItens] = useState<CampanhaProduto[]>([]);
   const [expandido, setExpandido] = useState<number | null>(null);
   const [buffers, setBuffers] = useState<Record<string, Partial<Record<CampoEditavel, string>>>>({});
-  const [processando, setProcessando] = useState<'pdf' | 'txt' | null>(null);
-  const [cartazesPorPagina, setCartazesPorPagina] = useState<CartazesPorPagina>(1);
+  const [processando, setProcessando] = useState<'pdf' | 'txt' | 'campanha' | null>(null);
+  const [cartazesPorPagina, setCartazesPorPagina] = useState<CartazesPorPagina>(3);
 
   const carregar = useCallback(async () => {
     if (!profile) return;
@@ -172,6 +182,30 @@ export function CartazetesScreen() {
   const grupos = useMemo(() => agruparParaCartazetes(itens), [itens]);
   const totalCartazes = grupos.reduce((acc, g) => acc + g.quantidadeCartazes, 0);
 
+  // De/Por/Desconto/Validade editados aqui só valiam pra impressão
+  // daquele momento — este botão persiste de volta na campanha salva
+  // (achado registrado 05/08, resolvido 18/08/2026).
+  const salvarNaCampanha = async () => {
+    if (!campanhaSelecionada) return;
+    setProcessando('campanha');
+    try {
+      const salva = await repository.salvarCampanha({
+        id: campanhaSelecionada.id,
+        nome: campanhaSelecionada.nome,
+        dataInicio: campanhaSelecionada.dataInicio,
+        dataFim: campanhaSelecionada.dataFim,
+        produtos: itens,
+      });
+      setCampanhaSelecionada(salva);
+      setCampanhas((atual) => atual.map((c) => (c.id === salva.id ? salva : c)));
+      alertar('Salvo', 'Alterações persistidas na campanha.');
+    } catch (erro) {
+      alertar('Erro ao salvar campanha', erro instanceof Error ? erro.message : 'Tente novamente.');
+    } finally {
+      setProcessando(null);
+    }
+  };
+
   const imprimir = async () => {
     if (!campanhaSelecionada || grupos.length === 0) return;
     setProcessando('pdf');
@@ -252,6 +286,7 @@ export function CartazetesScreen() {
   }
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
       <Pressable style={styles.voltar} onPress={() => setCampanhaSelecionada(null)} hitSlop={8}>
         <Ionicons name="arrow-back" size={18} color={colors.navy} />
@@ -369,11 +404,11 @@ export function CartazetesScreen() {
 
         <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Cartazes por página</Text>
         <Text style={styles.grupoHint}>
-          1 = cartaz grande (A5), um por página. Mais por página = cartaz menor numa folha A4, útil pra imprimir bastante
-          produto de uma vez.
+          Grade numa folha A4. Menos por página = cartaz maior; mais por página = cartaz menor, útil pra imprimir
+          bastante produto de uma vez.
         </Text>
         <View style={styles.grupoGrid}>
-          {([1, 2, 4, 6, 8, 10] as const).map((opcao) => (
+          {([3, 6, 9, 12] as const).map((opcao) => (
             <Pressable
               key={opcao}
               style={[styles.chip, cartazesPorPagina === opcao && styles.chipAtivo]}
@@ -383,6 +418,20 @@ export function CartazetesScreen() {
             </Pressable>
           ))}
         </View>
+
+        <Pressable style={styles.botaoSecundario} onPress={salvarNaCampanha} disabled={processando !== null}>
+          {processando === 'campanha' ? (
+            <ActivityIndicator color={colors.navy} />
+          ) : (
+            <>
+              <Ionicons name="save-outline" size={18} color={colors.navy} />
+              <Text style={styles.botaoSecundarioTexto}>Salvar alterações na campanha</Text>
+            </>
+          )}
+        </Pressable>
+        <Text style={styles.aviso}>
+          Preço, desconto, quantidade e validade editados acima ficam salvos na campanha (não só nessa impressão).
+        </Text>
 
         <Pressable style={styles.botaoPrimario} onPress={imprimir} disabled={processando !== null}>
           {processando === 'pdf' ? (
@@ -410,10 +459,12 @@ export function CartazetesScreen() {
         </Text>
       </Card>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },

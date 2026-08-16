@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
@@ -111,6 +121,7 @@ export function CarteiraClientesScreen() {
   };
 
   return (
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
       <Text style={styles.title}>👥 Carteira de clientes</Text>
       <Text style={styles.subtitle}>Clientes que você escolhe acompanhar de perto, independente de histórico de compra.</Text>
@@ -197,10 +208,12 @@ export function CarteiraClientesScreen() {
         ))
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 4 },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 14, lineHeight: 18 },
