@@ -1460,12 +1460,14 @@ class MockRepository implements DataRepository {
       existente.codigoProduto = input.codigoProduto;
       existente.nomeProduto = input.nomeProduto;
       existente.data = input.data;
+      existente.temSaldoEstoque = input.temSaldoEstoque;
     } else {
       itens.push({
         id: `falta-${Date.now()}`,
         codigoProduto: input.codigoProduto,
         nomeProduto: input.nomeProduto,
         data: input.data,
+        temSaldoEstoque: input.temSaldoEstoque,
         nomeRegistradoPor: null,
       });
     }

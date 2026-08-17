@@ -599,6 +599,10 @@ create table produtos_em_falta (
   nome_produto text not null,
   codigo_produto integer references produto_catalogo(codigo),
   data date not null,
+  -- "O produto tem saldo no estoque?" (17/08/2026) — distingue ruptura
+  -- de gôndola (sistema mostra saldo, mas não acha o produto) de falta
+  -- real (saldo zerado).
+  tem_saldo_estoque boolean not null default false,
   registrado_por uuid references auth.users(id),
   criado_em timestamptz not null default now()
 );

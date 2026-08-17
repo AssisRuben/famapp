@@ -767,6 +767,10 @@ export interface ProdutoEmFalta {
   nomeProduto: string;
   codigoProduto: number | null;
   data: string;
+  // "O produto tem saldo no estoque?" (17/08/2026) — distingue ruptura
+  // de gôndola (sistema mostra saldo, mas não acha o produto) de falta
+  // real (saldo zerado). Reportado pelo vendedor junto do resto.
+  temSaldoEstoque: boolean;
   // Resolvido no banco (vw_produtos_em_falta) — só vem preenchido pra
   // quem está logado como gestor; vendedor sempre recebe null aqui,
   // mesmo sendo o mesmo registro (não é filtro de UI, é a própria view
@@ -779,6 +783,7 @@ export interface SalvarProdutoEmFaltaInput {
   nomeProduto: string;
   codigoProduto: number | null;
   data: string;
+  temSaldoEstoque: boolean;
 }
 
 // ============================================================

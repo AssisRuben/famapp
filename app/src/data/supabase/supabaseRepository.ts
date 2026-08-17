@@ -1672,7 +1672,7 @@ class SupabaseRepository implements DataRepository {
     // logado como gestor — decidido dentro da própria view.
     const { data, error } = await supabase
       .from('vw_produtos_em_falta')
-      .select('id, nome_produto, codigo_produto, data, nome_registrado_por')
+      .select('id, nome_produto, codigo_produto, data, tem_saldo_estoque, nome_registrado_por')
       .order('data', { ascending: false });
     if (error) throw error;
 
@@ -1681,6 +1681,7 @@ class SupabaseRepository implements DataRepository {
       nomeProduto: r.nome_produto,
       codigoProduto: r.codigo_produto,
       data: r.data,
+      temSaldoEstoque: r.tem_saldo_estoque,
       nomeRegistradoPor: r.nome_registrado_por,
     }));
   }
@@ -1689,7 +1690,12 @@ class SupabaseRepository implements DataRepository {
     if (input.id) {
       const { error } = await supabase
         .from('produtos_em_falta')
-        .update({ nome_produto: input.nomeProduto, codigo_produto: input.codigoProduto, data: input.data })
+        .update({
+          nome_produto: input.nomeProduto,
+          codigo_produto: input.codigoProduto,
+          data: input.data,
+          tem_saldo_estoque: input.temSaldoEstoque,
+        })
         .eq('id', Number(input.id));
       if (error) throw error;
     } else {
@@ -1698,6 +1704,7 @@ class SupabaseRepository implements DataRepository {
         nome_produto: input.nomeProduto,
         codigo_produto: input.codigoProduto,
         data: input.data,
+        tem_saldo_estoque: input.temSaldoEstoque,
         registrado_por: sessao.user?.id ?? null,
       });
       if (error) throw error;

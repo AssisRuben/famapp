@@ -523,7 +523,8 @@ select
     when exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor')
     then coalesce(vd.nome, 'Gestor(a) da Farmácia')
     else null
-  end as nome_registrado_por
+  end as nome_registrado_por,
+  pef.tem_saldo_estoque
 from produtos_em_falta pef
 left join profiles perfil_registro on perfil_registro.id = pef.registrado_por
 left join vendedores vd on vd.codigo = perfil_registro.codigo_vendedor;

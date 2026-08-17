@@ -34,6 +34,7 @@ export function ProdutoEmFaltaScreen() {
   // exemplo, ainda não tem código nenhum).
   const [codigoVinculado, setCodigoVinculado] = useState<number | null>(null);
   const [data, setData] = useState(todayISO());
+  const [temSaldoEstoque, setTemSaldoEstoque] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
   const carregarLista = useCallback(async () => {
@@ -82,6 +83,7 @@ export function ProdutoEmFaltaScreen() {
     setNomeProduto('');
     setCodigoVinculado(null);
     setData(todayISO());
+    setTemSaldoEstoque(false);
   };
 
   const salvar = async () => {
@@ -101,6 +103,7 @@ export function ProdutoEmFaltaScreen() {
         nomeProduto: nomeProduto.trim(),
         codigoProduto: codigoVinculado,
         data,
+        temSaldoEstoque,
       });
       limparFormulario();
       await carregarLista();
@@ -116,6 +119,7 @@ export function ProdutoEmFaltaScreen() {
     setNomeProduto(item.nomeProduto);
     setCodigoVinculado(item.codigoProduto);
     setData(item.data);
+    setTemSaldoEstoque(item.temSaldoEstoque);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
 
@@ -163,6 +167,18 @@ export function ProdutoEmFaltaScreen() {
         <Text style={[styles.rotulo, styles.espacado]}>Data do dia</Text>
         <TextInput style={styles.input} value={data} onChangeText={setData} placeholder="AAAA-MM-DD" />
 
+        <Pressable
+          style={[styles.checkboxLinha, styles.espacado]}
+          onPress={() => setTemSaldoEstoque((atual) => !atual)}
+        >
+          <Ionicons
+            name={temSaldoEstoque ? 'checkbox' : 'square-outline'}
+            size={20}
+            color={temSaldoEstoque ? colors.navy : colors.textMuted}
+          />
+          <Text style={styles.checkboxTexto}>O produto tem saldo no estoque?</Text>
+        </Pressable>
+
         <View style={styles.botoesLinha}>
           {editandoId && (
             <Pressable style={styles.botaoCancelar} onPress={limparFormulario}>
@@ -204,6 +220,9 @@ export function ProdutoEmFaltaScreen() {
               {formatDateBR(item.data)}
               {profile?.role === 'gestor' && item.nomeRegistradoPor ? ` · ${item.nomeRegistradoPor}` : ''}
             </Text>
+            <Text style={item.temSaldoEstoque ? styles.itemAviso : styles.itemAvisoOk}>
+              {item.temSaldoEstoque ? 'Tem saldo no estoque (ruptura de gôndola)' : 'Sem saldo no estoque'}
+            </Text>
           </Card>
         ))
       )}
@@ -242,6 +261,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   resultadoBuscaTexto: { flex: 1, fontSize: 13, color: colors.textPrimary, marginRight: 8 },
+  checkboxLinha: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  checkboxTexto: { fontSize: 13, color: colors.textPrimary, flex: 1 },
   botoesLinha: { flexDirection: 'row', gap: 10, marginTop: 14 },
   botaoSalvar: { flex: 1, backgroundColor: colors.success, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
   botaoCancelar: { flex: 1, backgroundColor: colors.background, borderRadius: 10, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
@@ -251,4 +272,6 @@ const styles = StyleSheet.create({
   itemNome: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.textPrimary },
   itemAcoes: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   itemData: { fontSize: 12, color: colors.textMuted },
+  itemAviso: { fontSize: 12, color: colors.red, fontWeight: '600', marginTop: 4 },
+  itemAvisoOk: { fontSize: 12, color: colors.textMuted, marginTop: 4 },
 });
