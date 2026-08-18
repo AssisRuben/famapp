@@ -21,10 +21,16 @@ import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
-import { calcularRankingComplementar, produtosMarcadosPorVendedor } from '../lib/vendaComplementar';
+import {
+  agruparResultadoComplementarPorDia,
+  calcularRankingComplementar,
+  produtosMarcadosPorVendedor,
+  totalComplementarPorVendedor,
+} from '../lib/vendaComplementar';
 import {
   CampanhaComplementar,
   ItemVendaComplementar,
+  OfertaComplementarDia,
   VendaComplementarMarcada,
   VendedorAtivo,
 } from '../types/domain';
@@ -299,12 +305,19 @@ function ItensDoDia({
   editavel,
   metaClientesOfertadosDia,
   onSalvar,
+  cabecalho,
 }: {
   codigoVendedor: number;
   diaSelecionado: string;
   editavel: boolean;
   metaClientesOfertadosDia?: number | null;
   onSalvar?: () => void;
+  // Conteúdo (seletor de dia, resumo da campanha etc.) que precisa
+  // rolar JUNTO com a lista de notas — indo como ListHeaderComponent
+  // do FlatList em vez de sibling fixo, senão em telas com bastante
+  // conteúdo (ex.: campanha com muitos dias de resultado) ele fica
+  // fora da área que rola e trava o scroll da tela inteira.
+  cabecalho?: React.ReactNode;
 }) {
   const { profile } = useAuth();
   const [itens, setItens] = useState<ItemVendaComplementar[]>([]);
@@ -379,37 +392,47 @@ function ItensDoDia({
   const grupos = useMemo(() => agruparPorNota(itens), [itens]);
 
   if (loading) {
-    return <ActivityIndicator style={{ marginTop: 16 }} />;
+    return (
+      <View style={styles.telaFlex}>
+        {cabecalho}
+        <ActivityIndicator style={{ marginTop: 16 }} />
+      </View>
+    );
   }
 
   return (
     <View style={styles.telaFlex}>
-      <Card>
-        <Text style={styles.rotulo}>Clientes ofertados hoje</Text>
-        {editavel ? (
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            value={clientesOfertadosTexto}
-            onChangeText={(texto) => setClientesOfertadosTexto(texto.replace(/\D/g, ''))}
-            placeholder="0"
-          />
-        ) : (
-          <Text style={styles.campoSomenteLeitura}>{clientesOfertadosTexto}</Text>
-        )}
-        {metaClientesOfertadosDia != null && (
-          <Text style={styles.hint}>
-            Meta da campanha: oferecer o complementar a pelo menos {metaClientesOfertadosDia}{' '}
-            {metaClientesOfertadosDia === 1 ? 'cliente' : 'clientes'} por dia.
-          </Text>
-        )}
-      </Card>
       <FlatList
         style={styles.listaFlex}
         contentContainerStyle={styles.listaConteudo}
         data={grupos}
         keyExtractor={(g) => g.vendaId}
         renderItem={({ item }) => <CardNota grupo={item} marcados={marcados} editavel={editavel} onAlternar={alternarItem} />}
+        ListHeaderComponent={
+          <>
+            {cabecalho}
+            <Card>
+              <Text style={styles.rotulo}>Clientes ofertados hoje</Text>
+              {editavel ? (
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={clientesOfertadosTexto}
+                  onChangeText={(texto) => setClientesOfertadosTexto(texto.replace(/\D/g, ''))}
+                  placeholder="0"
+                />
+              ) : (
+                <Text style={styles.campoSomenteLeitura}>{clientesOfertadosTexto}</Text>
+              )}
+              {metaClientesOfertadosDia != null && (
+                <Text style={styles.hint}>
+                  Meta da campanha: oferecer o complementar a pelo menos {metaClientesOfertadosDia}{' '}
+                  {metaClientesOfertadosDia === 1 ? 'cliente' : 'clientes'} por dia.
+                </Text>
+              )}
+            </Card>
+          </>
+        }
         ListEmptyComponent={
           <Card>
             <Text style={styles.empty}>Nenhuma venda nesse dia.</Text>
@@ -440,19 +463,37 @@ function ItensDoDia({
 function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
   const { profile } = useAuth();
   const [vendas, setVendas] = useState<VendaComplementarMarcada[]>([]);
+  const [ofertas, setOfertas] = useState<OfertaComplementarDia[]>([]);
+  const [vendedores, setVendedores] = useState<VendedorAtivo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [diaAberto, setDiaAberto] = useState<string | null>(null);
 
   useEffect(() => {
     if (!profile) return;
     setLoading(true);
-    repository
-      .getVendasComplementaresCampanha(profile, campanha.id)
-      .then(setVendas)
+    Promise.all([
+      repository.getVendasComplementaresCampanha(profile, campanha.id),
+      repository.getOfertaComplementarPeriodo(profile, campanha.dataInicio, campanha.dataFim),
+      repository.getVendedoresAtivos(profile),
+    ])
+      .then(([vendasResp, ofertasResp, vendedoresResp]) => {
+        setVendas(vendasResp);
+        setOfertas(ofertasResp);
+        setVendedores(vendedoresResp);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [profile, campanha.id]);
+  }, [profile, campanha.id, campanha.dataInicio, campanha.dataFim]);
 
   const ranking = useMemo(() => calcularRankingComplementar(vendas, campanha), [vendas, campanha]);
+  const resultadoPorDia = useMemo(
+    () => agruparResultadoComplementarPorDia(vendas, ofertas, vendedores),
+    [vendas, ofertas, vendedores]
+  );
+  const totalPeriodo = useMemo(
+    () => totalComplementarPorVendedor(vendas, ofertas, vendedores),
+    [vendas, ofertas, vendedores]
+  );
 
   return (
     <Card>
@@ -485,6 +526,56 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
           ))}
         </View>
       )}
+
+      {!loading && resultadoPorDia.length > 0 && (
+        <View style={styles.espacado}>
+          <Text style={styles.cardTitulo}>Resultado por dia</Text>
+          {resultadoPorDia.map((grupo) => {
+            const aberto = diaAberto === grupo.data;
+            return (
+              <View key={grupo.data} style={styles.resultadoDiaBloco}>
+                <Pressable
+                  style={styles.resultadoDiaToggle}
+                  onPress={() => setDiaAberto(aberto ? null : grupo.data)}
+                >
+                  <Text style={styles.resultadoDiaData}>{formatDateBR(grupo.data)}</Text>
+                  <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={16} color={colors.navy} />
+                </Pressable>
+                {aberto && (
+                  <View>
+                    {grupo.itens.map((item) => (
+                      <View key={item.codigoVendedor} style={styles.andamentoLinha}>
+                        <Text style={styles.andamentoNome} numberOfLines={1}>
+                          {item.nomeVendedor}
+                        </Text>
+                        <Text style={styles.andamentoValor}>
+                          {item.clientesOfertados != null ? `${item.clientesOfertados} ofertados` : 'sem info'} ·{' '}
+                          {item.quantidadeItens} {item.quantidadeItens === 1 ? 'item' : 'itens'} ·{' '}
+                          {formatBRL(item.valorVenda)}
+                        </Text>
+                      </View>
+                    ))}
+
+                    <Text style={styles.resultadoTotalTitulo}>Total do período</Text>
+                    {totalPeriodo.map((item) => (
+                      <View key={item.codigoVendedor} style={styles.andamentoLinha}>
+                        <Text style={styles.andamentoNome} numberOfLines={1}>
+                          {item.nomeVendedor}
+                        </Text>
+                        <Text style={styles.andamentoValor}>
+                          {item.clientesOfertados != null ? `${item.clientesOfertados} ofertados` : 'sem info'} ·{' '}
+                          {item.quantidadeItens} {item.quantidadeItens === 1 ? 'item' : 'itens'} ·{' '}
+                          {formatBRL(item.valorVenda)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
     </Card>
   );
 }
@@ -502,20 +593,24 @@ function TelaVendedor({ codigoVendedor }: { codigoVendedor: number }) {
 
   return (
     <View style={styles.telaFlex}>
-      <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
-      {campanha && <CardResumoCampanha key={versaoResumo} campanha={campanha} />}
-      {!temCampanha && (
-        <Text style={styles.hintSomenteLeitura}>Nenhum período de ranking cadastrado ainda — mostrando a semana atual.</Text>
-      )}
-      {!editavel && (
-        <Text style={styles.hintSomenteLeitura}>Só é possível marcar/desmarcar o dia de hoje — isso aqui é só consulta.</Text>
-      )}
       <ItensDoDia
         codigoVendedor={codigoVendedor}
         diaSelecionado={diaSelecionado}
         editavel={editavel}
         metaClientesOfertadosDia={campanha?.metaClientesOfertadosDia}
         onSalvar={() => setVersaoResumo((v) => v + 1)}
+        cabecalho={
+          <>
+            <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
+            {campanha && <CardResumoCampanha key={versaoResumo} campanha={campanha} />}
+            {!temCampanha && (
+              <Text style={styles.hintSomenteLeitura}>Nenhum período de ranking cadastrado ainda — mostrando a semana atual.</Text>
+            )}
+            {!editavel && (
+              <Text style={styles.hintSomenteLeitura}>Só é possível marcar/desmarcar o dia de hoje — isso aqui é só consulta.</Text>
+            )}
+          </>
+        }
       />
     </View>
   );
@@ -595,19 +690,23 @@ function TelaGestorMarcar() {
     const vendedorNome = vendedores.find((v) => v.codigo === vendedorAberto)?.nome ?? 'Vendedor';
     return (
       <View style={styles.telaFlex}>
-        <Pressable style={styles.voltar} onPress={() => setVendedorAberto(null)} hitSlop={8}>
-          <Ionicons name="arrow-back" size={18} color={colors.navy} />
-          <Text style={styles.voltarTexto} numberOfLines={1}>
-            {vendedorNome}
-          </Text>
-        </Pressable>
-        <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
         <ItensDoDia
           codigoVendedor={vendedorAberto}
           diaSelecionado={diaSelecionado}
           editavel
           metaClientesOfertadosDia={campanha?.metaClientesOfertadosDia}
           onSalvar={() => setVersaoResumo((v) => v + 1)}
+          cabecalho={
+            <>
+              <Pressable style={styles.voltar} onPress={() => setVendedorAberto(null)} hitSlop={8}>
+                <Ionicons name="arrow-back" size={18} color={colors.navy} />
+                <Text style={styles.voltarTexto} numberOfLines={1}>
+                  {vendedorNome}
+                </Text>
+              </Pressable>
+              <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
+            </>
+          }
         />
       </View>
     );
@@ -615,29 +714,33 @@ function TelaGestorMarcar() {
 
   return (
     <View style={styles.telaFlex}>
-      <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
-      {campanha && <CardResumoCampanha key={versaoResumo} campanha={campanha} />}
-      {!temCampanha && (
-        <Text style={styles.hintSomenteLeitura}>Nenhum período de ranking cadastrado ainda — mostrando a semana atual.</Text>
-      )}
-      {loadingResumo ? (
-        <ActivityIndicator style={{ marginTop: 16 }} />
-      ) : (
-        <FlatList
-          style={styles.listaFlex}
-          contentContainerStyle={styles.listaConteudo}
-          data={resumos}
-          keyExtractor={(r) => String(r.codigoVendedor)}
-          renderItem={({ item }) => (
-            <CardResumoVendedor resumo={item} onPress={() => setVendedorAberto(item.codigoVendedor)} />
-          )}
-          ListEmptyComponent={
+      <FlatList
+        style={styles.listaFlex}
+        contentContainerStyle={styles.listaConteudo}
+        data={resumos}
+        keyExtractor={(r) => String(r.codigoVendedor)}
+        renderItem={({ item }) => (
+          <CardResumoVendedor resumo={item} onPress={() => setVendedorAberto(item.codigoVendedor)} />
+        )}
+        ListHeaderComponent={
+          <>
+            <SeletorDia inicio={inicio} fim={fim} selecionado={diaSelecionado} onSelecionar={setDiaSelecionado} />
+            {campanha && <CardResumoCampanha key={versaoResumo} campanha={campanha} />}
+            {!temCampanha && (
+              <Text style={styles.hintSomenteLeitura}>Nenhum período de ranking cadastrado ainda — mostrando a semana atual.</Text>
+            )}
+          </>
+        }
+        ListEmptyComponent={
+          loadingResumo ? (
+            <ActivityIndicator style={{ marginTop: 16 }} />
+          ) : (
             <Card>
               <Text style={styles.empty}>Nenhum vendedor ativo.</Text>
             </Card>
-          }
-        />
-      )}
+          )
+        }
+      />
     </View>
   );
 }
@@ -1166,4 +1269,13 @@ const styles = StyleSheet.create({
   andamentoNome: { flex: 1, fontSize: 12, color: colors.textPrimary },
   andamentoValor: { fontSize: 12, color: colors.textSecondary },
   andamentoProdutos: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  resultadoDiaBloco: { marginTop: 8 },
+  resultadoDiaToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  resultadoDiaData: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
+  resultadoTotalTitulo: { fontSize: 11, fontWeight: '700', color: colors.textMuted, marginTop: 8, marginBottom: 2 },
 });

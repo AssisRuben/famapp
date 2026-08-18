@@ -1,4 +1,4 @@
-import { CampanhaComplementar, VendaComplementarMarcada } from '../types/domain';
+import { CampanhaComplementar, OfertaComplementarDia, VendaComplementarMarcada, VendedorAtivo } from '../types/domain';
 
 export interface RankingComplementarItem {
   codigoVendedor: number;
@@ -37,6 +37,106 @@ export function calcularRankingComplementar(
       const posicao = index + 1;
       return { ...item, posicao, premio: premios.find((p) => p.posicao === posicao)?.valor ?? null };
     });
+}
+
+export interface ResultadoDiaVendedor {
+  codigoVendedor: number;
+  nomeVendedor: string;
+  // null = vendedor não informou nesse dia (não é "informou zero").
+  clientesOfertados: number | null;
+  quantidadeItens: number;
+  valorVenda: number;
+}
+
+export interface ResultadoDiaCampanha {
+  data: string;
+  itens: ResultadoDiaVendedor[];
+}
+
+// Resultado salvo de TODOS os vendedores por dia dentro do período da
+// campanha — diferente de calcularRankingComplementar (só quem bateu o
+// piso, somado no período todo): aqui é o dado bruto dia a dia, pra dar
+// visibilidade mesmo quando ninguém bateu a meta ainda.
+export function agruparResultadoComplementarPorDia(
+  vendas: VendaComplementarMarcada[],
+  ofertas: OfertaComplementarDia[],
+  vendedores: VendedorAtivo[]
+): ResultadoDiaCampanha[] {
+  const nomePorCodigo = new Map(vendedores.map((v) => [v.codigo, v.nome]));
+  const porData = new Map<string, Map<number, ResultadoDiaVendedor>>();
+
+  const linhaDe = (data: string, codigoVendedor: number, nomeVendedor: string) => {
+    if (!porData.has(data)) porData.set(data, new Map());
+    const porVendedor = porData.get(data)!;
+    if (!porVendedor.has(codigoVendedor)) {
+      porVendedor.set(codigoVendedor, {
+        codigoVendedor,
+        nomeVendedor,
+        clientesOfertados: null,
+        quantidadeItens: 0,
+        valorVenda: 0,
+      });
+    }
+    return porVendedor.get(codigoVendedor)!;
+  };
+
+  for (const v of vendas) {
+    const linha = linhaDe(v.dataVenda, v.codigoVendedor, v.nomeVendedor);
+    linha.quantidadeItens += 1;
+    linha.valorVenda += v.valor;
+  }
+  for (const o of ofertas) {
+    const nome = nomePorCodigo.get(o.codigoVendedor) ?? `Vendedor ${o.codigoVendedor}`;
+    const linha = linhaDe(o.data, o.codigoVendedor, nome);
+    linha.clientesOfertados = o.clientesOfertados;
+  }
+
+  return Array.from(porData.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([data, porVendedor]) => ({
+      data,
+      itens: Array.from(porVendedor.values()).sort((a, b) => a.nomeVendedor.localeCompare(b.nomeVendedor)),
+    }));
+}
+
+// Mesmo resultado de agruparResultadoComplementarPorDia, mas somado no
+// período inteiro por vendedor (clientesOfertados aqui é a SOMA das
+// contagens diárias, não um valor único) — usado como "total do
+// período" logo abaixo do dia aberto, pra dar o acumulado sem precisar
+// somar cada dia na mão.
+export function totalComplementarPorVendedor(
+  vendas: VendaComplementarMarcada[],
+  ofertas: OfertaComplementarDia[],
+  vendedores: VendedorAtivo[]
+): ResultadoDiaVendedor[] {
+  const nomePorCodigo = new Map(vendedores.map((v) => [v.codigo, v.nome]));
+  const porVendedor = new Map<number, ResultadoDiaVendedor>();
+
+  const linhaDe = (codigoVendedor: number, nomeVendedor: string) => {
+    if (!porVendedor.has(codigoVendedor)) {
+      porVendedor.set(codigoVendedor, {
+        codigoVendedor,
+        nomeVendedor,
+        clientesOfertados: null,
+        quantidadeItens: 0,
+        valorVenda: 0,
+      });
+    }
+    return porVendedor.get(codigoVendedor)!;
+  };
+
+  for (const v of vendas) {
+    const linha = linhaDe(v.codigoVendedor, v.nomeVendedor);
+    linha.quantidadeItens += 1;
+    linha.valorVenda += v.valor;
+  }
+  for (const o of ofertas) {
+    const nome = nomePorCodigo.get(o.codigoVendedor) ?? `Vendedor ${o.codigoVendedor}`;
+    const linha = linhaDe(o.codigoVendedor, nome);
+    linha.clientesOfertados = (linha.clientesOfertados ?? 0) + o.clientesOfertados;
+  }
+
+  return Array.from(porVendedor.values()).sort((a, b) => b.valorVenda - a.valorVenda);
 }
 
 // Resumo "Dipirona 500mg (2x), Vitamina C" dos produtos que um

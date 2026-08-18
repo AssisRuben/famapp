@@ -28,6 +28,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
+  OfertaComplementarDia,
   ParametrosCompra,
   Pendencia,
   Profile,
@@ -1417,6 +1418,21 @@ class MockRepository implements DataRepository {
     const mapa = await getOfertaComplementarDiariaStore();
     mapa[`${codigoVendedor}:${data}`] = clientesOfertados;
     await salvarOfertaComplementarDiariaStore(mapa);
+  }
+
+  async getOfertaComplementarPeriodo(
+    _profile: Profile,
+    dataInicio: string,
+    dataFim: string
+  ): Promise<OfertaComplementarDia[]> {
+    const mapa = await getOfertaComplementarDiariaStore();
+    const linhas = Object.entries(mapa)
+      .map(([chave, clientesOfertados]) => {
+        const [codigoVendedorTexto, data] = chave.split(':');
+        return { codigoVendedor: Number(codigoVendedorTexto), data, clientesOfertados };
+      })
+      .filter((l) => l.data >= dataInicio && l.data <= dataFim);
+    return delay(linhas);
   }
 
   async getVendasComplementaresCampanha(_profile: Profile, campanhaId: string): Promise<VendaComplementarMarcada[]> {

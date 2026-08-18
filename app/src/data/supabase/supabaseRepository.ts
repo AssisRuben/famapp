@@ -30,6 +30,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
+  OfertaComplementarDia,
   ParametrosCompra,
   Pendencia,
   Profile,
@@ -1664,6 +1665,25 @@ class SupabaseRepository implements DataRepository {
       { onConflict: 'codigo_vendedor,data' }
     );
     if (error) throw error;
+  }
+
+  async getOfertaComplementarPeriodo(
+    _profile: Profile,
+    dataInicio: string,
+    dataFim: string
+  ): Promise<OfertaComplementarDia[]> {
+    const { data, error } = await supabase
+      .from('venda_complementar_oferta_diaria')
+      .select('codigo_vendedor, data, clientes_ofertados')
+      .gte('data', dataInicio)
+      .lte('data', dataFim);
+    if (error) throw error;
+
+    return (data ?? []).map((r) => ({
+      codigoVendedor: r.codigo_vendedor,
+      data: r.data,
+      clientesOfertados: r.clientes_ofertados,
+    }));
   }
 
   async getProdutosEmFalta(_profile: Profile): Promise<ProdutoEmFalta[]> {

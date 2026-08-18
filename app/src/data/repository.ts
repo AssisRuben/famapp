@@ -23,6 +23,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
+  OfertaComplementarDia,
   ParametrosCompra,
   Pendencia,
   Profile,
@@ -251,6 +252,10 @@ export interface DataRepository {
   // de "só hoje é editável pro vendedor" da tela, não do método em si.
   getOfertaComplementarDia(profile: Profile, data: string, codigoVendedor: number): Promise<number>;
   salvarOfertaComplementarDia(profile: Profile, data: string, codigoVendedor: number, clientesOfertados: number): Promise<void>;
+  // De TODOS os vendedores no período (não só o logado) — usado no
+  // card de resumo da campanha pra mostrar o resultado diário de cada
+  // um, independente de ter batido o piso de premiação ou não.
+  getOfertaComplementarPeriodo(profile: Profile, dataInicio: string, dataFim: string): Promise<OfertaComplementarDia[]>;
 
   // Produto em falta — lista compartilhada, qualquer autenticado
   // reporta/edita/apaga (não é gestor-only, é registro rápido de
