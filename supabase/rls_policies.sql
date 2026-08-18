@@ -529,6 +529,59 @@ from produtos_em_falta pef
 left join profiles perfil_registro on perfil_registro.id = pef.registrado_por
 left join vendedores vd on vd.codigo = perfil_registro.codigo_vendedor;
 
+-- compras_classificacoes (18/08/2026): só gestor, mesmo acesso da aba
+-- Compras inteira (RootNavigator.tsx só mostra "Compras" no menu do
+-- gestor).
+alter table compras_classificacoes enable row level security;
+
+create policy "compras_classificacoes: gestor le"
+on compras_classificacoes for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "compras_classificacoes: gestor insere"
+on compras_classificacoes for insert
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "compras_classificacoes: gestor atualiza"
+on compras_classificacoes for update
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+))
+with check (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+create policy "compras_classificacoes: gestor deleta"
+on compras_classificacoes for delete
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));
+
+-- vw_compras_classificacoes (18/08/2026) — resolve nome do produto e
+-- de quem classificou. SEM security_invoker de propósito (mesmo motivo
+-- de vw_produtos_em_falta acima): RLS de `profiles` só deixa cada um
+-- ler o PRÓPRIO perfil, então em modo invoker o join pra resolver nome
+-- de QUALQUER OUTRO gestor voltaria nulo. Roda com privilégio de dono;
+-- o gate de acesso (só gestor) fica embutido na própria query.
+create view vw_compras_classificacoes as
+select
+  cc.id,
+  cc.codigo_produto,
+  pc.nome as nome_produto,
+  cc.motivo,
+  cc.observacao,
+  cc.classificado_em,
+  coalesce(vd2.nome, 'Gestor(a) da Farmácia') as nome_classificado_por
+from compras_classificacoes cc
+join produto_catalogo pc on pc.codigo = cc.codigo_produto
+left join profiles perfil_classificacao on perfil_classificacao.id = cc.classificado_por
+left join vendedores vd2 on vd2.codigo = perfil_classificacao.codigo_vendedor
+where exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor');
+
 -- pendencias: lista compartilhada, "dar baixa" é UPDATE (marca
 -- baixada=true), não DELETE — sem policy de delete de propósito, pra
 -- não perder o histórico de quem entregou o quê.

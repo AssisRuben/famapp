@@ -1,0 +1,127 @@
+{
+  "name": "SGF - Produto (catálogo/estoque diário)",
+  "nodes": [
+    {
+      "id": "nota-leia",
+      "name": "Leia antes de importar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-320, -40],
+      "parameters": {
+        "width": 460,
+        "height": 380,
+        "content": "## Leia antes de importar\n\n**Por que esse workflow existe (17/08/2026):** `produto_catalogo`\n(inclui `estoque_atual`) nunca foi coberto pelo incremental de 15 min —\nficou de fora de propósito desde o início (README, \"Escopo desta\nprimeira versão\"). Só era atualizado quando alguém rodava\n`backfill_periodo.js` na mão. Resultado: produto que recebia entrada de\nestoque continuava aparecendo como \"zerado\" nos relatórios de WhatsApp\n(`whatsapp_estoque_giro_alto_zerado.n8n.json`) e nas telas de\nCompras/Precificação do app, porque o dado subjacente nunca mudava.\n\n**O que faz:** puxa o catálogo INTEIRO da Trier todo dia de madrugada\n(`/produto/obter-todos-v1`, sem filtro de data — mesmo raciocínio do\nbackfill: não existe \"produto alterado recentemente\" que faça sentido\npra estoque, que muda toda hora) e faz upsert em `produto_catalogo`.\nRoda 1x por dia (07:00), antes do relatório de estoque zerado (08:00).\n\n**Antes de ativar:**\n1. Importe e configure as MESMAS credenciais dos outros workflows\n   (`SGF Trier - Bearer` no node HTTP, `Supabase Postgres` no node\n   Postgres).\n2. Rode manualmente uma vez (▶ no node HTTP Request) e confira se ele\n   pagina até o fim (acompanhe o nº de itens no output) — a paginação\n   usa a opção nativa do node HTTP Request (\"Pagination\" em Options),\n   incrementando `primeiroRegistro` de 999 em 999 até a resposta vir\n   vazia. Se a versão do n8n instalada tiver os campos de paginação\n   com nomes diferentes, ajuste na UI antes de confiar no resultado.\n3. Confira no Supabase que `produto_catalogo.estoque_atual` mudou pros\n   produtos que você sabe que tiveram entrada recente.\n4. Só depois disso, ative o Schedule Trigger.\n\n**Catálogo grande:** o Code node já quebra o upsert em lotes de 500\nlinhas por instrução SQL (mesmo tamanho de lote do `backfill_periodo.js`)\n— não manda um INSERT gigante numa query só."
+      }
+    },
+    {
+      "id": "trigger",
+      "name": "Todo dia às 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-320, 460],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "produto-http",
+      "name": "Buscar catálogo inteiro (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 460],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao/produto/obter-todos-v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "primeiroRegistro",
+              "value": "0"
+            },
+            {
+              "name": "quantidadeRegistros",
+              "value": "999"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "primeiroRegistro",
+                    "value": "={{ $pageCount * 999 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "responseIsEmpty",
+              "limitPagesFetched": false,
+              "requestInterval": 150
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "SGF Trier - Bearer"
+        }
+      }
+    },
+    {
+      "id": "produto-mapear",
+      "name": "Mapear produtos (lotes de 500)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 460],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// resposta paginada do node HTTP Request chega como 1 item por PÁGINA\n// (cada item.json = array daquela página, quando a paginação nativa\n// está ativa), ou já achatada em N items — cobre os dois casos e\n// concatena tudo num array único, igual buscarTudo() do backfill.\nconst brutos = $input.all().map((i) => i.json);\nlet linhas = [];\nfor (const b of brutos) {\n  if (Array.isArray(b)) linhas = linhas.concat(b);\n  else linhas.push(b);\n}\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, \"''\")}'::jsonb`;\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\n// Mesmo mapeamento de sincronizarProdutos() em backfill_periodo.js:\n// ProdutoIntegracaoDto não tem \"marca\" -- nomeLaboratorio é a\n// aproximação (fabricante); categoria = nomeCategoria (tipo de uso),\n// grupo = nomeGrupo (categoria de produto de verdade) -- campos\n// separados de propósito (achado 01/08/2026).\nconst COLUNAS = [\n  'codigo', 'codigo_barras', 'nome', 'categoria', 'grupo', 'marca',\n  'preco_venda', 'custo_medio', 'estoque_atual', 'tipo_lista',\n];\nconst ATUALIZAR = COLUNAS.slice(1).map((c) => `${c} = EXCLUDED.${c}`).join(', ');\nconst TAMANHO_LOTE = 500;\n\nconst saida = [];\nfor (let inicio = 0; inicio < linhas.length; inicio += TAMANHO_LOTE) {\n  const lote = linhas.slice(inicio, inicio + TAMANHO_LOTE);\n  const grupos = lote.map((p) => {\n    const valores = [\n      p.codigo,\n      p.codigoBarras != null ? String(p.codigoBarras) : null,\n      p.nome,\n      p.nomeCategoria ?? null,\n      p.nomeGrupo ?? null,\n      p.nomeLaboratorio ?? null,\n      p.valorVenda ?? 0,\n      p.valorCustoMedio ?? p.valorCusto ?? 0,\n      p.quantidadeEstoque ?? 0,\n      p.tipoLista ?? null,\n    ];\n    return `(${valores.map(pgVal).join(', ')})`;\n  });\n  const sql = `INSERT INTO produto_catalogo (${COLUNAS.join(', ')})\nVALUES ${grupos.join(',\\n')}\nON CONFLICT (codigo) DO UPDATE SET ${ATUALIZAR};`;\n  saida.push({ json: { sql, tipo: 'lote', quantidade: lote.length } });\n}\n\nif (linhas.length === 0) {\n  saida.push({ json: { sql: 'SELECT 1', tipo: 'vazio', quantidade: 0 } });\n}\n\n// Última linha: atualiza sync_control (upsert -- 'produto' pode nunca\n// ter tido linha aqui, já que era fora do escopo do incremental).\nsaida.push({\n  json: {\n    sql: `INSERT INTO sync_control (entity_name, last_synced_at) VALUES ('produto', now())\nON CONFLICT (entity_name) DO UPDATE SET last_synced_at = now();`,\n    tipo: 'sync_control',\n    quantidade: linhas.length,\n  },\n});\n\nreturn saida;"
+      }
+    },
+    {
+      "id": "produto-executar",
+      "name": "Executar upserts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, 460],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Todo dia às 07:00": {
+      "main": [[{ "node": "Buscar catálogo inteiro (API)", "type": "main", "index": 0 }]]
+    },
+    "Buscar catálogo inteiro (API)": {
+      "main": [[{ "node": "Mapear produtos (lotes de 500)", "type": "main", "index": 0 }]]
+    },
+    "Mapear produtos (lotes de 500)": {
+      "main": [[{ "node": "Executar upserts", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

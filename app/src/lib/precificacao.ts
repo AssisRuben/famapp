@@ -1,7 +1,7 @@
 import { ItemPrecificacao, ProdutoCatalogo, TagPrecificacao } from '../types/domain';
 import { calcularMargemPct } from './campanhas';
-import { macroGrupoDoProduto } from './macroGrupo';
 import { ehEstoqueParado, LIMIAR_DIAS_PARADO } from './estoqueParado';
+import { ehBaixaElasticidade } from './elasticidade';
 
 // re-exportado por conveniência — telas que já importam o limiar daqui
 // (PrecificacaoScreen) não precisam saber que ele mora em estoqueParado.ts.
@@ -10,23 +10,6 @@ export { LIMIAR_DIAS_PARADO };
 interface VendaInfo {
   quantidadeVendida30d: number;
   diasSemVenda: number | null;
-}
-
-// Uso contínuo/prescrição tolera menos variação de preço que
-// conveniência/impulso. produto_catalogo não tem um flag de receita —
-// isso vive só em `produtos` (curadoria separada e menor, códigos não
-// batem com o catálogo) — então aproxima pelas macro-categorias de
-// medicamento (éticos/genéricos/similares) do lib/macroGrupo.ts, a
-// mesma classificação usada no filtro de grupo da tela — confirmado com
-// dados reais de produção em 05/08/2026 (ver
-// README.md#pendências-técnicas). categoria (tipo de uso) foi
-// descartada por ter ~15% de valores nulos e não mapear
-// consistentemente pra medicamento vs. não-medicamento.
-const MACRO_GRUPOS_BAIXA_ELASTICIDADE = new Set(['eticos', 'genericos', 'similares']);
-
-function ehBaixaElasticidade(grupo: string | undefined): boolean {
-  const macro = macroGrupoDoProduto(grupo);
-  return macro !== null && MACRO_GRUPOS_BAIXA_ELASTICIDADE.has(macro);
 }
 
 function round2(valor: number): number {
@@ -73,7 +56,7 @@ export function calcularRelatorioPrecificacao(
     if (ehEstoqueParado(venda.diasSemVenda, produto.estoqueAtual)) {
       tags.push('parado_avaliar_preco');
     }
-    tags.push(ehBaixaElasticidade(produto.grupo) ? 'baixa_elasticidade' : 'alta_elasticidade');
+    tags.push(ehBaixaElasticidade(produto.grupo, produto.tipoLista) ? 'baixa_elasticidade' : 'alta_elasticidade');
 
     return {
       produto,

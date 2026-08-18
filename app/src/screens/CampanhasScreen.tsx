@@ -18,10 +18,13 @@ import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroGrupo';
-import { Campanha, CampanhaProduto, ModoSugestaoCampanha, ProdutoElegibilidade } from '../types/domain';
+import { MODELO_CAMPANHA_LABEL, nomeSugeridoPorModelo, ORDEM_MODELOS_CAMPANHA } from '../lib/modeloCampanha';
+import { Campanha, CampanhaProduto, ModeloCampanha, ModoSugestaoCampanha, ProdutoElegibilidade } from '../types/domain';
 
 type Modo = 'lista' | 'nova';
 const TODOS_OS_GRUPOS = '__todos__';
+const PERSONALIZADO = '__personalizado__';
+type SelecaoModelo = ModeloCampanha | typeof PERSONALIZADO;
 
 const OPCOES_MODO_SUGESTAO: { chave: ModoSugestaoCampanha; label: string; descricao: string }[] = [
   {
@@ -61,6 +64,12 @@ export function CampanhasScreen() {
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [modoSugestao, setModoSugestao] = useState<ModoSugestaoCampanha>('popularidade');
   const [macroGrupoFiltro, setMacroGrupoFiltro] = useState<MacroGrupo | typeof TODOS_OS_GRUPOS>(TODOS_OS_GRUPOS);
+  const [modeloSelecionado, setModeloSelecionado] = useState<SelecaoModelo>(PERSONALIZADO);
+
+  const escolherModelo = (selecao: SelecaoModelo) => {
+    setModeloSelecionado(selecao);
+    if (selecao !== PERSONALIZADO) setNome(nomeSugeridoPorModelo(selecao));
+  };
 
   const carregarLista = useCallback(async () => {
     if (!profile) return;
@@ -75,12 +84,14 @@ export function CampanhasScreen() {
 
   const gerarSugestao = async () => {
     if (!profile) return;
+    const usaModeloFixo = modeloSelecionado !== PERSONALIZADO;
     const params = {
       margemMinimaPct: Number(margemMinima.replace(',', '.')) || 0,
       descontoAlvoPct: Number(descontoAlvo.replace(',', '.')) || 0,
       quantidadeMaxima: Number(quantidadeMaxima) || 10,
-      modo: modoSugestao,
-      macroGrupo: macroGrupoFiltro === TODOS_OS_GRUPOS ? undefined : macroGrupoFiltro,
+      modo: usaModeloFixo ? undefined : modoSugestao,
+      macroGrupo: usaModeloFixo ? undefined : macroGrupoFiltro === TODOS_OS_GRUPOS ? undefined : macroGrupoFiltro,
+      modelo: usaModeloFixo ? modeloSelecionado : undefined,
     };
     setGerando(true);
     try {
@@ -115,6 +126,7 @@ export function CampanhasScreen() {
     setItens([]);
     setModoSugestao('popularidade');
     setMacroGrupoFiltro(TODOS_OS_GRUPOS);
+    setModeloSelecionado(PERSONALIZADO);
   };
 
   const abrirNova = () => {
@@ -204,50 +216,83 @@ export function CampanhasScreen() {
           <Card>
             <Text style={styles.cardTitulo}>Critérios de sugestão</Text>
 
-            <Text style={styles.rotulo}>Tipo de sugestão</Text>
-            <View style={styles.filtroRow}>
-              {OPCOES_MODO_SUGESTAO.map((opcao) => (
-                <Pressable
-                  key={opcao.chave}
-                  style={[styles.filtroChip, modoSugestao === opcao.chave && styles.filtroChipAtivo]}
-                  onPress={() => setModoSugestao(opcao.chave)}
-                >
-                  <Text style={[styles.filtroChipTexto, modoSugestao === opcao.chave && styles.filtroChipTextoAtivo]}>
-                    {opcao.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            <Text style={styles.rotulo}>Modelo de campanha</Text>
             <Text style={styles.explicacaoModo}>
-              {OPCOES_MODO_SUGESTAO.find((o) => o.chave === modoSugestao)?.descricao}
+              Escolha uma campanha fixa (já define sozinha quais produtos entram) ou "Personalizado" pra montar os
+              critérios na mão.
             </Text>
-
-            <Text style={[styles.rotulo, styles.espacado]}>Grupo (opcional — campanha temática)</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.espacado}>
               <View style={styles.filtroRow}>
-                <Pressable
-                  style={[styles.filtroChip, macroGrupoFiltro === TODOS_OS_GRUPOS && styles.filtroChipAtivo]}
-                  onPress={() => setMacroGrupoFiltro(TODOS_OS_GRUPOS)}
-                >
-                  <Text
-                    style={[styles.filtroChipTexto, macroGrupoFiltro === TODOS_OS_GRUPOS && styles.filtroChipTextoAtivo]}
-                  >
-                    Todos os grupos
-                  </Text>
-                </Pressable>
-                {ORDEM_MACRO_GRUPOS.map((macro) => (
+                {ORDEM_MODELOS_CAMPANHA.map((modelo) => (
                   <Pressable
-                    key={macro}
-                    style={[styles.filtroChip, macroGrupoFiltro === macro && styles.filtroChipAtivo]}
-                    onPress={() => setMacroGrupoFiltro(macro)}
+                    key={modelo}
+                    style={[styles.filtroChip, modeloSelecionado === modelo && styles.filtroChipAtivo]}
+                    onPress={() => escolherModelo(modelo)}
                   >
-                    <Text style={[styles.filtroChipTexto, macroGrupoFiltro === macro && styles.filtroChipTextoAtivo]}>
-                      {MACRO_GRUPO_LABEL[macro]}
+                    <Text style={[styles.filtroChipTexto, modeloSelecionado === modelo && styles.filtroChipTextoAtivo]}>
+                      {MODELO_CAMPANHA_LABEL[modelo]}
                     </Text>
                   </Pressable>
                 ))}
+                <Pressable
+                  style={[styles.filtroChip, modeloSelecionado === PERSONALIZADO && styles.filtroChipAtivo]}
+                  onPress={() => escolherModelo(PERSONALIZADO)}
+                >
+                  <Text style={[styles.filtroChipTexto, modeloSelecionado === PERSONALIZADO && styles.filtroChipTextoAtivo]}>
+                    Personalizado
+                  </Text>
+                </Pressable>
               </View>
             </ScrollView>
+
+            {modeloSelecionado === PERSONALIZADO && (
+              <>
+                <Text style={[styles.rotulo, styles.espacado]}>Tipo de sugestão</Text>
+                <View style={styles.filtroRow}>
+                  {OPCOES_MODO_SUGESTAO.map((opcao) => (
+                    <Pressable
+                      key={opcao.chave}
+                      style={[styles.filtroChip, modoSugestao === opcao.chave && styles.filtroChipAtivo]}
+                      onPress={() => setModoSugestao(opcao.chave)}
+                    >
+                      <Text style={[styles.filtroChipTexto, modoSugestao === opcao.chave && styles.filtroChipTextoAtivo]}>
+                        {opcao.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={styles.explicacaoModo}>
+                  {OPCOES_MODO_SUGESTAO.find((o) => o.chave === modoSugestao)?.descricao}
+                </Text>
+
+                <Text style={[styles.rotulo, styles.espacado]}>Grupo (opcional — campanha temática)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.filtroRow}>
+                    <Pressable
+                      style={[styles.filtroChip, macroGrupoFiltro === TODOS_OS_GRUPOS && styles.filtroChipAtivo]}
+                      onPress={() => setMacroGrupoFiltro(TODOS_OS_GRUPOS)}
+                    >
+                      <Text
+                        style={[styles.filtroChipTexto, macroGrupoFiltro === TODOS_OS_GRUPOS && styles.filtroChipTextoAtivo]}
+                      >
+                        Todos os grupos
+                      </Text>
+                    </Pressable>
+                    {ORDEM_MACRO_GRUPOS.map((macro) => (
+                      <Pressable
+                        key={macro}
+                        style={[styles.filtroChip, macroGrupoFiltro === macro && styles.filtroChipAtivo]}
+                        onPress={() => setMacroGrupoFiltro(macro)}
+                      >
+                        <Text style={[styles.filtroChipTexto, macroGrupoFiltro === macro && styles.filtroChipTextoAtivo]}>
+                          {MACRO_GRUPO_LABEL[macro]}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+              </>
+            )}
 
             <Text style={[styles.rotulo, styles.espacado]}>Margem mínima (%)</Text>
             <TextInput style={styles.input} keyboardType="numeric" value={margemMinima} onChangeText={setMargemMinima} />
@@ -368,6 +413,8 @@ function mapearSugestaoParaItem(sugestao: ProdutoElegibilidade, dataInicio: stri
     quantidadeCartazes: 1,
     dataInicio,
     dataFim,
+    tipoPromocao: 'unitario',
+    kit: null,
   };
 }
 

@@ -239,6 +239,8 @@ export function PrecificacaoScreen() {
             quantidadeCartazes: 0,
             dataInicio: todayISO(),
             dataFim: somarDias(todayISO(), HORIZONTE_REAJUSTE_DIAS),
+            tipoPromocao: 'unitario',
+            kit: null,
           }));
           const conteudo = gerarTxtTrier(produtos);
           const nomeArquivo = `reajuste-precos-${todayISO()}.txt`;

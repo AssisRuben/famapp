@@ -20,7 +20,9 @@ import {
   FaixaComissao,
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
+  ItemClassificacaoCompra,
   ItemPrecificacao,
+  ItemRelatorioFalta,
   ItemVendaComplementar,
   MetaSemana,
   MetaVendedor,
@@ -28,6 +30,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
+  MotivoClassificacaoCompra,
   OfertaComplementarDia,
   ParametrosCompra,
   Pendencia,
@@ -96,6 +99,7 @@ const OFERTA_COMPLEMENTAR_DIARIA_KEY = '@farmapp/oferta_complementar_diaria';
 const CONTATOS_CLIENTES_KEY = '@farmapp/contatos_clientes';
 const PRODUTOS_EM_FALTA_KEY = '@farmapp/produtos_em_falta';
 const PENDENCIAS_KEY = '@farmapp/pendencias';
+const COMPRAS_CLASSIFICACOES_KEY = '@farmapp/compras_classificacoes';
 const CARTEIRA_CLIENTES_KEY = '@farmapp/carteira_clientes';
 const SIMULATED_LATENCY_MS = 350;
 
@@ -334,6 +338,15 @@ async function getProdutosEmFaltaStore(): Promise<ProdutoEmFalta[]> {
 
 async function salvarProdutosEmFaltaStore(itens: ProdutoEmFalta[]): Promise<void> {
   await AsyncStorage.setItem(PRODUTOS_EM_FALTA_KEY, JSON.stringify(itens));
+}
+
+async function getClassificacoesCompraStore(): Promise<ItemClassificacaoCompra[]> {
+  const raw = await AsyncStorage.getItem(COMPRAS_CLASSIFICACOES_KEY);
+  return raw ? (JSON.parse(raw) as ItemClassificacaoCompra[]) : [];
+}
+
+async function salvarClassificacoesCompraStore(itens: ItemClassificacaoCompra[]): Promise<void> {
+  await AsyncStorage.setItem(COMPRAS_CLASSIFICACOES_KEY, JSON.stringify(itens));
 }
 
 async function getPendenciasStore(): Promise<Pendencia[]> {
@@ -1209,7 +1222,39 @@ class MockRepository implements DataRepository {
       fornecedorMaisBaratoPorProduto,
       params
     );
-    return delay(sugestoes);
+
+    const classificados = new Set((await getClassificacoesCompraStore()).map((c) => c.codigoProduto));
+    return delay(sugestoes.filter((s) => !classificados.has(s.codigoProduto)));
+  }
+
+  async classificarItensCompra(
+    _profile: Profile,
+    codigosProduto: number[],
+    motivo: MotivoClassificacaoCompra,
+    observacao?: string
+  ): Promise<void> {
+    const atuais = await getClassificacoesCompraStore();
+    const semOsNovos = atuais.filter((c) => !codigosProduto.includes(c.codigoProduto));
+    const novos: ItemClassificacaoCompra[] = codigosProduto.map((codigo) => ({
+      id: `${codigo}-${Date.now()}`,
+      codigoProduto: codigo,
+      nomeProduto: catalogoProdutosSeed.find((p) => p.codigo === codigo)?.nome ?? `Produto ${codigo}`,
+      motivo,
+      observacao: observacao ?? null,
+      classificadoEm: new Date().toISOString(),
+      nomeClassificadoPor: 'Gestor(a) da Farmácia',
+    }));
+    await salvarClassificacoesCompraStore([...semOsNovos, ...novos]);
+  }
+
+  async getClassificacoesCompra(_profile: Profile): Promise<ItemClassificacaoCompra[]> {
+    const itens = await getClassificacoesCompraStore();
+    return delay([...itens].sort((a, b) => b.classificadoEm.localeCompare(a.classificadoEm)));
+  }
+
+  async removerClassificacaoCompra(codigoProduto: number): Promise<void> {
+    const itens = await getClassificacoesCompraStore();
+    await salvarClassificacoesCompraStore(itens.filter((i) => i.codigoProduto !== codigoProduto));
   }
 
   async getRelatorioPrecificacao(_profile: Profile): Promise<ItemPrecificacao[]> {
@@ -1494,6 +1539,36 @@ class MockRepository implements DataRepository {
   async excluirProdutoEmFalta(id: string): Promise<void> {
     const itens = await getProdutosEmFaltaStore();
     await salvarProdutosEmFaltaStore(itens.filter((i) => i.id !== id));
+  }
+
+  async gerarRelatorioFaltas(profile: Profile): Promise<ItemRelatorioFalta[]> {
+    const faltas = await this.getProdutosEmFalta(profile);
+    const fornecedoresPorCodigo = new Map(fornecedoresSeed.map((f) => [f.codigo, f.nomeFantasia]));
+    const fornecedorPorProduto = new Map(
+      compraInfoSeed.map((c) => [c.codigoProduto, fornecedoresPorCodigo.get(c.codigoFornecedor) ?? null])
+    );
+
+    return delay(
+      faltas.map((f) => {
+        const cat = f.codigoProduto != null ? catalogoProdutosSeed.find((p) => p.codigo === f.codigoProduto) : null;
+        return {
+          id: f.id,
+          nomeProduto: f.nomeProduto,
+          codigoProduto: f.codigoProduto,
+          codigoBarras: cat?.codigoBarras ?? null,
+          custoMedio: cat?.custoMedio ?? null,
+          fornecedorSugerido: f.codigoProduto != null ? fornecedorPorProduto.get(f.codigoProduto) ?? null : null,
+          data: f.data,
+          nomeRegistradoPor: f.nomeRegistradoPor,
+          temSaldoEstoque: f.temSaldoEstoque,
+        };
+      })
+    );
+  }
+
+  async limparProdutosEmFalta(ids: string[]): Promise<void> {
+    const itens = await getProdutosEmFaltaStore();
+    await salvarProdutosEmFaltaStore(itens.filter((i) => !ids.includes(i.id)));
   }
 
   async getPendencias(_profile: Profile): Promise<Pendencia[]> {

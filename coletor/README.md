@@ -108,11 +108,22 @@ ative o workflow (Schedule Trigger a cada 15 min).
 ## Escopo desta primeira versão
 
 Sincroniza: **vendedor, cliente, venda + itens, atendimentos diários por
-vendedor**. Deliberadamente **fora** desta versão: `produto_catalogo`,
-`fornecedores`, `compras` (usados por Campanhas/Cartazetes/Compras/
-Precificação, hoje ainda mockados no app) — mesmo escopo original
-documentado no `README.md` da raiz. Posso estender pra essas entidades
-depois, o padrão é o mesmo (ler cursor → buscar alterados → upsert).
+vendedor**. Deliberadamente **fora** desta versão: `fornecedores`,
+`compras` (usados por Campanhas/Compras, hoje ainda mockados no app) —
+mesmo escopo original documentado no `README.md` da raiz. Posso
+estender pra essas entidades depois, o padrão é o mesmo (ler cursor →
+buscar alterados → upsert).
+
+**[17/08/2026] `produto_catalogo` deixou de ficar de fora** — ganhou
+workflow próprio (`sgf-produto-diario.n8n.json`, 1x/dia às 07:00, não
+15 em 15 min: catálogo inteiro via `obter-todos-v1`, não dá pra pedir
+"alterado recentemente" pra estoque que muda toda hora, e paginar o
+catálogo inteiro a cada 15 min seria pesado à toa). Motivo: o relatório
+de WhatsApp "estoque zerado" (`whatsapp_estoque_giro_alto_zerado.n8n.json`)
+não dava baixa em produto que recebia entrada, porque `estoque_atual`
+só era atualizado manualmente via `backfill_periodo.js`. Compras e
+Precificação também dependiam desse mesmo dado parado — corrige os
+três de uma vez.
 
 ## Formato de data exigido pela Trier
 

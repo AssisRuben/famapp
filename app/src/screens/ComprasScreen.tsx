@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -19,10 +20,12 @@ import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatBRL, todayISO } from '../lib/format';
 import { gerarXlsxSugestaoCompras } from '../lib/comprasXlsx';
+import { gerarXlsxRelatorioFaltas } from '../lib/faltasXlsx';
 import { baixarArquivoBase64NoWeb } from '../lib/downloadWeb';
-import { alertar } from '../lib/alert';
+import { alertar, confirmar } from '../lib/alert';
 import { ORDEM_MACRO_GRUPOS, MACRO_GRUPO_LABEL, MacroGrupo } from '../lib/macroGrupo';
-import { SugestaoCompra } from '../types/domain';
+import { MOTIVO_CLASSIFICACAO_LABEL, ORDEM_MOTIVOS_CLASSIFICACAO } from '../lib/comprasClassificacao';
+import { ItemClassificacaoCompra, ItemRelatorioFalta, MotivoClassificacaoCompra, SugestaoCompra } from '../types/domain';
 
 // "outros_administrativo" nunca aparece na sugestão (doseCerta.ts já
 // filtra fora, é serviço/ajuste de sistema, não produto pra repor) —
@@ -39,6 +42,41 @@ export function ComprasScreen() {
   const [expandido, setExpandido] = useState<number | null>(null);
   const [gerando, setGerando] = useState(false);
   const [exportando, setExportando] = useState(false);
+  const [faltas, setFaltas] = useState<ItemRelatorioFalta[]>([]);
+  const [carregandoFaltas, setCarregandoFaltas] = useState(true);
+  const [gerandoFaltas, setGerandoFaltas] = useState(false);
+  const [classificacoes, setClassificacoes] = useState<ItemClassificacaoCompra[]>([]);
+  const [carregandoClassificacoes, setCarregandoClassificacoes] = useState(true);
+  const [mostrarClassificados, setMostrarClassificados] = useState(false);
+  const [selecionados, setSelecionados] = useState<number[]>([]);
+  const [classificando, setClassificando] = useState(false);
+  const [modalOutrosAberto, setModalOutrosAberto] = useState(false);
+  const [observacaoOutros, setObservacaoOutros] = useState('');
+
+  const carregarFaltas = useCallback(async () => {
+    if (!profile) return;
+    setCarregandoFaltas(true);
+    try {
+      setFaltas(await repository.gerarRelatorioFaltas(profile));
+    } finally {
+      setCarregandoFaltas(false);
+    }
+  }, [profile]);
+
+  const carregarClassificacoes = useCallback(async () => {
+    if (!profile) return;
+    setCarregandoClassificacoes(true);
+    try {
+      setClassificacoes(await repository.getClassificacoesCompra(profile));
+    } finally {
+      setCarregandoClassificacoes(false);
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    carregarFaltas();
+    carregarClassificacoes();
+  }, [carregarFaltas, carregarClassificacoes]);
 
   // Toque pra marcar, toque de novo pra tirar — dá pra marcar mais de
   // um (mesma dinâmica do filtro de vendedor no Checklist).
@@ -68,6 +106,42 @@ export function ComprasScreen() {
 
   const alternarExpandido = (codigoProduto: number) => {
     setExpandido((atual) => (atual === codigoProduto ? null : codigoProduto));
+  };
+
+  const alternarSelecao = (codigoProduto: number) => {
+    setSelecionados((atual) =>
+      atual.includes(codigoProduto) ? atual.filter((c) => c !== codigoProduto) : [...atual, codigoProduto]
+    );
+  };
+
+  const classificarSelecionados = async (motivo: MotivoClassificacaoCompra, observacao?: string) => {
+    if (!profile || selecionados.length === 0) return;
+    setClassificando(true);
+    try {
+      await repository.classificarItensCompra(profile, selecionados, motivo, observacao);
+      setItens((atual) => atual?.filter((i) => !selecionados.includes(i.codigoProduto)) ?? null);
+      setSelecionados([]);
+      await carregarClassificacoes();
+    } catch (erro) {
+      alertar('Erro ao classificar', erro instanceof Error ? erro.message : 'Tente novamente.');
+    } finally {
+      setClassificando(false);
+    }
+  };
+
+  const confirmarOutros = async () => {
+    setModalOutrosAberto(false);
+    await classificarSelecionados('outros', observacaoOutros.trim() || undefined);
+    setObservacaoOutros('');
+  };
+
+  const reincluir = async (codigoProduto: number) => {
+    try {
+      await repository.removerClassificacaoCompra(codigoProduto);
+      setClassificacoes((atual) => atual.filter((c) => c.codigoProduto !== codigoProduto));
+    } catch (erro) {
+      alertar('Erro ao reincluir', erro instanceof Error ? erro.message : 'Tente novamente.');
+    }
   };
 
   const ajustarQuantidade = (codigoProduto: number, texto: string) => {
@@ -108,6 +182,42 @@ export function ComprasScreen() {
     }
   };
 
+  const gerarRelatorioFaltasEExportar = () => {
+    if (faltas.length === 0) return;
+    confirmar(
+      'Gerar relatório e limpar faltas',
+      `Gera o XLSX com ${faltas.length} falta(s) registrada(s) e apaga todas da lista — some daqui e da aba Produtos em falta. Não dá pra desfazer.`,
+      async () => {
+        setGerandoFaltas(true);
+        try {
+          const base64 = gerarXlsxRelatorioFaltas(faltas);
+          const nomeArquivo = `faltas-${todayISO()}.xlsx`;
+
+          if (Platform.OS === 'web') {
+            baixarArquivoBase64NoWeb(nomeArquivo, base64, MIME_XLSX);
+          } else {
+            const uri = `${FileSystem.documentDirectory}${nomeArquivo}`;
+            await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+            const podeCompartilhar = await Sharing.isAvailableAsync();
+            if (podeCompartilhar) {
+              await Sharing.shareAsync(uri, { mimeType: MIME_XLSX, dialogTitle: 'Exportar relatório de faltas' });
+            } else {
+              alertar('Arquivo gerado', `Salvo em: ${uri}`);
+            }
+          }
+
+          await repository.limparProdutosEmFalta(faltas.map((f) => f.id));
+          setFaltas([]);
+        } catch (erro) {
+          alertar('Erro ao gerar relatório de faltas', erro instanceof Error ? erro.message : 'Tente novamente.');
+        } finally {
+          setGerandoFaltas(false);
+        }
+      },
+      { textoConfirmar: 'Gerar e limpar', destrutivo: true }
+    );
+  };
+
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
@@ -115,6 +225,67 @@ export function ComprasScreen() {
       <Text style={styles.subtitle}>
         Calcula quanto repor por produto comparando estoque atual com a demanda média de venda recente.
       </Text>
+
+      <Card>
+        <Text style={styles.cardTitulo}>Faltas registradas</Text>
+        {carregandoFaltas ? (
+          <ActivityIndicator />
+        ) : faltas.length === 0 ? (
+          <Text style={styles.empty}>Nenhuma falta registrada agora.</Text>
+        ) : (
+          <>
+            <Text style={styles.resumoLinha}>
+              {faltas.length} produto(s) reportado(s) em falta
+              {faltas.some((f) => f.temSaldoEstoque)
+                ? ` · ${faltas.filter((f) => f.temSaldoEstoque).length} são ruptura de gôndola (não entra na compra)`
+                : ''}
+            </Text>
+            <Pressable style={styles.botaoSecundario} onPress={gerarRelatorioFaltasEExportar} disabled={gerandoFaltas}>
+              {gerandoFaltas ? (
+                <ActivityIndicator color={colors.navy} />
+              ) : (
+                <>
+                  <Ionicons name="document-text-outline" size={18} color={colors.navy} />
+                  <Text style={styles.botaoSecundarioTexto}>Gerar relatório e limpar</Text>
+                </>
+              )}
+            </Pressable>
+            <Text style={styles.aviso}>
+              Gera o XLSX (separado por fornecedor, ruptura de gôndola numa aba à parte) e apaga as faltas da lista —
+              some daqui e da aba Produtos em falta. Não dá pra desfazer.
+            </Text>
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <Pressable style={styles.itemHeaderRow} onPress={() => setMostrarClassificados((v) => !v)}>
+          <Text style={[styles.cardTitulo, styles.flex1]}>
+            Classificados ({carregandoClassificacoes ? '...' : classificacoes.length})
+          </Text>
+          <Ionicons name={mostrarClassificados ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+        </Pressable>
+        {mostrarClassificados && (
+          classificacoes.length === 0 ? (
+            <Text style={[styles.empty, styles.espacadoCima]}>Nenhum item classificado ainda.</Text>
+          ) : (
+            classificacoes.map((c) => (
+              <View key={c.id} style={styles.linhaClassificado}>
+                <View style={styles.flex1}>
+                  <Text style={styles.itemNome} numberOfLines={1}>{c.nomeProduto}</Text>
+                  <Text style={styles.itemSubinfo}>
+                    {MOTIVO_CLASSIFICACAO_LABEL[c.motivo]}
+                    {c.observacao ? ` · ${c.observacao}` : ''} · {c.nomeClassificadoPor}
+                  </Text>
+                </View>
+                <Pressable onPress={() => reincluir(c.codigoProduto)} hitSlop={8}>
+                  <Text style={styles.linkAcao}>Reincluir</Text>
+                </Pressable>
+              </View>
+            ))
+          )
+        )}
+      </Card>
 
       <Card>
         <Text style={styles.cardTitulo}>Parâmetros</Text>
@@ -220,12 +391,47 @@ export function ComprasScreen() {
             </Text>
           </Card>
 
+          {selecionados.length > 0 && (
+            <Card style={styles.cardSelecao}>
+              <Text style={styles.cardTitulo}>{selecionados.length} selecionado(s)</Text>
+              <Text style={styles.grupoHint}>
+                Classificar como (some da lista até você reincluir em "Classificados"):
+              </Text>
+              <View style={styles.grupoGrid}>
+                {ORDEM_MOTIVOS_CLASSIFICACAO.filter((m) => m !== 'outros').map((motivo) => (
+                  <Pressable
+                    key={motivo}
+                    style={styles.chip}
+                    onPress={() => classificarSelecionados(motivo)}
+                    disabled={classificando}
+                  >
+                    <Text style={styles.chipTexto}>{MOTIVO_CLASSIFICACAO_LABEL[motivo]}</Text>
+                  </Pressable>
+                ))}
+                <Pressable style={styles.chip} onPress={() => setModalOutrosAberto(true)} disabled={classificando}>
+                  <Text style={styles.chipTexto}>{MOTIVO_CLASSIFICACAO_LABEL.outros}</Text>
+                </Pressable>
+              </View>
+              <Pressable onPress={() => setSelecionados([])} hitSlop={8} style={styles.espacadoCima}>
+                <Text style={styles.linkAcao}>Limpar seleção</Text>
+              </Pressable>
+            </Card>
+          )}
+
           <Text style={styles.sectionTitulo}>Produtos a repor</Text>
           {itens.map((item) => {
             const aberto = expandido === item.codigoProduto;
+            const selecionado = selecionados.includes(item.codigoProduto);
             return (
               <Card key={item.codigoProduto}>
                 <Pressable style={styles.itemHeaderRow} onPress={() => alternarExpandido(item.codigoProduto)}>
+                  <Pressable onPress={() => alternarSelecao(item.codigoProduto)} hitSlop={8}>
+                    <Ionicons
+                      name={selecionado ? 'checkbox' : 'square-outline'}
+                      size={22}
+                      color={selecionado ? colors.navy : colors.textMuted}
+                    />
+                  </Pressable>
                   <View style={styles.itemHeaderTexto}>
                     <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
                     <Text style={styles.itemSubinfo}>
@@ -291,6 +497,31 @@ export function ComprasScreen() {
           })}
         </>
       )}
+
+      <Modal visible={modalOutrosAberto} transparent animationType="fade" onRequestClose={() => setModalOutrosAberto(false)}>
+        <Pressable style={styles.modalFundo} onPress={() => setModalOutrosAberto(false)}>
+          <Pressable style={styles.modalCartao} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.cardTitulo}>Classificar como "Outros"</Text>
+            <Text style={styles.grupoHint}>Observação (opcional)</Text>
+            <TextInput
+              style={[styles.input, styles.inputMultilinha]}
+              value={observacaoOutros}
+              onChangeText={setObservacaoOutros}
+              placeholder="Ex.: fornecedor sem previsão de entrega"
+              multiline
+              numberOfLines={3}
+            />
+            <View style={styles.linhaDoisCampos}>
+              <Pressable style={[styles.botaoSecundario, styles.flex1]} onPress={() => setModalOutrosAberto(false)}>
+                <Text style={styles.botaoSecundarioTexto}>Cancelar</Text>
+              </Pressable>
+              <Pressable style={[styles.botaoPrimario, styles.flex1]} onPress={confirmarOutros}>
+                <Text style={styles.botaoTexto}>Confirmar</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -384,4 +615,19 @@ const styles = StyleSheet.create({
   },
   botaoSecundarioTexto: { color: colors.navy, fontWeight: '700', fontSize: 14 },
   aviso: { fontSize: 11, color: colors.textMuted, marginTop: 10, lineHeight: 15 },
+  flex1: { flex: 1 },
+  espacadoCima: { marginTop: 10 },
+  linkAcao: { fontSize: 12, color: colors.navy, fontWeight: '700' },
+  linhaClassificado: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  cardSelecao: { borderWidth: 1.5, borderColor: colors.navy },
+  inputMultilinha: { minHeight: 70, textAlignVertical: 'top', marginTop: 6, marginBottom: 12 },
+  modalFundo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  modalCartao: { backgroundColor: colors.white, borderRadius: 16, padding: 18, width: '88%', maxWidth: 360 },
 });

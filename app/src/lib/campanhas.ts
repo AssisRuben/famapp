@@ -1,6 +1,41 @@
-import { ProdutoCatalogo, ProdutoElegibilidade, SugestaoCampanhaParams } from '../types/domain';
+import { ModeloCampanha, ProdutoCatalogo, ProdutoElegibilidade, SugestaoCampanhaParams } from '../types/domain';
 import { ehEstoqueParado } from './estoqueParado';
-import { macroGrupoDoProduto } from './macroGrupo';
+import { ehBaixaElasticidade } from './elasticidade';
+import { macroGrupoDoProduto, MacroGrupo } from './macroGrupo';
+
+const MACROS_MEDICAMENTO: MacroGrupo[] = ['eticos', 'genericos', 'similares'];
+
+// Dias sem venda pra "estoque parado 60+ dias" (campanha fixa,
+// 18/08/2026) — limiar próprio, mais rígido que o LIMIAR_DIAS_PARADO
+// genérico (14 dias) usado no modo "liquidação"/Precificação.
+const LIMIAR_DIAS_ESTOQUE_PARADO_CAMPANHA = 60;
+
+// Filtro específico de cada modelo de campanha fixo — decide se o
+// produto É CANDIDATO ao tema (a pontuação/ordenação continua vindo de
+// pontuarCandidato/pontuarLiquidacao logo abaixo, não daqui).
+function passaNoFiltroDoModelo(modelo: ModeloCampanha, produto: ProdutoCatalogo, diasSemVenda: number | null): boolean {
+  const macro = macroGrupoDoProduto(produto.grupo);
+  const nomeNormalizado = produto.nome.toUpperCase();
+  switch (modelo) {
+    case 'estoque_parado_60':
+      return diasSemVenda !== null && diasSemVenda >= LIMIAR_DIAS_ESTOQUE_PARADO_CAMPANHA && produto.estoqueAtual > 0;
+    case 'mips':
+      // medicamento que não exige receita (aproximação — a Trier não
+      // manda um flag "isso é MIPS" pronto, ver comentário em domain.ts).
+      return !!macro && MACROS_MEDICAMENTO.includes(macro) && !produto.tipoLista?.trim();
+    case 'nao_medicamentos':
+      return !!macro && !MACROS_MEDICAMENTO.includes(macro) && macro !== 'outros_administrativo';
+    case 'desodorantes':
+      // sem subcategoria própria no catálogo — precisa ser por nome.
+      return nomeNormalizado.includes('DESODORANTE');
+    case 'bebe_idoso':
+      // "FRALDAS" (grupo bruto) cobre infantil E geriátrica no mesmo
+      // balde — confirmado com a farmácia (18/08/2026). Nome também
+      // serve de rede de segurança caso algum item geriátrico não caia
+      // nesse grupo bruto.
+      return macro === 'infantil_puericultura' || nomeNormalizado.includes('GERIATRIC');
+  }
+}
 
 interface VendaRecenteInfo {
   quantidadeVendida30d: number;
@@ -40,12 +75,22 @@ export function calcularDescontoSustentavel(
   };
 }
 
-// 60% margem + 40% popularidade normalizada — prioriza quem sustenta
-// desconto de verdade E já vende bem (reforça sucesso, não tenta
-// "adivinhar" se um produto parado vai deslanchar).
-function pontuarCandidato(margemAtualPct: number, quantidadeVendida30d: number, maxVendida: number): number {
+// 50% margem + 30% popularidade normalizada + 20% elasticidade —
+// prioriza quem sustenta desconto de verdade E já vende bem E responde
+// a promoção de verdade. [18/08/2026] Pesos antigos eram 60/40 margem/
+// popularidade, redistribuídos pra abrir espaço pro sinal de
+// elasticidade sem zerar os dois que já existiam. Baixa elasticidade
+// não é DESCARTADA (ainda pode entrar se pontuar bem nos outros dois),
+// só pesa menos — descontar um produto de baixa elasticidade não é
+// necessariamente errado, só menos eficiente pra gerar volume extra.
+function pontuarCandidato(
+  margemAtualPct: number,
+  quantidadeVendida30d: number,
+  maxVendida: number,
+  altaElasticidade: boolean
+): number {
   const popularidadeNorm = maxVendida > 0 ? (quantidadeVendida30d / maxVendida) * 100 : 0;
-  return margemAtualPct * 0.6 + popularidadeNorm * 0.4;
+  return margemAtualPct * 0.5 + popularidadeNorm * 0.3 + (altaElasticidade ? 100 : 0) * 0.2;
 }
 
 // Inverso do modo popularidade: 70% valor parado (custoMedio ×
@@ -63,26 +108,38 @@ export function sugerirCandidatos(
   params: SugestaoCampanhaParams,
   codigosParaEvitar: Set<number> = new Set()
 ): ProdutoElegibilidade[] {
-  const modo = params.modo ?? 'popularidade';
+  // Modelo fixo (18/08/2026) sobrepõe modo/macroGrupo — cada modelo já
+  // decide sua própria regra de seleção (passaNoFiltroDoModelo) e usa a
+  // pontuação equivalente ao modo mais parecido (estoque_parado_60 ~
+  // liquidação; os outros 4, temáticos, ~ popularidade).
+  const modo = params.modelo ? (params.modelo === 'estoque_parado_60' ? 'liquidacao' : 'popularidade') : params.modo ?? 'popularidade';
 
   const base = catalogo
     .filter((produto) => !codigosParaEvitar.has(produto.codigo))
-    // filtro temático opcional (campanha "Dia do Genérico", "Perfumaria"...).
-    .filter((produto) => !params.macroGrupo || macroGrupoDoProduto(produto.grupo) === params.macroGrupo)
+    // filtro temático opcional (campanha "Dia do Genérico", "Perfumaria"...)
+    // — só quando NÃO há modelo fixo (modelo tem o próprio filtro abaixo).
+    .filter((produto) => params.modelo || !params.macroGrupo || macroGrupoDoProduto(produto.grupo) === params.macroGrupo)
     .map((produto) => {
       const venda = vendaRecentePorProduto.get(produto.codigo) ?? { quantidadeVendida30d: 0, diasSemVenda: null };
       const margemAtualPct = calcularMargemPct(produto.precoVenda, produto.custoMedio);
       return { produto, venda, margemAtualPct };
     })
     // margem abaixo do mínimo = descontar isso quebraria a farmácia,
-    // fora da lista nos dois modos.
+    // fora da lista em qualquer modo/modelo.
     .filter(({ margemAtualPct }) => margemAtualPct >= params.margemMinimaPct)
-    // popularidade: precisa ter vendido no período (senão não há sinal
-    // de popularidade nenhum). liquidação: o oposto — precisa estar
-    // parado (mesma definição do diagnóstico de Precificação).
-    .filter(({ venda, produto }) =>
-      modo === 'liquidacao' ? ehEstoqueParado(venda.diasSemVenda, produto.estoqueAtual) : venda.quantidadeVendida30d > 0
-    );
+    .filter(({ venda, produto }) => {
+      if (params.modelo) {
+        if (!passaNoFiltroDoModelo(params.modelo, produto, venda.diasSemVenda)) return false;
+        // estoque_parado_60 já exige diasSemVenda>=60 dentro do próprio
+        // filtro (não faz sentido também exigir venda>0); os modelos
+        // temáticos continuam exigindo sinal real de venda recente.
+        return params.modelo === 'estoque_parado_60' || venda.quantidadeVendida30d > 0;
+      }
+      // popularidade: precisa ter vendido no período (senão não há sinal
+      // de popularidade nenhum). liquidação: o oposto — precisa estar
+      // parado (mesma definição do diagnóstico de Precificação).
+      return modo === 'liquidacao' ? ehEstoqueParado(venda.diasSemVenda, produto.estoqueAtual) : venda.quantidadeVendida30d > 0;
+    });
 
   const maxVendida = Math.max(1, ...base.map(({ venda }) => venda.quantidadeVendida30d));
   const maxValorParado = Math.max(1, ...base.map(({ produto }) => produto.custoMedio * produto.estoqueAtual));
@@ -93,7 +150,12 @@ export function sugerirCandidatos(
       const pontuacao =
         modo === 'liquidacao'
           ? pontuarLiquidacao(produto.custoMedio * produto.estoqueAtual, maxValorParado, margemAtualPct)
-          : pontuarCandidato(margemAtualPct, venda.quantidadeVendida30d, maxVendida);
+          : pontuarCandidato(
+              margemAtualPct,
+              venda.quantidadeVendida30d,
+              maxVendida,
+              !ehBaixaElasticidade(produto.grupo, produto.tipoLista)
+            );
       return {
         produto,
         margemAtualPct: round2(margemAtualPct),

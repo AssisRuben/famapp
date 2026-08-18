@@ -16,13 +16,16 @@ import {
   DesempenhoVendedorSemanal,
   FaixaComissao,
   HistoricoCompraCliente,
+  ItemClassificacaoCompra,
   ItemPrecificacao,
+  ItemRelatorioFalta,
   ItemVendaComplementar,
   MetaVendedor,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
+  MotivoClassificacaoCompra,
   OfertaComplementarDia,
   ParametrosCompra,
   Pendencia,
@@ -263,6 +266,13 @@ export interface DataRepository {
   getProdutosEmFalta(profile: Profile): Promise<ProdutoEmFalta[]>;
   salvarProdutoEmFalta(input: SalvarProdutoEmFaltaInput): Promise<void>;
   excluirProdutoEmFalta(id: string): Promise<void>;
+  // Relatório de compra a partir das faltas registradas (aba Compras,
+  // 18/08/2026) — enriquece com custo/fornecedor quando dá. Gerar o
+  // XLSX já limpa a lista (limparProdutosEmFalta) — mesmo padrão de
+  // exclusão definitiva que excluirProdutoEmFalta já usa, só em lote;
+  // o próprio arquivo exportado vira o registro histórico do pedido.
+  gerarRelatorioFaltas(profile: Profile): Promise<ItemRelatorioFalta[]>;
+  limparProdutosEmFalta(ids: string[]): Promise<void>;
 
   // Pendências — lista compartilhada (todo mundo lê/registra), igual
   // Produto em falta. getPendencias traz só as ATIVAS (baixada=false);
@@ -275,6 +285,18 @@ export interface DataRepository {
   // fator de compra vêm da compra mais recente de cada produto
   // (vw_produto_fornecedor_recente no real), não de cadastro manual.
   gerarSugestaoCompras(profile: Profile, params: ParametrosCompra): Promise<SugestaoCompra[]>;
+  // Classificação em lote (18/08/2026) — "não vou comprar esse produto
+  // porque já resolvi de outro jeito". gerarSugestaoCompras já filtra
+  // fora quem está classificado; getClassificacoesCompra alimenta a
+  // lista "Classificados" (com opção de reincluir).
+  classificarItensCompra(
+    profile: Profile,
+    codigosProduto: number[],
+    motivo: MotivoClassificacaoCompra,
+    observacao?: string
+  ): Promise<void>;
+  getClassificacoesCompra(profile: Profile): Promise<ItemClassificacaoCompra[]>;
+  removerClassificacaoCompra(codigoProduto: number): Promise<void>;
 
   // Precificação — gestor-only na UI. Diagnóstico (quem merece atenção
   // e por quê), diferente de Campanhas (decide quanto descontar).

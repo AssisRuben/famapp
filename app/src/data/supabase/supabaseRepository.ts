@@ -22,7 +22,9 @@ import {
   FaixaComissao,
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
+  ItemClassificacaoCompra,
   ItemPrecificacao,
+  ItemRelatorioFalta,
   ItemVendaComplementar,
   MetaSemana,
   MetaVendedor,
@@ -30,6 +32,7 @@ import {
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
   MetricasVendedorSemanal,
+  MotivoClassificacaoCompra,
   OfertaComplementarDia,
   ParametrosCompra,
   Pendencia,
@@ -98,6 +101,7 @@ function mapearProdutoCatalogo(r: any): ProdutoCatalogo {
     precoVenda: Number(r.preco_venda),
     custoMedio: Number(r.custo_medio),
     estoqueAtual: r.estoque_atual,
+    tipoLista: r.tipo_lista ?? null,
   };
 }
 
@@ -1214,7 +1218,7 @@ class SupabaseRepository implements DataRepository {
     let query = supabase
       .from('campanhas')
       .select(
-        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim)'
+        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item)'
       )
       .order('created_at', { ascending: false });
     if (filtroId !== undefined) query = query.eq('id', filtroId);
@@ -1256,6 +1260,14 @@ class SupabaseRepository implements DataRepository {
           // não-customizado acompanha).
           dataInicio: cp.data_inicio ?? c.data_inicio,
           dataFim: cp.data_fim ?? c.data_fim,
+          tipoPromocao: cp.tipo_promocao === 'kit' ? 'kit' : 'unitario',
+          kit:
+            cp.tipo_promocao === 'kit' && cp.kit_quantidade_minima != null && cp.kit_percentual_desconto_item != null
+              ? {
+                  quantidadeMinima: cp.kit_quantidade_minima,
+                  percentualDescontoItem: Number(cp.kit_percentual_desconto_item),
+                }
+              : null,
         };
       }),
     }));
@@ -1303,6 +1315,9 @@ class SupabaseRepository implements DataRepository {
           // campanha automaticamente se ela mudar de data depois.
           data_inicio: p.dataInicio === input.dataInicio ? null : p.dataInicio,
           data_fim: p.dataFim === input.dataFim ? null : p.dataFim,
+          tipo_promocao: p.tipoPromocao,
+          kit_quantidade_minima: p.tipoPromocao === 'kit' ? p.kit?.quantidadeMinima ?? null : null,
+          kit_percentual_desconto_item: p.tipoPromocao === 'kit' ? p.kit?.percentualDescontoItem ?? null : null,
         }))
       );
       if (error) throw error;
@@ -1736,6 +1751,44 @@ class SupabaseRepository implements DataRepository {
     if (error) throw error;
   }
 
+  async gerarRelatorioFaltas(profile: Profile): Promise<ItemRelatorioFalta[]> {
+    const faltas = await this.getProdutosEmFalta(profile);
+    const codigos = [...new Set(faltas.map((f) => f.codigoProduto).filter((c): c is number => c != null))];
+
+    const [catalogoLinhas, fornecedorLinhas] = codigos.length
+      ? await Promise.all([
+          this.queryProdutoCatalogo('codigo, codigo_barras, custo_medio').in('codigo', codigos),
+          supabase.from('vw_produto_fornecedor_recente').select('codigo_produto, nome_fornecedor').in('codigo_produto', codigos),
+        ])
+      : [{ data: [], error: null }, { data: [], error: null }];
+    if (catalogoLinhas.error) throw catalogoLinhas.error;
+    if (fornecedorLinhas.error) throw fornecedorLinhas.error;
+
+    const catalogoPorCodigo = new Map((catalogoLinhas.data ?? []).map((r: any) => [r.codigo, r]));
+    const fornecedorPorCodigo = new Map((fornecedorLinhas.data ?? []).map((r: any) => [r.codigo_produto, r.nome_fornecedor]));
+
+    return faltas.map((f) => {
+      const cat = f.codigoProduto != null ? catalogoPorCodigo.get(f.codigoProduto) : null;
+      return {
+        id: f.id,
+        nomeProduto: f.nomeProduto,
+        codigoProduto: f.codigoProduto,
+        codigoBarras: cat?.codigo_barras ?? null,
+        custoMedio: cat ? Number(cat.custo_medio) : null,
+        fornecedorSugerido: f.codigoProduto != null ? fornecedorPorCodigo.get(f.codigoProduto) ?? null : null,
+        data: f.data,
+        nomeRegistradoPor: f.nomeRegistradoPor,
+        temSaldoEstoque: f.temSaldoEstoque,
+      };
+    });
+  }
+
+  async limparProdutosEmFalta(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const { error } = await supabase.from('produtos_em_falta').delete().in('id', ids.map(Number));
+    if (error) throw error;
+  }
+
   // vw_pendencias resolve nome_registrado_por pra qualquer um (sem
   // máscara de gestor) — só as ATIVAS (baixada=false), "dar baixa" some
   // da lista sem apagar a linha.
@@ -1811,7 +1864,7 @@ class SupabaseRepository implements DataRepository {
     // venda considerados — dava demanda/quantidade sugerida erradas
     // (achado 10/08/2026).
     const diasBase = Math.max(1, Math.round(params.diasBaseVenda));
-    const [catalogoLinhas, vendaLinhas, fornecedorLinhas, fornecedorMaisBaratoLinhas] = await Promise.all([
+    const [catalogoLinhas, vendaLinhas, fornecedorLinhas, fornecedorMaisBaratoLinhas, classificacoesLinhas] = await Promise.all([
       this.buscarPaginado((inicio, fim) =>
         this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
       ),
@@ -1831,6 +1884,12 @@ class SupabaseRepository implements DataRepository {
           .order('codigo_produto', { ascending: true })
           .range(inicio, fim)
       ),
+      // Classificados em lote (18/08/2026, "não vou comprar esse
+      // produto porque já resolvi de outro jeito") não voltam a
+      // aparecer na sugestão até alguém remover a classificação.
+      this.buscarPaginado((inicio, fim) =>
+        supabase.from('compras_classificacoes').select('codigo_produto').range(inicio, fim)
+      ),
     ]);
 
     const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
@@ -1849,8 +1908,51 @@ class SupabaseRepository implements DataRepository {
         { nomeFornecedor: r.nome_fornecedor, precoCusto: Number(r.valor_custo) },
       ])
     );
+    const codigosClassificados = new Set(classificacoesLinhas.map((r: any) => r.codigo_produto));
 
-    return calcularSugestaoCompras(catalogo, demandaPorProduto, fornecedorPorProduto, fornecedorMaisBaratoPorProduto, params);
+    const sugestoes = calcularSugestaoCompras(catalogo, demandaPorProduto, fornecedorPorProduto, fornecedorMaisBaratoPorProduto, params);
+    return sugestoes.filter((s) => !codigosClassificados.has(s.codigoProduto));
+  }
+
+  async classificarItensCompra(
+    _profile: Profile,
+    codigosProduto: number[],
+    motivo: MotivoClassificacaoCompra,
+    observacao?: string
+  ): Promise<void> {
+    if (codigosProduto.length === 0) return;
+    const { data: sessao } = await supabase.auth.getUser();
+    const linhas = codigosProduto.map((codigo) => ({
+      codigo_produto: codigo,
+      motivo,
+      observacao: observacao ?? null,
+      classificado_em: new Date().toISOString(),
+      classificado_por: sessao.user?.id ?? null,
+    }));
+    // upsert (não insert): reclassificar um produto já classificado
+    // substitui a linha em vez de dar erro de unique constraint.
+    const { error } = await supabase.from('compras_classificacoes').upsert(linhas, { onConflict: 'codigo_produto' });
+    if (error) throw error;
+  }
+
+  async getClassificacoesCompra(_profile: Profile): Promise<ItemClassificacaoCompra[]> {
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase.from('vw_compras_classificacoes').select('*').order('classificado_em', { ascending: false }).range(inicio, fim)
+    );
+    return linhas.map((r: any) => ({
+      id: String(r.id),
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.nome_produto,
+      motivo: r.motivo,
+      observacao: r.observacao,
+      classificadoEm: r.classificado_em,
+      nomeClassificadoPor: r.nome_classificado_por,
+    }));
+  }
+
+  async removerClassificacaoCompra(codigoProduto: number): Promise<void> {
+    const { error } = await supabase.from('compras_classificacoes').delete().eq('codigo_produto', codigoProduto);
+    if (error) throw error;
   }
 
   async getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]> {

@@ -391,6 +391,14 @@ create table campanha_produtos (
   -- sem override, segue a validade da campanha.
   data_inicio date,
   data_fim date,
+  -- Promoção "kit" (18/08/2026, ex.: "compre 3 pague 2", "50% no 2º
+  -- item") — alternativa ao desconto simples por unidade acima. Quando
+  -- 'kit', preco_promocional/percentual_desconto ficam sem uso pro
+  -- cartaz/preço (o app ignora, usa os dois campos de kit).
+  tipo_promocao text not null default 'unitario' check (tipo_promocao in ('unitario', 'kit')),
+  kit_quantidade_minima integer check (kit_quantidade_minima is null or kit_quantidade_minima >= 2),
+  kit_percentual_desconto_item numeric(5,2)
+    check (kit_percentual_desconto_item is null or kit_percentual_desconto_item between 0 and 100),
   unique (campanha_id, codigo_produto)
 );
 
@@ -608,6 +616,26 @@ create table produtos_em_falta (
 );
 
 create index idx_produtos_em_falta_data on produtos_em_falta (data desc);
+
+-- ============================================================
+-- COMPRAS_CLASSIFICACOES (18/08/2026) — classificação em lote de itens
+-- da sugestão de compras (aba Compras, gestor-only): "não vou comprar
+-- esse produto específico porque já resolvi de outro jeito" (pediu de
+-- outro laboratório, já comprou por fora, etc.), sem mexer no cálculo
+-- de demanda/estoque. Uma linha ATIVA por produto (unique) — não
+-- expira sozinho, some da sugestão até alguém remover a classificação.
+-- ============================================================
+create table compras_classificacoes (
+  id bigserial primary key,
+  codigo_produto integer not null unique references produto_catalogo(codigo),
+  motivo text not null check (motivo in ('outro_laboratorio', 'ja_comprado', 'outros')),
+  observacao text,
+  classificado_em timestamptz not null default now(),
+  classificado_por uuid references profiles(id)
+);
+-- vw_compras_classificacoes fica só em rls_policies.sql (mesmo padrão
+-- de vw_produtos_em_falta) — a view depende de auth.uid() por dentro
+-- pro gate de acesso, então mora junto do resto da RLS.
 
 -- ============================================================
 -- PENDÊNCIAS (06/08/2026) — vendedor registra que separou/reservou

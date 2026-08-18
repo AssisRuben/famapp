@@ -26,7 +26,8 @@ import { gerarTxtTrier } from '../lib/trierTxt';
 import { imprimirHtmlNoWeb } from '../lib/printWeb';
 import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
 import { alertar } from '../lib/alert';
-import { Campanha, CampanhaProduto } from '../types/domain';
+import { descricaoKit, PRESETS_KIT } from '../lib/kits';
+import { Campanha, CampanhaProduto, TipoPromocaoProduto } from '../types/domain';
 
 function round2(valor: number): number {
   return Math.round(valor * 100) / 100;
@@ -82,6 +83,20 @@ export function CartazetesScreen() {
   const ajustarQuantidade = (codigoProduto: number, texto: string) => {
     const quantidade = Math.max(1, Number(texto.replace(/\D/g, '')) || 1);
     setItens((atual) => atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, quantidadeCartazes: quantidade } : i)));
+  };
+
+  // Alternar pra "kit" começa sem preset marcado (obriga escolher um
+  // antes de fechar o painel — sem isso o cartaz ficaria com "kit"
+  // mas nenhum texto de kit pra mostrar). Voltar pra "unitario" limpa
+  // o kit salvo (evita ficar um kit "fantasma" gravado sem uso).
+  const alternarTipoPromocao = (codigoProduto: number, tipo: TipoPromocaoProduto) => {
+    setItens((atual) =>
+      atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, tipoPromocao: tipo, kit: tipo === 'kit' ? i.kit : null } : i))
+    );
+  };
+
+  const escolherKit = (codigoProduto: number, kit: CampanhaProduto['kit']) => {
+    setItens((atual) => atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, kit } : i)));
   };
 
   // Campos formatados (preço em vírgula, data BR) digitam livre num
@@ -225,24 +240,43 @@ export function CartazetesScreen() {
 
   const exportarTxt = async () => {
     if (!campanhaSelecionada || itens.length === 0) return;
+    // Formato do .txt (ver lib/trierTxt.ts) é 1 preço fixo por linha —
+    // não tem como representar "kit" nele (a Trier não tem um formato
+    // confirmado pra promoção de leve-mais-pague-menos). Produto em kit
+    // fica de fora do arquivo; avisa quantos ficaram.
+    const itensUnitarios = itens.filter((i) => i.tipoPromocao !== 'kit');
+    if (itensUnitarios.length === 0) {
+      alertar(
+        'Nada pra exportar',
+        'Todos os produtos dessa campanha estão como "Kit" — o formato de importação da Trier ainda não suporta esse tipo de promoção.'
+      );
+      return;
+    }
     setProcessando('txt');
     try {
-      const conteudo = gerarTxtTrier(itens);
+      const conteudo = gerarTxtTrier(itensUnitarios);
       const nomeArquivo = `campanha-${campanhaSelecionada.id}.txt`;
+      const puladosKit = itens.length - itensUnitarios.length;
 
       if (Platform.OS === 'web') {
         baixarArquivoTextoNoWeb(nomeArquivo, conteudo);
-        return;
+      } else {
+        const uri = `${FileSystem.documentDirectory}${nomeArquivo}`;
+        await FileSystem.writeAsStringAsync(uri, conteudo);
+
+        const podeCompartilhar = await Sharing.isAvailableAsync();
+        if (podeCompartilhar) {
+          await Sharing.shareAsync(uri, { mimeType: 'text/plain', dialogTitle: 'Exportar para importação no Trier' });
+        } else {
+          alertar('Arquivo gerado', `Salvo em: ${uri}`);
+        }
       }
 
-      const uri = `${FileSystem.documentDirectory}${nomeArquivo}`;
-      await FileSystem.writeAsStringAsync(uri, conteudo);
-
-      const podeCompartilhar = await Sharing.isAvailableAsync();
-      if (podeCompartilhar) {
-        await Sharing.shareAsync(uri, { mimeType: 'text/plain', dialogTitle: 'Exportar para importação no Trier' });
-      } else {
-        alertar('Arquivo gerado', `Salvo em: ${uri}`);
+      if (puladosKit > 0) {
+        alertar(
+          'Kits não exportados',
+          `${puladosKit} produto(s) "Kit" não entraram no .txt — cadastre essa promoção direto no sistema, se precisar.`
+        );
       }
     } catch (erro) {
       alertar('Erro ao gerar TXT', erro instanceof Error ? erro.message : 'Tente novamente.');
@@ -307,7 +341,9 @@ export function CartazetesScreen() {
               <View style={styles.itemHeaderTexto}>
                 <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
                 <Text style={styles.itemSubinfo}>
-                  Código {item.codigoProduto} · {formatBRL(item.precoPromocional)} ({item.percentualDesconto.toFixed(1)}% off)
+                  {item.tipoPromocao === 'kit' && item.kit
+                    ? `Código ${item.codigoProduto} · ${descricaoKit(item.kit)}`
+                    : `Código ${item.codigoProduto} · ${formatBRL(item.precoPromocional)} (${item.percentualDesconto.toFixed(1)}% off)`}
                 </Text>
               </View>
             </Pressable>
@@ -329,37 +365,82 @@ export function CartazetesScreen() {
                   {item.codigoProduto} · {item.codigoBarras}
                 </Text>
 
-                <View style={styles.linhaDoisCampos}>
-                  <View style={styles.campoMetade}>
-                    <Text style={styles.campoLabel}>De (R$)</Text>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="decimal-pad"
-                      value={valorExibido(item, 'de')}
-                      onChangeText={(texto) => digitar(item.codigoProduto, 'de', texto)}
-                      onBlur={() => confirmarDe(item.codigoProduto)}
-                    />
-                  </View>
-                  <View style={styles.campoMetade}>
-                    <Text style={styles.campoLabel}>Por (R$)</Text>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="decimal-pad"
-                      value={valorExibido(item, 'por')}
-                      onChangeText={(texto) => digitar(item.codigoProduto, 'por', texto)}
-                      onBlur={() => confirmarPor(item.codigoProduto)}
-                    />
-                  </View>
+                <Text style={styles.campoLabel}>Tipo de promoção</Text>
+                <View style={styles.grupoGrid}>
+                  <Pressable
+                    style={[styles.chip, item.tipoPromocao === 'unitario' && styles.chipAtivo]}
+                    onPress={() => alternarTipoPromocao(item.codigoProduto, 'unitario')}
+                  >
+                    <Text style={[styles.chipTexto, item.tipoPromocao === 'unitario' && styles.chipTextoAtivo]}>
+                      Desconto normal
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.chip, item.tipoPromocao === 'kit' && styles.chipAtivo]}
+                    onPress={() => alternarTipoPromocao(item.codigoProduto, 'kit')}
+                  >
+                    <Text style={[styles.chipTexto, item.tipoPromocao === 'kit' && styles.chipTextoAtivo]}>
+                      Kit (leve mais, pague menos)
+                    </Text>
+                  </Pressable>
                 </View>
 
-                <Text style={styles.campoLabel}>Desconto (%)</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="decimal-pad"
-                  value={valorExibido(item, 'desconto')}
-                  onChangeText={(texto) => digitar(item.codigoProduto, 'desconto', texto)}
-                  onBlur={() => confirmarDesconto(item.codigoProduto)}
-                />
+                {item.tipoPromocao === 'kit' ? (
+                  <>
+                    <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Regra do kit</Text>
+                    <View style={styles.grupoGrid}>
+                      {PRESETS_KIT.map((preset) => {
+                        const ativo =
+                          item.kit?.quantidadeMinima === preset.kit.quantidadeMinima &&
+                          item.kit?.percentualDescontoItem === preset.kit.percentualDescontoItem;
+                        return (
+                          <Pressable
+                            key={preset.label}
+                            style={[styles.chip, ativo && styles.chipAtivo]}
+                            onPress={() => escolherKit(item.codigoProduto, preset.kit)}
+                          >
+                            <Text style={[styles.chipTexto, ativo && styles.chipTextoAtivo]}>{preset.label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    {!item.kit && <Text style={styles.avisoKit}>Escolha uma regra acima antes de imprimir.</Text>}
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.linhaDoisCampos}>
+                      <View style={styles.campoMetade}>
+                        <Text style={styles.campoLabel}>De (R$)</Text>
+                        <TextInput
+                          style={styles.input}
+                          keyboardType="decimal-pad"
+                          value={valorExibido(item, 'de')}
+                          onChangeText={(texto) => digitar(item.codigoProduto, 'de', texto)}
+                          onBlur={() => confirmarDe(item.codigoProduto)}
+                        />
+                      </View>
+                      <View style={styles.campoMetade}>
+                        <Text style={styles.campoLabel}>Por (R$)</Text>
+                        <TextInput
+                          style={styles.input}
+                          keyboardType="decimal-pad"
+                          value={valorExibido(item, 'por')}
+                          onChangeText={(texto) => digitar(item.codigoProduto, 'por', texto)}
+                          onBlur={() => confirmarPor(item.codigoProduto)}
+                        />
+                      </View>
+                    </View>
+
+                    <Text style={styles.campoLabel}>Desconto (%)</Text>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="decimal-pad"
+                      value={valorExibido(item, 'desconto')}
+                      onChangeText={(texto) => digitar(item.codigoProduto, 'desconto', texto)}
+                      onBlur={() => confirmarDesconto(item.codigoProduto)}
+                    />
+                  </>
+                )}
 
                 <View style={styles.linhaDoisCampos}>
                   <View style={styles.campoMetade}>
@@ -502,6 +583,7 @@ const styles = StyleSheet.create({
   campoSomenteLeitura: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
   grupoLabelEspacado: { marginTop: 14 },
   grupoHint: { fontSize: 11, color: colors.textMuted, marginBottom: 8, lineHeight: 15 },
+  avisoKit: { fontSize: 11, color: colors.red, marginTop: 6, lineHeight: 15 },
   grupoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     backgroundColor: colors.white,

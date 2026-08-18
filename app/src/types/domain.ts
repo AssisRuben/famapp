@@ -501,6 +501,12 @@ export interface ProdutoCatalogo {
   precoVenda: number;
   custoMedio: number;
   estoqueAtual: number;
+  // ProdutoIntegracaoDto.tipoLista — null/vazio = não exige receita,
+  // 'T' = antimicrobiano, outro valor = controle especial (mesmo
+  // campo usado em vw_vendas_antimicrobiano_recente/produto_catalogo.
+  // Usado pra aproximar "MIPS" no modelo de campanha (18/08/2026):
+  // medicamento (éticos/genéricos/similares) que NÃO exige receita.
+  tipoLista?: string | null;
 }
 
 export interface ProdutoElegibilidade {
@@ -515,6 +521,19 @@ export interface ProdutoElegibilidade {
 
 export type ModoSugestaoCampanha = 'popularidade' | 'liquidacao';
 
+// Campanhas recorrentes fixas (18/08/2026, espelhando as campanhas já
+// usadas hoje via FarmaUP) — cada uma tem regra própria de seleção de
+// produto, ver lib/campanhas.ts:
+//   'estoque_parado_60'  — sem venda há 60+ dias, ainda em estoque.
+//   'mips'                — medicamento (éticos/genéricos/similares)
+//                            que não exige receita (aproximação via
+//                            tipoLista nulo).
+//   'nao_medicamentos'    — fora de éticos/genéricos/similares/administrativo.
+//   'desodorantes'        — nome do produto contém "desodorante".
+//   'bebe_idoso'          — infantil&puericultura (cobre fralda infantil
+//                            E geriátrica, que caem no mesmo grupo bruto).
+export type ModeloCampanha = 'estoque_parado_60' | 'mips' | 'nao_medicamentos' | 'desodorantes' | 'bebe_idoso';
+
 export interface SugestaoCampanhaParams {
   margemMinimaPct: number;
   descontoAlvoPct: number;
@@ -522,13 +541,31 @@ export interface SugestaoCampanhaParams {
   // 'popularidade' (padrão, se omitido): prioriza quem já vende bem.
   // 'liquidacao': busca estoque parado (sem venda recente, ainda em
   // estoque) pra desencalhar, priorizando quem tem mais capital parado.
+  // Ignorado quando `modelo` está presente (modelo decide o próprio modo).
   modo?: ModoSugestaoCampanha;
   // id de MacroGrupo (lib/macroGrupo.ts, ex. "genericos") — filtra a
   // sugestão só pra essa macro-categoria (campanha temática, ex. "Dia
   // do Genérico"). String (não o tipo MacroGrupo) porque domain.ts não
   // importa de lib/ — validado no lado de quem consome (lib/campanhas.ts).
+  // Ignorado quando `modelo` está presente.
   macroGrupo?: string;
+  // Modelo de campanha fixo (18/08/2026) — quando presente, sobrepõe
+  // modo/macroGrupo com a regra própria daquele modelo.
+  modelo?: ModeloCampanha;
 }
+
+// Promoção "kit" (18/08/2026, ex.: "compre 3 pague 2", "50% no 2º
+// item") — alternativa ao desconto simples por unidade. Aplicada por
+// PRODUTO (CampanhaProduto), não por campanha inteira.
+export interface KitPromocao {
+  // Quantas unidades precisa levar pra ativar o desconto (ex.: 2 ou 3).
+  quantidadeMinima: number;
+  // % de desconto aplicado numa das unidades do kit (100 = grátis,
+  // vira "compre N pague N-1"; 50/25 = desconto parcial no item).
+  percentualDescontoItem: number;
+}
+
+export type TipoPromocaoProduto = 'unitario' | 'kit';
 
 export interface CampanhaProduto {
   codigoProduto: number;
@@ -544,6 +581,11 @@ export interface CampanhaProduto {
   // override, segue a campanha) — resolvido 18/08/2026.
   dataInicio: string;
   dataFim: string;
+  // Promoção "kit" (18/08/2026) — 'unitario' (padrão) usa
+  // precoPromocional/percentualDesconto normalmente; 'kit' ignora esses
+  // dois pro cartaz/preço e usa `kit` em vez disso (ver KitPromocao).
+  tipoPromocao: TipoPromocaoProduto;
+  kit: KitPromocao | null;
 }
 
 export interface Campanha {
@@ -786,6 +828,23 @@ export interface SalvarProdutoEmFaltaInput {
   temSaldoEstoque: boolean;
 }
 
+// Item do relatório de compras gerado a partir de produtos_em_falta
+// (aba Compras, 18/08/2026) — enriquece ProdutoEmFalta com dado do
+// catálogo (custo, código de barras) e fornecedor mais recente, quando
+// o item tem codigoProduto vinculado. Sem isso (produto novo/texto
+// livre), os três campos ficam null e o comprador preenche na mão.
+export interface ItemRelatorioFalta {
+  id: string;
+  nomeProduto: string;
+  codigoProduto: number | null;
+  codigoBarras: string | null;
+  custoMedio: number | null;
+  fornecedorSugerido: string | null;
+  data: string;
+  nomeRegistradoPor: string | null;
+  temSaldoEstoque: boolean;
+}
+
 // ============================================================
 // PENDÊNCIAS (06/08/2026) — vendedor separa/reserva produto(s) pra um
 // cliente buscar depois: foto de comprovante, produtos (texto livre),
@@ -859,6 +918,23 @@ export interface ItemPrecificacao {
   margemAtualPct: number;
   temDescontoAtivo: boolean;
   tags: TagPrecificacao[];
+}
+
+// Classificação em lote de itens da sugestão de compras (18/08/2026) —
+// "não vou comprar esse produto específico porque já resolvi de outro
+// jeito", sem mexer no cálculo de demanda/estoque. Motivo fixo (não
+// texto livre) pra dar pra filtrar/relatar depois.
+export type MotivoClassificacaoCompra = 'outro_laboratorio' | 'ja_comprado' | 'outros';
+
+// Espelha vw_compras_classificacoes.
+export interface ItemClassificacaoCompra {
+  id: string;
+  codigoProduto: number;
+  nomeProduto: string;
+  motivo: MotivoClassificacaoCompra;
+  observacao: string | null;
+  classificadoEm: string;
+  nomeClassificadoPor: string | null;
 }
 
 export interface SugestaoCompra {

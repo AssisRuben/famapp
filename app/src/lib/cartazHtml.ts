@@ -1,5 +1,6 @@
 import { GrupoCartazete } from '../types/domain';
 import { formatBRL } from './format';
+import { descricaoKit } from './kits';
 import { MASCOTE_CONVIVA_BASE64 } from '../assets/mascoteConvivaBase64';
 
 const MESES = [
@@ -48,6 +49,25 @@ function cartazHtml(grupo: GrupoCartazete): string {
     ? `<div class="desconto-badge">${grupo.percentualDesconto.toFixed(0)}% OFF</div>`
     : '';
 
+  // Promoção "kit" (18/08/2026, ex.: "compre 3 pague 2") substitui o
+  // DE/POR pelo texto do kit — o desconto aqui não é por unidade, é
+  // por levar mais de um, então mostrar "%OFF" isolado confundiria.
+  const primeiroProduto = grupo.produtos[0];
+  const kit = primeiroProduto?.tipoPromocao === 'kit' ? primeiroProduto.kit : null;
+  const faixaPrecoHtml = kit
+    ? `<div class="kit-titulo">${escapeHtml(descricaoKit(kit).toUpperCase())}</div>
+       <div class="preco-linha">
+         <span class="preco-por-label">CADA</span>
+         <span class="preco">${escapeHtml(formatBRL(precoDe))}</span>
+       </div>`
+    : `${descontoBadgeHtml}
+       ${precoDeHtml}
+       <div class="preco-linha">
+         <span class="preco-por-label">POR</span>
+         <span class="preco">${escapeHtml(formatBRL(grupo.precoPromocional))}</span>
+       </div>
+       <span class="cada">CADA</span>`;
+
   return `
     <div class="cartaz">
       <div class="faixa-oferta"><span class="oferta-texto">OFERTA</span></div>
@@ -56,13 +76,7 @@ function cartazHtml(grupo: GrupoCartazete): string {
         ${variantesHtml}
       </div>
       <div class="faixa-preco">
-        ${descontoBadgeHtml}
-        ${precoDeHtml}
-        <div class="preco-linha">
-          <span class="preco-por-label">POR</span>
-          <span class="preco">${escapeHtml(formatBRL(grupo.precoPromocional))}</span>
-        </div>
-        <span class="cada">CADA</span>
+        ${faixaPrecoHtml}
       </div>
       <div class="rodape-info">
         <div class="rodape-textos">
@@ -193,6 +207,10 @@ export function gerarHtmlCartazes(grupos: GrupoCartazete[], cartazesPorPagina: C
   .desconto-badge {
     position: absolute; left: 18px; top: 14px; background: #FFE600; color: #E81820;
     font-weight: 900; font-size: 16px; padding: 6px 12px; border-radius: 20px; transform: rotate(-6deg);
+  }
+  .kit-titulo {
+    font-size: 30px; font-weight: 900; line-height: 1.15; margin-bottom: 8px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.25);
   }
   .preco-de { font-size: 16px; font-weight: 700; opacity: 0.85; margin-bottom: 2px; }
   .preco-de-valor { text-decoration: line-through; }
