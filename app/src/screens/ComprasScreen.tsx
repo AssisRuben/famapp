@@ -53,6 +53,7 @@ export function ComprasScreen() {
   const [gerandoFaltas, setGerandoFaltas] = useState(false);
   const [estoqueZeradoGiroAlto, setEstoqueZeradoGiroAlto] = useState<ItemEstoqueZeradoGiroAlto[]>([]);
   const [carregandoEstoqueZeradoGiroAlto, setCarregandoEstoqueZeradoGiroAlto] = useState(true);
+  const [mostrarEstoqueZeradoGiroAlto, setMostrarEstoqueZeradoGiroAlto] = useState(false);
   const [classificacoes, setClassificacoes] = useState<ItemClassificacaoCompra[]>([]);
   const [carregandoClassificacoes, setCarregandoClassificacoes] = useState(true);
   const [mostrarClassificados, setMostrarClassificados] = useState(false);
@@ -247,48 +248,80 @@ export function ComprasScreen() {
       </Text>
 
       <Card style={styles.cardDestaque}>
-        <View style={styles.itemHeaderRow}>
+        <Pressable style={styles.itemHeaderRow} onPress={() => setMostrarEstoqueZeradoGiroAlto((v) => !v)}>
           <Ionicons name="flame" size={18} color={colors.red} />
-          <Text style={[styles.cardTitulo, styles.cardTituloDestaque]}>Estoque zerado — giro alto</Text>
-        </View>
+          <Text style={[styles.cardTitulo, styles.cardTituloDestaque, styles.flex1]}>
+            Estoque zerado — giro alto ({carregandoEstoqueZeradoGiroAlto ? '...' : estoqueZeradoGiroAlto.length})
+          </Text>
+          <Ionicons name={mostrarEstoqueZeradoGiroAlto ? 'chevron-up' : 'chevron-down'} size={18} color={colors.red} />
+        </Pressable>
         <Text style={styles.itemSubinfo}>
           Mesma lista que sai no WhatsApp da farmácia todo dia às 08h: produtos entre os que mais vendem, zerados agora.
         </Text>
-        {carregandoEstoqueZeradoGiroAlto ? (
-          <ActivityIndicator style={styles.espacadoCima} />
-        ) : estoqueZeradoGiroAlto.length === 0 ? (
-          <Text style={[styles.empty, styles.espacadoCima]}>Nenhum produto de giro alto zerado agora.</Text>
-        ) : (
-          <>
-            <Text style={[styles.resumoLinha, styles.espacadoCima]}>
-              {estoqueZeradoGiroAlto.length} produto(s) — toque pra selecionar e classificar quem não vai ser reposto.
-            </Text>
-            {estoqueZeradoGiroAlto.map((item) => {
-              const selecionado = selecionados.includes(item.codigoProduto);
-              return (
-                <Pressable
-                  key={item.codigoProduto}
-                  style={styles.linhaClassificado}
-                  onPress={() => alternarSelecao(item.codigoProduto)}
-                  hitSlop={4}
-                >
-                  <Ionicons
-                    name={selecionado ? 'checkbox' : 'square-outline'}
-                    size={22}
-                    color={selecionado ? colors.navy : colors.textMuted}
-                  />
-                  <View style={styles.flex1}>
-                    <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
-                    <Text style={styles.itemSubinfo}>
-                      cód. {item.codigoProduto} · {item.quantidadeVendida30d} vendidos em 30d
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </>
+        {mostrarEstoqueZeradoGiroAlto && (
+          carregandoEstoqueZeradoGiroAlto ? (
+            <ActivityIndicator style={styles.espacadoCima} />
+          ) : estoqueZeradoGiroAlto.length === 0 ? (
+            <Text style={[styles.empty, styles.espacadoCima]}>Nenhum produto de giro alto zerado agora.</Text>
+          ) : (
+            <>
+              <Text style={[styles.resumoLinha, styles.espacadoCima]}>
+                Toque pra selecionar e classificar quem não vai ser reposto.
+              </Text>
+              {estoqueZeradoGiroAlto.map((item) => {
+                const selecionado = selecionados.includes(item.codigoProduto);
+                return (
+                  <Pressable
+                    key={item.codigoProduto}
+                    style={styles.linhaClassificado}
+                    onPress={() => alternarSelecao(item.codigoProduto)}
+                    hitSlop={4}
+                  >
+                    <Ionicons
+                      name={selecionado ? 'checkbox' : 'square-outline'}
+                      size={22}
+                      color={selecionado ? colors.navy : colors.textMuted}
+                    />
+                    <View style={styles.flex1}>
+                      <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
+                      <Text style={styles.itemSubinfo}>
+                        cód. {item.codigoProduto} · {item.quantidadeVendida30d} vendidos em 30d
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </>
+          )
         )}
       </Card>
+
+      {selecionados.length > 0 && (
+        <Card style={styles.cardSelecao}>
+          <Text style={styles.cardTitulo}>{selecionados.length} selecionado(s)</Text>
+          <Text style={styles.grupoHint}>
+            Classificar como (some da lista até você reincluir em "Classificados"):
+          </Text>
+          <View style={styles.grupoGrid}>
+            {ORDEM_MOTIVOS_CLASSIFICACAO.filter((m) => m !== 'outros').map((motivo) => (
+              <Pressable
+                key={motivo}
+                style={styles.chip}
+                onPress={() => classificarSelecionados(motivo)}
+                disabled={classificando}
+              >
+                <Text style={styles.chipTexto}>{MOTIVO_CLASSIFICACAO_LABEL[motivo]}</Text>
+              </Pressable>
+            ))}
+            <Pressable style={styles.chip} onPress={() => setModalOutrosAberto(true)} disabled={classificando}>
+              <Text style={styles.chipTexto}>{MOTIVO_CLASSIFICACAO_LABEL.outros}</Text>
+            </Pressable>
+          </View>
+          <Pressable onPress={() => setSelecionados([])} hitSlop={8} style={styles.espacadoCima}>
+            <Text style={styles.linkAcao}>Limpar seleção</Text>
+          </Pressable>
+        </Card>
+      )}
 
       <Card>
         <Text style={styles.cardTitulo}>Faltas registradas</Text>
@@ -454,33 +487,6 @@ export function ComprasScreen() {
               recente de cada produto — sem prazo de entrega/última cotação, a Trier não expõe esses campos na integração.
             </Text>
           </Card>
-
-          {selecionados.length > 0 && (
-            <Card style={styles.cardSelecao}>
-              <Text style={styles.cardTitulo}>{selecionados.length} selecionado(s)</Text>
-              <Text style={styles.grupoHint}>
-                Classificar como (some da lista até você reincluir em "Classificados"):
-              </Text>
-              <View style={styles.grupoGrid}>
-                {ORDEM_MOTIVOS_CLASSIFICACAO.filter((m) => m !== 'outros').map((motivo) => (
-                  <Pressable
-                    key={motivo}
-                    style={styles.chip}
-                    onPress={() => classificarSelecionados(motivo)}
-                    disabled={classificando}
-                  >
-                    <Text style={styles.chipTexto}>{MOTIVO_CLASSIFICACAO_LABEL[motivo]}</Text>
-                  </Pressable>
-                ))}
-                <Pressable style={styles.chip} onPress={() => setModalOutrosAberto(true)} disabled={classificando}>
-                  <Text style={styles.chipTexto}>{MOTIVO_CLASSIFICACAO_LABEL.outros}</Text>
-                </Pressable>
-              </View>
-              <Pressable onPress={() => setSelecionados([])} hitSlop={8} style={styles.espacadoCima}>
-                <Text style={styles.linkAcao}>Limpar seleção</Text>
-              </Pressable>
-            </Card>
-          )}
 
           <Text style={styles.sectionTitulo}>Produtos a repor</Text>
           {itens.map((item) => {
