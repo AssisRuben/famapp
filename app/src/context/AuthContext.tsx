@@ -1,7 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { repository } from '../data';
 import { obterPushToken } from '../lib/notifications';
+import { withTimeout } from '../lib/timeout';
 import { Profile } from '../types/domain';
+
+// Sem isso, wifi ruim (portal cativo, sinal fraco) trava a chamada ao
+// Supabase pra sempre e a tela fica girando sem nunca dar erro.
+const TIMEOUT_MS = 15000;
 
 // Registra (ou atualiza) o Expo push token no perfil logado — usado
 // pelo n8n pra mandar push de verdade (ex.: subiu de faixa de
@@ -32,11 +37,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    repository
-      .getSession()
+    withTimeout(repository.getSession(), TIMEOUT_MS, 'Tempo esgotado ao verificar sessão.')
       .then((sessionProfile) => {
         setProfile(sessionProfile);
         if (sessionProfile) registrarPushToken(sessionProfile);
+      })
+      .catch(() => {
+        // sem sessão restaurada, cai na tela de login normalmente
       })
       .finally(() => setLoadingSession(false));
   }, []);
@@ -45,7 +52,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSigningIn(true);
     setError(null);
     try {
-      const loggedProfile = await repository.login(email, senha);
+      const loggedProfile = await withTimeout(
+        repository.login(email, senha),
+        TIMEOUT_MS,
+        'Sem conexão com o servidor. Verifique sua internet e tente novamente.'
+      );
       setProfile(loggedProfile);
       registrarPushToken(loggedProfile);
     } catch (err) {
