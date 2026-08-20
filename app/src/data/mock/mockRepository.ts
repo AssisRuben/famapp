@@ -21,6 +21,7 @@ import {
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
   ItemClassificacaoCompra,
+  ItemEstoqueZeradoGiroAlto,
   ItemPrecificacao,
   ItemRelatorioFalta,
   ItemVendaComplementar,
@@ -84,7 +85,7 @@ import { diasDecorridosNaSemana, rotuloSemana, semanaDoDia } from '../../lib/met
 import { todayISO } from '../../lib/format';
 import { sugerirCandidatos } from '../../lib/campanhas';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
-import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
+import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
 
 const SESSION_KEY = '@farmapp/session';
 const RECEITAS_OVERRIDES_KEY = '@farmapp/receitas_overrides';
@@ -1255,6 +1256,17 @@ class MockRepository implements DataRepository {
   async removerClassificacaoCompra(codigoProduto: number): Promise<void> {
     const itens = await getClassificacoesCompraStore();
     await salvarClassificacoesCompraStore(itens.filter((i) => i.codigoProduto !== codigoProduto));
+  }
+
+  async getEstoqueZeradoGiroAlto(_profile: Profile): Promise<ItemEstoqueZeradoGiroAlto[]> {
+    const vendaPorProduto = new Map(
+      vendaRecenteSeed.map((v) => [v.codigoProduto, { quantidadeVendida30d: v.quantidadeVendida30d, diasSemVenda: v.diasSemVenda }])
+    );
+    const classificados = new Set((await getClassificacoesCompraStore()).map((c) => c.codigoProduto));
+    const itens = calcularEstoqueZeradoGiroAlto(catalogoProdutosSeed, vendaPorProduto).filter(
+      (item) => !classificados.has(item.codigoProduto)
+    );
+    return delay(itens);
   }
 
   async getRelatorioPrecificacao(_profile: Profile): Promise<ItemPrecificacao[]> {

@@ -25,7 +25,13 @@ import { baixarArquivoBase64NoWeb } from '../lib/downloadWeb';
 import { alertar, confirmar } from '../lib/alert';
 import { ORDEM_MACRO_GRUPOS, MACRO_GRUPO_LABEL, MacroGrupo } from '../lib/macroGrupo';
 import { MOTIVO_CLASSIFICACAO_LABEL, ORDEM_MOTIVOS_CLASSIFICACAO } from '../lib/comprasClassificacao';
-import { ItemClassificacaoCompra, ItemRelatorioFalta, MotivoClassificacaoCompra, SugestaoCompra } from '../types/domain';
+import {
+  ItemClassificacaoCompra,
+  ItemEstoqueZeradoGiroAlto,
+  ItemRelatorioFalta,
+  MotivoClassificacaoCompra,
+  SugestaoCompra,
+} from '../types/domain';
 
 // "outros_administrativo" nunca aparece na sugestão (doseCerta.ts já
 // filtra fora, é serviço/ajuste de sistema, não produto pra repor) —
@@ -45,6 +51,8 @@ export function ComprasScreen() {
   const [faltas, setFaltas] = useState<ItemRelatorioFalta[]>([]);
   const [carregandoFaltas, setCarregandoFaltas] = useState(true);
   const [gerandoFaltas, setGerandoFaltas] = useState(false);
+  const [estoqueZeradoGiroAlto, setEstoqueZeradoGiroAlto] = useState<ItemEstoqueZeradoGiroAlto[]>([]);
+  const [carregandoEstoqueZeradoGiroAlto, setCarregandoEstoqueZeradoGiroAlto] = useState(true);
   const [classificacoes, setClassificacoes] = useState<ItemClassificacaoCompra[]>([]);
   const [carregandoClassificacoes, setCarregandoClassificacoes] = useState(true);
   const [mostrarClassificados, setMostrarClassificados] = useState(false);
@@ -73,10 +81,21 @@ export function ComprasScreen() {
     }
   }, [profile]);
 
+  const carregarEstoqueZeradoGiroAlto = useCallback(async () => {
+    if (!profile) return;
+    setCarregandoEstoqueZeradoGiroAlto(true);
+    try {
+      setEstoqueZeradoGiroAlto(await repository.getEstoqueZeradoGiroAlto(profile));
+    } finally {
+      setCarregandoEstoqueZeradoGiroAlto(false);
+    }
+  }, [profile]);
+
   useEffect(() => {
     carregarFaltas();
     carregarClassificacoes();
-  }, [carregarFaltas, carregarClassificacoes]);
+    carregarEstoqueZeradoGiroAlto();
+  }, [carregarFaltas, carregarClassificacoes, carregarEstoqueZeradoGiroAlto]);
 
   // Toque pra marcar, toque de novo pra tirar — dá pra marcar mais de
   // um (mesma dinâmica do filtro de vendedor no Checklist).
@@ -120,6 +139,7 @@ export function ComprasScreen() {
     try {
       await repository.classificarItensCompra(profile, selecionados, motivo, observacao);
       setItens((atual) => atual?.filter((i) => !selecionados.includes(i.codigoProduto)) ?? null);
+      setEstoqueZeradoGiroAlto((atual) => atual.filter((i) => !selecionados.includes(i.codigoProduto)));
       setSelecionados([]);
       await carregarClassificacoes();
     } catch (erro) {
@@ -225,6 +245,50 @@ export function ComprasScreen() {
       <Text style={styles.subtitle}>
         Calcula quanto repor por produto comparando estoque atual com a demanda média de venda recente.
       </Text>
+
+      <Card style={styles.cardDestaque}>
+        <View style={styles.itemHeaderRow}>
+          <Ionicons name="flame" size={18} color={colors.red} />
+          <Text style={[styles.cardTitulo, styles.cardTituloDestaque]}>Estoque zerado — giro alto</Text>
+        </View>
+        <Text style={styles.itemSubinfo}>
+          Mesma lista que sai no WhatsApp da farmácia todo dia às 08h: produtos entre os que mais vendem, zerados agora.
+        </Text>
+        {carregandoEstoqueZeradoGiroAlto ? (
+          <ActivityIndicator style={styles.espacadoCima} />
+        ) : estoqueZeradoGiroAlto.length === 0 ? (
+          <Text style={[styles.empty, styles.espacadoCima]}>Nenhum produto de giro alto zerado agora.</Text>
+        ) : (
+          <>
+            <Text style={[styles.resumoLinha, styles.espacadoCima]}>
+              {estoqueZeradoGiroAlto.length} produto(s) — toque pra selecionar e classificar quem não vai ser reposto.
+            </Text>
+            {estoqueZeradoGiroAlto.map((item) => {
+              const selecionado = selecionados.includes(item.codigoProduto);
+              return (
+                <Pressable
+                  key={item.codigoProduto}
+                  style={styles.linhaClassificado}
+                  onPress={() => alternarSelecao(item.codigoProduto)}
+                  hitSlop={4}
+                >
+                  <Ionicons
+                    name={selecionado ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={selecionado ? colors.navy : colors.textMuted}
+                  />
+                  <View style={styles.flex1}>
+                    <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
+                    <Text style={styles.itemSubinfo}>
+                      cód. {item.codigoProduto} · {item.quantidadeVendida30d} vendidos em 30d
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </>
+        )}
+      </Card>
 
       <Card>
         <Text style={styles.cardTitulo}>Faltas registradas</Text>
@@ -627,6 +691,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   cardSelecao: { borderWidth: 1.5, borderColor: colors.navy },
+  cardDestaque: { borderWidth: 1.5, borderColor: colors.red, backgroundColor: '#FFF5F5' },
+  cardTituloDestaque: { color: colors.red },
   inputMultilinha: { minHeight: 70, textAlignVertical: 'top', marginTop: 6, marginBottom: 12 },
   modalFundo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
   modalCartao: { backgroundColor: colors.white, borderRadius: 16, padding: 18, width: '88%', maxWidth: 360 },

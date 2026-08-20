@@ -1,7 +1,8 @@
-import { ItemPrecificacao, ProdutoCatalogo, TagPrecificacao } from '../types/domain';
+import { ItemEstoqueZeradoGiroAlto, ItemPrecificacao, ProdutoCatalogo, TagPrecificacao } from '../types/domain';
 import { calcularMargemPct } from './campanhas';
 import { ehEstoqueParado, LIMIAR_DIAS_PARADO } from './estoqueParado';
 import { ehBaixaElasticidade } from './elasticidade';
+import { macroGrupoDoProduto } from './macroGrupo';
 
 // re-exportado por conveniência — telas que já importam o limiar daqui
 // (PrecificacaoScreen) não precisam saber que ele mora em estoqueParado.ts.
@@ -67,4 +68,31 @@ export function calcularRelatorioPrecificacao(
       tags,
     };
   });
+}
+
+// Espelha a query SQL do node "Buscar produtos de giro alto zerados" —
+// percentil calculado sobre TODO o catálogo com venda recente (não só
+// os zerados), estoque_atual = 0 filtrado só depois. 'outros_administrativo'
+// cobre o mesmo universo do "not like TAXA" + regex de grupo do SQL
+// (ver comentário em ComprasScreen.tsx: esse macro nunca é produto de verdade).
+export function calcularEstoqueZeradoGiroAlto(
+  catalogo: ProdutoCatalogo[],
+  vendaPorProduto: Map<number, VendaInfo>
+): ItemEstoqueZeradoGiroAlto[] {
+  const vendidos = catalogo
+    .map((p) => vendaPorProduto.get(p.codigo)?.quantidadeVendida30d ?? 0)
+    .filter((q) => q > 0);
+  const giroLimiarAlto = percentil(vendidos, 0.8);
+
+  return catalogo
+    .filter((p) => p.estoqueAtual === 0)
+    .filter((p) => macroGrupoDoProduto(p.grupo) !== 'outros_administrativo')
+    .filter((p) => !p.nome.toUpperCase().includes('TAXA'))
+    .map((p) => ({
+      codigoProduto: p.codigo,
+      nomeProduto: p.nome,
+      quantidadeVendida30d: vendaPorProduto.get(p.codigo)?.quantidadeVendida30d ?? 0,
+    }))
+    .filter((p) => p.quantidadeVendida30d > 0 && p.quantidadeVendida30d >= giroLimiarAlto)
+    .sort((a, b) => b.quantidadeVendida30d - a.quantidadeVendida30d);
 }

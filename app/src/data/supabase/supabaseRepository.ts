@@ -23,6 +23,7 @@ import {
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
   ItemClassificacaoCompra,
+  ItemEstoqueZeradoGiroAlto,
   ItemPrecificacao,
   ItemRelatorioFalta,
   ItemVendaComplementar,
@@ -64,7 +65,7 @@ import {
   VendedorAtivo,
 } from '../../types/domain';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
-import { calcularRelatorioPrecificacao } from '../../lib/precificacao';
+import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
 import { sugerirCandidatos } from '../../lib/campanhas';
 import { rotuloSemana } from '../../lib/metas';
 import { todayISO } from '../../lib/format';
@@ -1953,6 +1954,30 @@ class SupabaseRepository implements DataRepository {
   async removerClassificacaoCompra(codigoProduto: number): Promise<void> {
     const { error } = await supabase.from('compras_classificacoes').delete().eq('codigo_produto', codigoProduto);
     if (error) throw error;
+  }
+
+  async getEstoqueZeradoGiroAlto(profile: Profile): Promise<ItemEstoqueZeradoGiroAlto[]> {
+    const [catalogo, vendaLinhas, classificacoesLinhas] = await Promise.all([
+      this.getCatalogoProdutos(profile),
+      this.buscarPaginado((inicio, fim) =>
+        supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
+      ),
+      this.buscarPaginado((inicio, fim) =>
+        supabase.from('compras_classificacoes').select('codigo_produto').range(inicio, fim)
+      ),
+    ]);
+
+    const vendaPorProduto = new Map(
+      vendaLinhas.map((r: any) => [
+        r.codigo_produto,
+        { quantidadeVendida30d: Number(r.quantidade_vendida_30d), diasSemVenda: r.dias_sem_venda },
+      ])
+    );
+    const codigosClassificados = new Set(classificacoesLinhas.map((r: any) => r.codigo_produto));
+
+    return calcularEstoqueZeradoGiroAlto(catalogo, vendaPorProduto).filter(
+      (item) => !codigosClassificados.has(item.codigoProduto)
+    );
   }
 
   async getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]> {

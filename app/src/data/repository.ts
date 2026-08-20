@@ -17,6 +17,7 @@ import {
   FaixaComissao,
   HistoricoCompraCliente,
   ItemClassificacaoCompra,
+  ItemEstoqueZeradoGiroAlto,
   ItemPrecificacao,
   ItemRelatorioFalta,
   ItemVendaComplementar,
@@ -297,6 +298,12 @@ export interface DataRepository {
   ): Promise<void>;
   getClassificacoesCompra(profile: Profile): Promise<ItemClassificacaoCompra[]>;
   removerClassificacaoCompra(codigoProduto: number): Promise<void>;
+  // Mesmo critério do zap diário de "estoque zerado — giro alto"
+  // (coletor/whatsapp_estoque_giro_alto_zerado.n8n.json), pra dar
+  // destaque a isso também dentro do app. Também já filtrado por
+  // compras_classificacoes — classificar aqui ou na Sugestão de
+  // compras tem o mesmo efeito.
+  getEstoqueZeradoGiroAlto(profile: Profile): Promise<ItemEstoqueZeradoGiroAlto[]>;
 
   // Precificação — gestor-only na UI. Diagnóstico (quem merece atenção
   // e por quê), diferente de Campanhas (decide quanto descontar).

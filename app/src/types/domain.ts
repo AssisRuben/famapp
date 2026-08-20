@@ -920,6 +920,18 @@ export interface ItemPrecificacao {
   tags: TagPrecificacao[];
 }
 
+// Mesmo critério do workflow n8n "WhatsApp - Estoque zerado de produto
+// de giro alto" (coletor/whatsapp_estoque_giro_alto_zerado.n8n.json) —
+// giro alto = top 20% em quantidade vendida nos últimos 30 dias entre
+// quem vendeu algo, e estoque zerado agora. Mantido em espelho pra não
+// mostrar no app um produto que não está (ou vice-versa) no zap que o
+// gestor já recebe todo dia às 08h.
+export interface ItemEstoqueZeradoGiroAlto {
+  codigoProduto: number;
+  nomeProduto: string;
+  quantidadeVendida30d: number;
+}
+
 // Classificação em lote de itens da sugestão de compras (18/08/2026) —
 // "não vou comprar esse produto específico porque já resolvi de outro
 // jeito", sem mexer no cálculo de demanda/estoque. Motivo fixo (não
