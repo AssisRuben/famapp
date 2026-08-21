@@ -7,6 +7,11 @@ export interface AcumuladoVendedorVendaAdicional {
   // no período. criterio='mesma_venda': o MAIOR cupom individual dele
   // (não a soma) — é o "vendeu 2 juntas na mesma nota".
   quantidadeTotal: number;
+  // Valor (R$) na MESMA base de quantidadeTotal — em 'mesma_venda' é o
+  // valor DAQUELA venda específica (a do maior cupom), não a soma do
+  // período inteiro, pra bater com o que quantidadeTotal representa
+  // (21/08/2026).
+  valorTotal: number;
 }
 
 // Agrupa por vendedor conforme o critério da campanha — base tanto do
@@ -24,24 +29,35 @@ export function agruparPorVendedor(
   }
 
   if (criterio === 'mesma_venda') {
-    // soma quantidade DENTRO de cada nota (duas linhas do mesmo
+    // soma quantidade/valor DENTRO de cada nota (duas linhas do mesmo
     // produto — ou produtos diferentes da campanha — na mesma venda
-    // contam juntas), depois pega o maior cupom entre as notas do
-    // vendedor.
-    const porVendedorPorVenda = new Map<number, Map<string, number>>();
+    // contam juntas), depois pega o maior cupom (por quantidade) entre
+    // as notas do vendedor — valorTotal segue a MESMA venda escolhida,
+    // não o valor somado do período.
+    const porVendedorPorVenda = new Map<number, Map<string, { quantidade: number; valor: number }>>();
     const nomePorVendedor = new Map<number, string>();
     for (const v of vendas) {
       if (v.codigoVendedor == null) continue;
       nomePorVendedor.set(v.codigoVendedor, v.nomeVendedor ?? `Vendedor ${v.codigoVendedor}`);
-      const porVenda = porVendedorPorVenda.get(v.codigoVendedor) ?? new Map<string, number>();
-      porVenda.set(v.vendaId, (porVenda.get(v.vendaId) ?? 0) + v.quantidade);
+      const porVenda = porVendedorPorVenda.get(v.codigoVendedor) ?? new Map<string, { quantidade: number; valor: number }>();
+      const atual = porVenda.get(v.vendaId) ?? { quantidade: 0, valor: 0 };
+      atual.quantidade += v.quantidade;
+      atual.valor += v.valor;
+      porVenda.set(v.vendaId, atual);
       porVendedorPorVenda.set(v.codigoVendedor, porVenda);
     }
-    return Array.from(porVendedorPorVenda.entries()).map(([codigoVendedor, porVenda]) => ({
-      codigoVendedor,
-      nomeVendedor: nomePorVendedor.get(codigoVendedor) ?? `Vendedor ${codigoVendedor}`,
-      quantidadeTotal: Math.max(...porVenda.values()),
-    }));
+    return Array.from(porVendedorPorVenda.entries()).map(([codigoVendedor, porVenda]) => {
+      let melhor = { quantidade: 0, valor: 0 };
+      for (const registro of porVenda.values()) {
+        if (registro.quantidade > melhor.quantidade) melhor = registro;
+      }
+      return {
+        codigoVendedor,
+        nomeVendedor: nomePorVendedor.get(codigoVendedor) ?? `Vendedor ${codigoVendedor}`,
+        quantidadeTotal: melhor.quantidade,
+        valorTotal: melhor.valor,
+      };
+    });
   }
 
   const porVendedor = new Map<number, AcumuladoVendedorVendaAdicional>();
@@ -51,8 +67,10 @@ export function agruparPorVendedor(
       codigoVendedor: v.codigoVendedor,
       nomeVendedor: v.nomeVendedor ?? `Vendedor ${v.codigoVendedor}`,
       quantidadeTotal: 0,
+      valorTotal: 0,
     };
     atual.quantidadeTotal += v.quantidade;
+    atual.valorTotal += v.valor;
     porVendedor.set(v.codigoVendedor, atual);
   }
   return Array.from(porVendedor.values());
@@ -63,13 +81,13 @@ export interface RankingVendaAdicionalItem extends AcumuladoVendedorVendaAdicion
   premio: number | null;
 }
 
-// tipo_premiacao='ranking': ordena por quantidade desc, atribui a
-// posição, e casa com premiacao_ranking (ex.: 1º=R$200) pelo número da
-// posição — quem fica fora das posições premiadas recebe premio=null.
-// minimoParaConcorrer (opcional, ex.: "concorre a partir de 5") filtra
-// fora quem vendeu menos que isso ANTES de numerar as posições — não
-// aparece no ranking nem como "sem prêmio", simplesmente não concorre
-// (03/08/2026).
+// tipo_premiacao='ranking': ordena por quantidade desc e atribui a
+// posição pra TODO MUNDO que vendeu (transparência do ranqueamento
+// completo — pedido explícito 21/08/2026, revertendo a decisão
+// anterior de 03/08/2026 de esconder quem não bate o mínimo). O
+// prêmio em si continua condicionado: só casa com premiacao_ranking
+// pela posição se o vendedor também bateu minimoParaConcorrer — dá pra
+// estar em 1º e ainda não ganhar nada, se não bateu o mínimo.
 export function calcularRankingVendaAdicional(
   vendas: VendaVendaAdicional[],
   campanha: CampanhaVendaAdicional
@@ -77,11 +95,11 @@ export function calcularRankingVendaAdicional(
   const premios = campanha.premiacaoRanking ?? [];
   const minimo = campanha.minimoParaConcorrer ?? 0;
   return agruparPorVendedor(vendas, campanha.criterioQuantidade)
-    .filter((item) => item.quantidadeTotal >= minimo)
     .sort((a, b) => b.quantidadeTotal - a.quantidadeTotal)
     .map((item, index) => {
       const posicao = index + 1;
-      return { ...item, posicao, premio: premios.find((p) => p.posicao === posicao)?.valor ?? null };
+      const concorre = item.quantidadeTotal >= minimo;
+      return { ...item, posicao, premio: concorre ? premios.find((p) => p.posicao === posicao)?.valor ?? null : null };
     });
 }
 
@@ -104,6 +122,17 @@ export function calcularMetaIndividualVendaAdicional(
       const bateu = meta > 0 && item.quantidadeTotal >= meta;
       return { ...item, bateu, premio: bateu ? campanha.premiacaoMetaValor : null };
     });
+}
+
+// Medalha/troféu pra quem realmente ganhou prêmio numa posição (não
+// só quem está naquela posição no ranking — ver calcularRankingVendaAdicional,
+// dá pra estar em 1º sem prêmio se não bateu o mínimo pra concorrer).
+// Chamar só quando premio != null.
+export function medalhaPosicao(posicao: number): string {
+  if (posicao === 1) return '🥇';
+  if (posicao === 2) return '🥈';
+  if (posicao === 3) return '🥉';
+  return '🏆';
 }
 
 export function campanhaAtiva(campanha: CampanhaVendaAdicional, hojeIso: string): boolean {

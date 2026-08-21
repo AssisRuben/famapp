@@ -726,6 +726,11 @@ export interface VendaVendaAdicional {
   // campanha), separados por vírgula — null se veio sozinho. Mostra
   // "com o que" a venda contou no critério 'venda_com_outros_itens'.
   outrosProdutosNaVenda: string | null;
+  // Valor líquido dessa linha (21/08/2026) — Venda Adicional só
+  // rastreava quantidade até então; usado no resumo por vendedor
+  // (Alertas e na própria aba) pra mostrar quanto em R$, não só quantas
+  // unidades.
+  valor: number;
 }
 
 // ============================================================

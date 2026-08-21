@@ -1381,6 +1381,7 @@ class MockRepository implements DataRepository {
         // 'venda_com_outros_itens' não tem como ser testado no mock.
         qtdItensNaVenda: 1,
         outrosProdutosNaVenda: null,
+        valor: (catalogoProdutosSeed.find((p) => p.codigo === v.codigoProduto)?.precoVenda ?? 0) * v.quantidade,
       }));
 
     return delay(linhas);

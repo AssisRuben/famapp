@@ -508,7 +508,8 @@ select
     from venda_itens vi2
     left join produto_catalogo pc2 on pc2.codigo = vi2.codigo_produto
     where vi2.venda_id = vi.venda_id and vi2.id <> vi.id
-  ) as outros_produtos_na_venda
+  ) as outros_produtos_na_venda,
+  vi.valor_total_liquido as valor
 from campanha_venda_adicional_produtos cvap
 join campanhas_venda_adicional camp on camp.id = cvap.campanha_id
 join venda_itens vi on vi.codigo_produto = cvap.codigo_produto

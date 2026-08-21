@@ -1480,6 +1480,7 @@ class SupabaseRepository implements DataRepository {
       nomeCliente: r.nome_cliente,
       qtdItensNaVenda: Number(r.qtd_itens_na_venda),
       outrosProdutosNaVenda: r.outros_produtos_na_venda,
+      valor: Number(r.valor ?? 0),
     }));
   }
 

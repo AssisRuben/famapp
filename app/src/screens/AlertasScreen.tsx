@@ -18,6 +18,7 @@ import {
   calcularMetaIndividualVendaAdicional,
   calcularRankingVendaAdicional,
   filtrarVendasQualificadas,
+  medalhaPosicao,
 } from '../lib/vendaAdicional';
 import {
   CampanhaVendaAdicional,
@@ -144,6 +145,66 @@ function LinhaClienteComHistorico({
   );
 }
 
+// Resumo (2 linhas de estatística) + lista de clientes do card
+// "Carteira de clientes" — reaproveitado tanto pro agregado (vendedor,
+// ou gestor antes de separar por vendedor) quanto pro resumo de UM
+// vendedor específico (gestor, depois de clicar — 21/08/2026).
+function ResumoCarteira({
+  stats,
+  clientes,
+  onContato,
+}: {
+  stats: StatsCarteira;
+  clientes: ClienteCarteira[];
+  onContato: (motivo: MotivoContato, codigoCliente: number, tipoContato: TipoContato) => void;
+}) {
+  return (
+    <>
+      <View style={styles.carteiraStatsRow}>
+        <View style={styles.carteiraStatItem}>
+          <Text style={styles.carteiraStatValor}>{formatBRL(stats.valorTotal)}</Text>
+          <Text style={styles.carteiraStatLabel}>Vendido (últ. 6 meses)</Text>
+        </View>
+        <View style={styles.carteiraStatItem}>
+          <Text style={styles.carteiraStatValor}>{stats.totalClientes}</Text>
+          <Text style={styles.carteiraStatLabel}>Clientes na carteira</Text>
+        </View>
+        <View style={styles.carteiraStatItem}>
+          <Text style={styles.carteiraStatValor}>{stats.compraramEsteMes}</Text>
+          <Text style={styles.carteiraStatLabel}>Compraram este mês</Text>
+        </View>
+      </View>
+      <View style={styles.carteiraStatsRow}>
+        <View style={styles.carteiraStatItem}>
+          <Text style={styles.carteiraStatValor}>{formatBRL(stats.valorMesAtual)}</Text>
+          <Text style={styles.carteiraStatLabel}>Comprado este mês</Text>
+        </View>
+        <View style={styles.carteiraStatItem}>
+          <Text style={styles.carteiraStatValor}>{stats.contatadosEsteMes}</Text>
+          <Text style={styles.carteiraStatLabel}>Contatados este mês</Text>
+        </View>
+      </View>
+      {clientes.length === 0 ? (
+        <Text style={styles.empty}>Nenhum cliente na carteira ainda — adiciona na aba "Carteira de clientes".</Text>
+      ) : (
+        clientes.map((cliente) => (
+          <LinhaClienteComHistorico
+            key={cliente.id}
+            codigoCliente={cliente.codigoCliente}
+            nome={cliente.nome}
+            telefone={cliente.telefone}
+            detalhe={`${formatBRL(cliente.valor6Meses)} (últ. 6 meses)${
+              cliente.compradoEsteMes ? ` · ${formatBRL(cliente.valorMesAtual)} este mês ✅` : ''
+            }`}
+            mensagemWhatsapp={`Oi, ${nomeCurto(cliente.nome)}! Tudo bem? Aqui é da Farmácia Conviva Parquelândia. Passando pra saber se você precisa de alguma coisa 🙂`}
+            onContato={(tipo) => onContato('carteira', cliente.codigoCliente, tipo)}
+          />
+        ))
+      )}
+    </>
+  );
+}
+
 type ModoFiltroSemComprador = 'todas' | 'controladas' | 'proprio_cpf';
 
 // Contagem "sem identificação" certa pro modo ativo — usada tanto pra
@@ -265,6 +326,38 @@ function diasDesde(dataISO: string, hoje: Date): number {
   const data = new Date(dataISO);
   const hojeSemHora = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
   return Math.round((hojeSemHora.getTime() - data.getTime()) / 86400000);
+}
+
+interface StatsCarteira {
+  valorTotal: number;
+  valorMesAtual: number;
+  totalClientes: number;
+  compraramEsteMes: number;
+  contatadosEsteMes: number;
+}
+
+// Extraído do card "Carteira de clientes" pra reaproveitar tanto no
+// resumo agregado (vendedor, ou gestor antes de separar por vendedor)
+// quanto no resumo de UM vendedor específico (gestor, depois de
+// clicar — 21/08/2026).
+function calcularStatsCarteira(clientes: ClienteCarteira[], contatos: ContatoCliente[], hoje: Date): StatsCarteira {
+  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).getTime();
+  const clientesDaCarteira = new Set(clientes.map((c) => c.codigoCliente));
+  const contatadosEsteMes = new Set(
+    contatos
+      .filter(
+        (c) =>
+          c.motivo === 'carteira' && clientesDaCarteira.has(c.codigoCliente) && new Date(c.contatadoEm).getTime() >= inicioMes
+      )
+      .map((c) => c.codigoCliente)
+  ).size;
+  return {
+    valorTotal: clientes.reduce((soma, c) => soma + c.valor6Meses, 0),
+    valorMesAtual: clientes.reduce((soma, c) => soma + c.valorMesAtual, 0),
+    totalClientes: clientes.length,
+    compraramEsteMes: clientes.filter((c) => c.compradoEsteMes).length,
+    contatadosEsteMes,
+  };
 }
 
 const RECEITA_PENDENTE_DIAS = 7;
@@ -472,25 +565,39 @@ export function AlertasScreen() {
   // cliente distinto contatado (ligação/whatsapp) por motivo 'carteira'
   // dentro do mês corrente — não usa foiContatadoRecentemente porque
   // aqui não é suspensão de lista, é estatística pura (10/08/2026).
-  const carteiraStats = useMemo(() => {
-    const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).getTime();
-    const clientesDaCarteira = new Set(carteiraClientes.map((c) => c.codigoCliente));
-    const contatadosEsteMes = new Set(
-      contatos
-        .filter(
-          (c) =>
-            c.motivo === 'carteira' && clientesDaCarteira.has(c.codigoCliente) && new Date(c.contatadoEm).getTime() >= inicioMes
-        )
-        .map((c) => c.codigoCliente)
-    ).size;
-    return {
-      valorTotal: carteiraClientes.reduce((soma, c) => soma + c.valor6Meses, 0),
-      valorMesAtual: carteiraClientes.reduce((soma, c) => soma + c.valorMesAtual, 0),
-      totalClientes: carteiraClientes.length,
-      compraramEsteMes: carteiraClientes.filter((c) => c.compradoEsteMes).length,
-      contatadosEsteMes,
-    };
-  }, [carteiraClientes, contatos, hoje]);
+  const carteiraStats = useMemo(() => calcularStatsCarteira(carteiraClientes, contatos, hoje), [carteiraClientes, contatos, hoje]);
+
+  // Gestor vê o card "Carteira de clientes" separado por vendedor
+  // (21/08/2026, pedido explícito) — em vez da lista combinada de
+  // todo mundo, mostra os nomes primeiro; clicar num nome abre o
+  // resumo+lista SÓ daquele vendedor. nomeVendedor vem de
+  // donosCarteira (mesma tabela carteira_clientes, sem o recorte por
+  // vendedor da RLS) — não de getVendedoresAtivos, pra não precisar de
+  // outro fetch.
+  const carteiraPorVendedor = useMemo(() => {
+    if (profile?.role !== 'gestor') return [];
+    const nomePorCodigo = new Map(donosCarteira.map((d) => [d.codigoVendedor, d.nomeVendedor]));
+    const porVendedor = new Map<number, ClienteCarteira[]>();
+    for (const c of carteiraClientes) {
+      if (!porVendedor.has(c.codigoVendedor)) porVendedor.set(c.codigoVendedor, []);
+      porVendedor.get(c.codigoVendedor)!.push(c);
+    }
+    return Array.from(porVendedor.entries())
+      .map(([codigoVendedor, clientes]) => ({
+        codigoVendedor,
+        nomeVendedor: nomePorCodigo.get(codigoVendedor) ?? `Vendedor ${codigoVendedor}`,
+        clientes,
+        stats: calcularStatsCarteira(clientes, contatos, hoje),
+      }))
+      .sort((a, b) => a.nomeVendedor.localeCompare(b.nomeVendedor));
+  }, [profile, carteiraClientes, donosCarteira, contatos, hoje]);
+  const [vendedorCarteiraAberto, setVendedorCarteiraAberto] = useState<number | null>(null);
+  // Venda Adicional (21/08/2026): ranking mostra só posição+nome por
+  // padrão — clicar no nome abre o resumo (quantidade + valor) daquele
+  // vendedor. Chave `${campanhaId}:${codigoVendedor}` porque várias
+  // campanhas ativas podem estar na tela ao mesmo tempo, cada uma com
+  // seu próprio ranking independente.
+  const [linhaVAAberta, setLinhaVAAberta] = useState<string | null>(null);
 
   const diaDoMes = hoje.getDate();
   const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
@@ -701,6 +808,7 @@ export function AlertasScreen() {
       navigation.navigate('Receitas');
       return;
     }
+    if (chave === 'carteira_clientes') setVendedorCarteiraAberto(null);
     setExpandido((atual) => (atual === chave ? null : chave));
   };
 
@@ -733,46 +841,54 @@ export function AlertasScreen() {
       {expandido === 'carteira_clientes' && (
         <Card>
           <Text style={styles.listaTitulo}>Carteira de clientes</Text>
-          <View style={styles.carteiraStatsRow}>
-            <View style={styles.carteiraStatItem}>
-              <Text style={styles.carteiraStatValor}>{formatBRL(carteiraStats.valorTotal)}</Text>
-              <Text style={styles.carteiraStatLabel}>Vendido (últ. 6 meses)</Text>
-            </View>
-            <View style={styles.carteiraStatItem}>
-              <Text style={styles.carteiraStatValor}>{carteiraStats.totalClientes}</Text>
-              <Text style={styles.carteiraStatLabel}>Clientes na carteira</Text>
-            </View>
-            <View style={styles.carteiraStatItem}>
-              <Text style={styles.carteiraStatValor}>{carteiraStats.compraramEsteMes}</Text>
-              <Text style={styles.carteiraStatLabel}>Compraram este mês</Text>
-            </View>
-          </View>
-          <View style={styles.carteiraStatsRow}>
-            <View style={styles.carteiraStatItem}>
-              <Text style={styles.carteiraStatValor}>{formatBRL(carteiraStats.valorMesAtual)}</Text>
-              <Text style={styles.carteiraStatLabel}>Comprado este mês</Text>
-            </View>
-            <View style={styles.carteiraStatItem}>
-              <Text style={styles.carteiraStatValor}>{carteiraStats.contatadosEsteMes}</Text>
-              <Text style={styles.carteiraStatLabel}>Contatados este mês</Text>
-            </View>
-          </View>
-          {carteiraClientes.length === 0 ? (
-            <Text style={styles.empty}>Nenhum cliente na carteira ainda — adiciona na aba "Carteira de clientes".</Text>
+          {profile?.role === 'gestor' ? (
+            vendedorCarteiraAberto == null ? (
+              carteiraPorVendedor.length === 0 ? (
+                <Text style={styles.empty}>Nenhum cliente na carteira ainda.</Text>
+              ) : (
+                carteiraPorVendedor.map((v) => (
+                  <Pressable
+                    key={v.codigoVendedor}
+                    style={styles.itemRow}
+                    onPress={() => setVendedorCarteiraAberto(v.codigoVendedor)}
+                  >
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemNome}>{v.nomeVendedor}</Text>
+                      <Text style={styles.itemDetalhe}>
+                        <Text style={styles.vendedorStatNumero}>{v.stats.totalClientes}</Text>{' '}
+                        {v.stats.totalClientes === 1 ? 'cliente' : 'clientes'} ·{' '}
+                        <Text style={styles.vendedorStatNumero}>{v.stats.compraramEsteMes}</Text> compraram este mês
+                        ·{' '}
+                        <Text style={styles.vendedorStatNumero}>{formatBRL(v.stats.valorMesAtual)}</Text> este mês
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  </Pressable>
+                ))
+              )
+            ) : (
+              (() => {
+                const vendedorAtual = carteiraPorVendedor.find((v) => v.codigoVendedor === vendedorCarteiraAberto);
+                if (!vendedorAtual) return null;
+                return (
+                  <View>
+                    <Pressable style={styles.voltar} onPress={() => setVendedorCarteiraAberto(null)} hitSlop={8}>
+                      <Ionicons name="arrow-back" size={18} color={colors.navy} />
+                      <Text style={styles.voltarTexto} numberOfLines={1}>
+                        {vendedorAtual.nomeVendedor}
+                      </Text>
+                    </Pressable>
+                    <ResumoCarteira
+                      stats={vendedorAtual.stats}
+                      clientes={vendedorAtual.clientes}
+                      onContato={registrarContatoAlerta}
+                    />
+                  </View>
+                );
+              })()
+            )
           ) : (
-            carteiraClientes.map((cliente) => (
-              <LinhaClienteComHistorico
-                key={cliente.id}
-                codigoCliente={cliente.codigoCliente}
-                nome={cliente.nome}
-                telefone={cliente.telefone}
-                detalhe={`${formatBRL(cliente.valor6Meses)} (últ. 6 meses)${
-                  cliente.compradoEsteMes ? ` · ${formatBRL(cliente.valorMesAtual)} este mês ✅` : ''
-                }`}
-                mensagemWhatsapp={`Oi, ${nomeCurto(cliente.nome)}! Tudo bem? Aqui é da Farmácia Conviva Parquelândia. Passando pra saber se você precisa de alguma coisa 🙂`}
-                onContato={(tipo) => registrarContatoAlerta('carteira', cliente.codigoCliente, tipo)}
-              />
-            ))
+            <ResumoCarteira stats={carteiraStats} clientes={carteiraClientes} onContato={registrarContatoAlerta} />
           )}
         </Card>
       )}
@@ -970,10 +1086,6 @@ export function AlertasScreen() {
               // vendas em si (quem comprou o quê, quando) que só mostra
               // a do próprio vendedor logado; gestor vê a de todo mundo.
               const vendasQualificadas = filtrarVendasQualificadas(vendas, campanha);
-              const minhasVendas =
-                profile?.role === 'gestor'
-                  ? vendasQualificadas
-                  : vendasQualificadas.filter((v) => v.codigoVendedor === profile?.codigoVendedor);
 
               return (
                 <Card key={campanha.id}>
@@ -991,48 +1103,67 @@ export function AlertasScreen() {
 
                   <View style={styles.clientesSection}>
                     <Text style={styles.clientesTitle}>Total vendido: {totalQuantidade} un.</Text>
-                    {parciais.length > 0 &&
-                      parciais.map((item) => (
-                        <View key={item.codigoVendedor} style={styles.itemRow}>
-                          <Text style={styles.itemNome}>
-                            {'posicao' in item ? `${item.posicao}º ` : item.bateu ? '✅ ' : '▫️ '}
-                            {item.nomeVendedor}
-                          </Text>
-                          <Text style={styles.itemDetalhe}>
-                            {item.quantidadeTotal} un.{item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
-                          </Text>
-                        </View>
-                      ))}
-                  </View>
-
-                  <View style={styles.clientesSection}>
-                    <Text style={styles.clientesTitle}>
-                      {profile?.role === 'gestor' ? `Vendas (${minhasVendas.length})` : `Suas vendas (${minhasVendas.length})`}
-                    </Text>
-                    {minhasVendas.length === 0 ? (
-                      <Text style={styles.empty}>Nenhuma venda registrada ainda.</Text>
+                    {parciais.length === 0 ? (
+                      <Text style={styles.empty}>Nenhuma venda com vendedor identificado ainda.</Text>
                     ) : (
-                      minhasVendas.map((v) => (
-                        <View key={v.itemId} style={styles.historicoRow}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.historicoProduto} numberOfLines={1}>
-                              {v.quantidade > 1 ? `${v.quantidade}x ` : ''}
-                              {v.nomeProduto}
-                              {profile?.role === 'gestor' && v.nomeVendedor ? ` · ${v.nomeVendedor}` : ''}
-                            </Text>
-                            {v.nomeCliente && <Text style={styles.itemDetalhe}>{v.nomeCliente}</Text>}
-                            {v.outrosProdutosNaVenda && (
-                              <Text style={styles.itemDetalhe} numberOfLines={1}>
-                                + {v.outrosProdutosNaVenda}
-                              </Text>
+                      parciais.map((item) => {
+                        const chave = `${campanha.id}:${item.codigoVendedor}`;
+                        const aberta = linhaVAAberta === chave;
+                        const vendasDoVendedor = vendasQualificadas.filter((v) => v.codigoVendedor === item.codigoVendedor);
+                        return (
+                          <View key={item.codigoVendedor}>
+                            <Pressable
+                              style={styles.itemRow}
+                              onPress={() => setLinhaVAAberta((atual) => (atual === chave ? null : chave))}
+                            >
+                              <View style={styles.itemInfo}>
+                                <Text style={styles.itemNome}>
+                                  {'posicao' in item
+                                    ? `${item.premio != null ? medalhaPosicao(item.posicao) : `${item.posicao}º`} `
+                                    : item.bateu
+                                    ? '✅ '
+                                    : '▫️ '}
+                                  {item.nomeVendedor}
+                                </Text>
+                                <Text style={styles.itemDetalhe}>
+                                  <Text style={styles.vendedorStatNumero}>{item.quantidadeTotal}</Text> un. ·{' '}
+                                  <Text style={styles.vendedorStatNumero}>{formatBRL(item.valorTotal)}</Text>
+                                  {item.premio != null ? ` · prêmio ${formatBRL(item.premio)}` : ''}
+                                </Text>
+                              </View>
+                              <Ionicons name={aberta ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+                            </Pressable>
+                            {aberta && (
+                              <View style={styles.historicoPainel}>
+                                {vendasDoVendedor.length === 0 ? (
+                                  <Text style={styles.empty}>Nenhuma venda qualificada encontrada.</Text>
+                                ) : (
+                                  vendasDoVendedor.map((v) => (
+                                    <View key={v.itemId} style={styles.historicoRow}>
+                                      <View style={{ flex: 1 }}>
+                                        <Text style={styles.historicoProduto} numberOfLines={1}>
+                                          {v.quantidade > 1 ? `${v.quantidade}x ` : ''}
+                                          {v.nomeProduto}
+                                        </Text>
+                                        {v.nomeCliente && <Text style={styles.itemDetalhe}>{v.nomeCliente}</Text>}
+                                        {v.outrosProdutosNaVenda && (
+                                          <Text style={styles.itemDetalhe} numberOfLines={1}>
+                                            + {v.outrosProdutosNaVenda}
+                                          </Text>
+                                        )}
+                                      </View>
+                                      <Text style={styles.historicoData}>
+                                        {formatDateBR(v.dataVenda)}
+                                        {v.horaVenda ? ` ${v.horaVenda.slice(0, 5)}` : ''}
+                                      </Text>
+                                    </View>
+                                  ))
+                                )}
+                              </View>
                             )}
                           </View>
-                          <Text style={styles.historicoData}>
-                            {formatDateBR(v.dataVenda)}
-                            {v.horaVenda ? ` ${v.horaVenda.slice(0, 5)}` : ''}
-                          </Text>
-                        </View>
-                      ))
+                        );
+                      })
                     )}
                   </View>
                 </Card>
@@ -1099,6 +1230,9 @@ const styles = StyleSheet.create({
   cardContagem: { fontSize: 24, fontWeight: '700', color: colors.textPrimary },
   cardTitulo: { fontSize: 12.5, color: colors.textSecondary, marginTop: 3, lineHeight: 16 },
   listaTitulo: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: 4 },
+  voltar: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  voltarTexto: { color: colors.navy, fontWeight: '600', fontSize: 14 },
+  vendedorStatNumero: { fontWeight: '700', color: colors.navy },
   listaSubtitulo: { fontSize: 11, color: colors.textMuted, marginBottom: 10 },
   carteiraStatsRow: {
     flexDirection: 'row',

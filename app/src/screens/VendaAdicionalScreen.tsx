@@ -17,7 +17,7 @@ import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
-import { calcularMetaIndividualVendaAdicional, calcularRankingVendaAdicional } from '../lib/vendaAdicional';
+import { calcularMetaIndividualVendaAdicional, calcularRankingVendaAdicional, medalhaPosicao } from '../lib/vendaAdicional';
 import {
   CampanhaVendaAdicional,
   CriterioQuantidadeVendaAdicional,
@@ -57,6 +57,18 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaVendaAdicional }) {
     }
   };
 
+  // Calculado sempre (não só dentro do JSX) pra dar pra checar
+  // .length === 0 e mostrar uma mensagem clara. calcularRankingVendaAdicional
+  // sempre traz TODO MUNDO que vendeu, ranqueado (mesmo quem não bateu
+  // o mínimo pra concorrer) — só o prêmio em si fica condicionado ao
+  // mínimo (21/08/2026, revertendo o filtro que escondia quem não
+  // batia, que fazia o painel parecer vazio/quebrado com venda real
+  // registrada).
+  const parciais =
+    campanha.tipoPremiacao === 'ranking'
+      ? calcularRankingVendaAdicional(vendas, campanha)
+      : calcularMetaIndividualVendaAdicional(vendas, campanha);
+
   return (
     <View>
       <Pressable style={styles.andamentoToggle} onPress={alternar}>
@@ -69,6 +81,8 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaVendaAdicional }) {
             <ActivityIndicator style={{ marginTop: 6 }} />
           ) : vendas.length === 0 ? (
             <Text style={styles.empty}>Nenhuma venda registrada nessa campanha ainda.</Text>
+          ) : parciais.length === 0 ? (
+            <Text style={styles.empty}>Nenhuma venda com vendedor identificado ainda.</Text>
           ) : (
             <>
               {campanha.criterioQuantidade === 'mesma_venda' && (
@@ -78,23 +92,28 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaVendaAdicional }) {
                 <Text style={styles.hint}>Contando só venda que veio com outro item junto — quem comprou sozinho não entra na conta.</Text>
               )}
               {campanha.tipoPremiacao === 'ranking'
-                ? calcularRankingVendaAdicional(vendas, campanha).map((item) => (
+                ? parciais.map((item) => (
                     <View key={item.codigoVendedor} style={styles.andamentoLinha}>
                       <Text style={styles.andamentoNome} numberOfLines={1}>
-                        {item.posicao}º {item.nomeVendedor}
+                        {'posicao' in item
+                          ? `${item.premio != null ? medalhaPosicao(item.posicao) : `${item.posicao}º`} `
+                          : ''}
+                        {item.nomeVendedor}
                       </Text>
                       <Text style={styles.andamentoValor}>
-                        {item.quantidadeTotal} un. {item.premio != null ? `· ${formatBRL(item.premio)}` : ''}
+                        {item.quantidadeTotal} un. · {formatBRL(item.valorTotal)}
+                        {'premio' in item && item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
                       </Text>
                     </View>
                   ))
-                : calcularMetaIndividualVendaAdicional(vendas, campanha).map((item) => (
+                : parciais.map((item) => (
                     <View key={item.codigoVendedor} style={styles.andamentoLinha}>
                       <Text style={styles.andamentoNome} numberOfLines={1}>
-                        {item.bateu ? '✅' : '▫️'} {item.nomeVendedor}
+                        {'bateu' in item && item.bateu ? '✅' : '▫️'} {item.nomeVendedor}
                       </Text>
                       <Text style={styles.andamentoValor}>
-                        {item.quantidadeTotal} de {campanha.metaQuantidade} {item.premio != null ? `· ${formatBRL(item.premio)}` : ''}
+                        {item.quantidadeTotal} de {campanha.metaQuantidade} · {formatBRL(item.valorTotal)}
+                        {'premio' in item && item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
                       </Text>
                     </View>
                   ))}
