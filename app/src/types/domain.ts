@@ -181,6 +181,18 @@ export interface ClienteBusca {
   telefone: string | null;
 }
 
+// Espelha vw_cliente_dono_carteira (21/08/2026) — quem já é "dono" de
+// cada cliente na carteira, SEM o resto dos dados de vw_carteira_clientes
+// (valor comprado, telefone): só o suficiente pra avisar "esse cliente já
+// está na carteira de fulano" na hora de buscar/adicionar, evitando
+// duplicidade entre carteiras de vendedores diferentes — achado
+// 21/08/2026 revisando os dados reais (2 clientes em 2 carteiras cada).
+export interface DonoCarteira {
+  codigoCliente: number;
+  codigoVendedor: number;
+  nomeVendedor: string;
+}
+
 // Espelha vw_historico_compras_cliente — histórico de compra por
 // PRODUTO (não por nota) do cliente inteiro (qualquer vendedor),
 // mostrado ao expandir um cliente na tela "Meus clientes" (só os

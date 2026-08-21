@@ -14,6 +14,7 @@ import {
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
   DesempenhoVendedorSemanal,
+  DonoCarteira,
   FaixaComissao,
   HistoricoCompraCliente,
   ItemClassificacaoCompra,
@@ -114,6 +115,13 @@ export interface DataRepository {
   // Alertas). Com codigoVendedor: filtra pra esse vendedor específico
   // (usado pelo gestor na aba, com o seletor de vendedor).
   getCarteiraClientes(profile: Profile, codigoVendedor?: number): Promise<ClienteCarteira[]>;
+  // Quem é o "dono" de cada cliente já na carteira de ALGUÉM (qualquer
+  // vendedor, não só o logado) — diferente de getCarteiraClientes, que
+  // é restrito por RLS ao próprio vendedor (ou ao selecionado, se
+  // gestor). Usado só pra avisar "já está na carteira de fulano" na
+  // busca/lista, sem expor valor de compra nem telefone de quem não é
+  // o dono.
+  getDonosCarteira(profile: Profile): Promise<DonoCarteira[]>;
   // Busca em `clientes` (aberta a qualquer autenticado) por nome ou
   // CPF, pra escolher quem adicionar na carteira — limitada (não
   // carrega o cadastro inteiro).

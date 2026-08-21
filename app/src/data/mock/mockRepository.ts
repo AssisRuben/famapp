@@ -17,6 +17,7 @@ import {
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
   DesempenhoVendedorSemanal,
+  DonoCarteira,
   FaixaComissao,
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
@@ -1667,6 +1668,18 @@ class MockRepository implements DataRepository {
           valorMesAtual: round2(valorMesAtual),
         };
       })
+    );
+  }
+
+  async getDonosCarteira(_profile: Profile): Promise<DonoCarteira[]> {
+    const itens = await getCarteiraClientesStore();
+    const nomePorCodigo = new Map(vendedoresSeed.map((v) => [v.codigo, v.nome]));
+    return delay(
+      itens.map((item) => ({
+        codigoCliente: item.codigoCliente,
+        codigoVendedor: item.codigoVendedor,
+        nomeVendedor: nomePorCodigo.get(item.codigoVendedor) ?? `Vendedor ${item.codigoVendedor}`,
+      }))
     );
   }
 

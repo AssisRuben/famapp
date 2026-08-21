@@ -24,6 +24,7 @@ import {
   ClienteCarteira,
   ClienteDoVendedor,
   ContatoCliente,
+  DonoCarteira,
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
   MetaVendedor,
@@ -52,6 +53,7 @@ function LinhaClienteComHistorico({
   nome,
   telefone,
   detalhe,
+  donoCarteira,
   mensagemWhatsapp,
   onContato,
 }: {
@@ -59,6 +61,10 @@ function LinhaClienteComHistorico({
   nome: string;
   telefone: string | null;
   detalhe: string;
+  // Nome do vendedor dono desse cliente na carteira, se tiver — só
+  // passado por quem usa (hoje só "alto valor sumindo"); nos outros 2
+  // usos fica undefined e o selo simplesmente não aparece.
+  donoCarteira?: string | null;
   mensagemWhatsapp: string;
   onContato?: (tipoContato: TipoContato) => void;
 }) {
@@ -86,7 +92,17 @@ function LinhaClienteComHistorico({
     <View>
       <Pressable style={styles.itemRow} onPress={alternar}>
         <View style={styles.itemInfo}>
-          <Text style={styles.itemNome}>{nome}</Text>
+          <View style={styles.itemNomeLinha}>
+            <Text style={styles.itemNome}>{nome}</Text>
+            {donoCarteira && (
+              <View style={styles.carteiraBadge}>
+                <Ionicons name="person" size={10} color={colors.navy} />
+                <Text style={styles.carteiraBadgeTexto} numberOfLines={1}>
+                  {donoCarteira}
+                </Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.itemDetalhe}>{detalhe}</Text>
         </View>
         <View style={styles.itemAcoes}>
@@ -288,6 +304,7 @@ interface AlertasDados {
   metas: MetaVendedor[];
   contatos: ContatoCliente[];
   carteiraClientes: ClienteCarteira[];
+  donosCarteira: DonoCarteira[];
   campanhasVendaAdicionalAtivas: CampanhaVendaAdicional[];
   vendasVendaAdicionalPorCampanha: Record<string, VendaVendaAdicional[]>;
 }
@@ -308,6 +325,7 @@ export function AlertasScreen() {
   const [campanhasVendaAdicionalAtivas, setCampanhasVendaAdicionalAtivas] = useState<CampanhaVendaAdicional[]>([]);
   const [vendasVendaAdicionalPorCampanha, setVendasVendaAdicionalPorCampanha] = useState<Record<string, VendaVendaAdicional[]>>({});
   const [carteiraClientes, setCarteiraClientes] = useState<ClienteCarteira[]>([]);
+  const [donosCarteira, setDonosCarteira] = useState<DonoCarteira[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
@@ -332,6 +350,7 @@ export function AlertasScreen() {
     setMetas(d.metas);
     setContatos(d.contatos);
     setCarteiraClientes(d.carteiraClientes);
+    setDonosCarteira(d.donosCarteira);
     setCampanhasVendaAdicionalAtivas(d.campanhasVendaAdicionalAtivas);
     setVendasVendaAdicionalPorCampanha(d.vendasVendaAdicionalPorCampanha);
   }, []);
@@ -339,7 +358,7 @@ export function AlertasScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     const hoje = new Date();
-    const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont, carteira] = await Promise.all([
+    const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont, carteira, donos] = await Promise.all([
       repository.getProdutosEmPromocao(profile),
       repository.getClientesDoVendedor(profile),
       repository.getClientesValorGeral(profile),
@@ -353,6 +372,10 @@ export function AlertasScreen() {
       // traz a de todo mundo somada (card de Alertas é um resumo geral
       // — o detalhe por vendedor fica na aba "Carteira de clientes").
       repository.getCarteiraClientes(profile),
+      // Quem é dono de cada cliente em QUALQUER carteira (não só a do
+      // vendedor logado) — usado no card "Cliente de alto valor
+      // sumindo" pra avisar se o cliente já é acompanhado por alguém.
+      repository.getDonosCarteira(profile),
     ]);
 
     // Venda adicional: só as campanhas ativas hoje interessam pro card
@@ -380,6 +403,7 @@ export function AlertasScreen() {
       metas: met,
       contatos: cont,
       carteiraClientes: carteira,
+      donosCarteira: donos,
       campanhasVendaAdicionalAtivas: ativasVA,
       vendasVendaAdicionalPorCampanha: vendasPorCampanhaVA,
     };
@@ -492,6 +516,11 @@ export function AlertasScreen() {
         .sort((a, b) => b.dias - a.dias),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [receitas]
+  );
+
+  const donoPorCliente = useMemo(
+    () => new Map(donosCarteira.map((d) => [d.codigoCliente, d.nomeVendedor])),
+    [donosCarteira]
   );
 
   // clientesValorGeral (não `clientes`, que é escopado por vendedor) —
@@ -830,6 +859,7 @@ export function AlertasScreen() {
                 nome={c.nome}
                 telefone={c.telefone}
                 detalhe={`${formatBRL(c.valorTotal)} no total${c.ultimaCompra ? ` · última compra em ${formatDateBR(c.ultimaCompra)}` : ''}`}
+                donoCarteira={donoPorCliente.get(c.codigo)}
                 mensagemWhatsapp={`Olá, ${nomeCurto(c.nome)}! Aqui é ${nomeCurto(profile?.nome ?? '')} da Farmácia Conviva Parquelândia 💊 Sentimos sua falta — podemos ajudar em algo?`}
                 onContato={(tipo) => registrarContatoAlerta('alto_valor_sumindo', c.codigo, tipo)}
               />
@@ -1105,7 +1135,18 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   itemInfo: { flexShrink: 1 },
+  itemNomeLinha: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
   itemNome: { fontSize: 14, color: colors.textPrimary, fontWeight: '500' },
+  carteiraBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.navy + '14',
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  carteiraBadgeTexto: { fontSize: 10, color: colors.navy, fontWeight: '700' },
   itemDetalhe: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
   itemAcoes: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   historicoPainel: {

@@ -807,6 +807,27 @@ using (exists (
     and (p.role = 'gestor' or p.codigo_vendedor = carteira_clientes.codigo_vendedor)
 ));
 
+-- vw_cliente_dono_carteira (21/08/2026) — resolve só "quem é o dono
+-- desse cliente na carteira", sem o resto de vw_carteira_clientes
+-- (valor comprado, telefone). A RLS de carteira_clientes restringe
+-- cada vendedor a ver só a PRÓPRIA carteira, então sem essa view
+-- ninguém percebe quando um cliente já está na carteira de outro
+-- vendedor (achado 21/08/2026: 2 clientes cadastrados em 2 carteiras
+-- cada). Expõe só o mínimo pra qualquer autenticado — SEM
+-- security_invoker de propósito, mesmo padrão de vw_carteira_clientes
+-- acima, pra furar a RLS por-vendedor e decidir sozinha (via
+-- auth.uid()) que qualquer autenticado pode ler esse recorte.
+create view vw_cliente_dono_carteira as
+select
+  cc.codigo_cliente,
+  cc.codigo_vendedor,
+  vd.nome as nome_vendedor
+from carteira_clientes cc
+join vendedores vd on vd.codigo = cc.codigo_vendedor
+where exists (
+  select 1 from profiles p where p.id = auth.uid()
+);
+
 -- sync_control: escrita continua exclusiva do coletor via service_role
 -- (nenhuma policy de insert/update/delete para authenticated). Leitura
 -- liberada pra qualquer autenticado — usada pelo app pra mostrar "dados

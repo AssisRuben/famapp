@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,7 +17,7 @@ import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatBRL } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
-import { ClienteBusca, ClienteCarteira, VendedorAtivo } from '../types/domain';
+import { ClienteBusca, ClienteCarteira, DonoCarteira, VendedorAtivo } from '../types/domain';
 
 function mensagemErro(erro: unknown): string {
   if (erro instanceof Error && erro.message) return erro.message;
@@ -41,6 +41,7 @@ export function CarteiraClientesScreen() {
   const [resultados, setResultados] = useState<ClienteBusca[]>([]);
   const [buscando, setBuscando] = useState(false);
   const [adicionando, setAdicionando] = useState<number | null>(null);
+  const [donosCarteira, setDonosCarteira] = useState<DonoCarteira[]>([]);
 
   useEffect(() => {
     if (!profile || !ehGestor) return;
@@ -49,6 +50,19 @@ export function CarteiraClientesScreen() {
       setVendedorSelecionado((atual) => atual ?? lista[0]?.codigo ?? null);
     });
   }, [profile, ehGestor]);
+
+  // Quem já é dono de cada cliente (QUALQUER vendedor, não só o
+  // logado) — avisa na busca "já está na carteira de fulano" pra
+  // evitar duplicidade entre carteiras (achado 21/08/2026).
+  useEffect(() => {
+    if (!profile) return;
+    repository.getDonosCarteira(profile).then(setDonosCarteira);
+  }, [profile]);
+
+  const donoPorCliente = useMemo(
+    () => new Map(donosCarteira.map((d) => [d.codigoCliente, d])),
+    [donosCarteira]
+  );
 
   const carregarCarteira = useCallback(async () => {
     if (!profile) return;
@@ -101,6 +115,7 @@ export function CarteiraClientesScreen() {
     setResultados([]);
     setAdicionando(null);
     await carregarCarteira();
+    if (profile) repository.getDonosCarteira(profile).then(setDonosCarteira);
   };
 
   const remover = (item: ClienteCarteira) => {
@@ -115,6 +130,7 @@ export function CarteiraClientesScreen() {
           return;
         }
         await carregarCarteira();
+        if (profile) repository.getDonosCarteira(profile).then(setDonosCarteira);
       },
       { textoConfirmar: 'Remover', destrutivo: true }
     );
@@ -150,7 +166,9 @@ export function CarteiraClientesScreen() {
         />
         {buscando && <ActivityIndicator style={{ marginTop: 10 }} />}
         {!buscando &&
-          resultados.map((cliente) => (
+          resultados.map((cliente) => {
+            const dono = donoPorCliente.get(cliente.codigo);
+            return (
             <View key={cliente.codigo} style={styles.resultadoRow}>
               <View style={styles.resultadoInfo}>
                 <Text style={styles.resultadoNome} numberOfLines={1}>
@@ -160,6 +178,13 @@ export function CarteiraClientesScreen() {
                   Cód. {cliente.codigo}
                   {cliente.numeroCpfCnpj ? ` · ${cliente.numeroCpfCnpj}` : ''}
                 </Text>
+                {dono && (
+                  <Text style={styles.resultadoAviso}>
+                    {dono.codigoVendedor === codigoVendedorAlvo
+                      ? 'Já está na sua carteira'
+                      : `Já está na carteira de ${dono.nomeVendedor}`}
+                  </Text>
+                )}
               </View>
               <Pressable
                 style={styles.botaoAdicionar}
@@ -173,7 +198,8 @@ export function CarteiraClientesScreen() {
                 )}
               </Pressable>
             </View>
-          ))}
+            );
+          })}
         {!buscando && termoBusca.trim().length >= 2 && resultados.length === 0 && (
           <Text style={styles.hint}>Nenhum cliente encontrado.</Text>
         )}
@@ -250,6 +276,7 @@ const styles = StyleSheet.create({
   resultadoInfo: { flex: 1 },
   resultadoNome: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
   resultadoCpf: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  resultadoAviso: { fontSize: 11, color: colors.red, marginTop: 2, fontWeight: '600' },
   botaoAdicionar: {
     backgroundColor: colors.navy,
     borderRadius: 8,

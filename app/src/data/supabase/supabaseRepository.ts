@@ -19,6 +19,7 @@ import {
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
   DesempenhoVendedorSemanal,
+  DonoCarteira,
   FaixaComissao,
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
@@ -506,6 +507,16 @@ class SupabaseRepository implements DataRepository {
       valor6Meses: Number(r.valor_6_meses),
       compradoEsteMes: r.comprado_este_mes,
       valorMesAtual: Number(r.valor_mes_atual ?? 0),
+    }));
+  }
+
+  async getDonosCarteira(_profile: Profile): Promise<DonoCarteira[]> {
+    const { data, error } = await supabase.from('vw_cliente_dono_carteira').select('*');
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      codigoCliente: r.codigo_cliente,
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
     }));
   }
 
