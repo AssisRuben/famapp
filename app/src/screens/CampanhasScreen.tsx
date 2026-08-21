@@ -19,7 +19,14 @@ import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroGrupo';
 import { MODELO_CAMPANHA_LABEL, nomeSugeridoPorModelo, ORDEM_MODELOS_CAMPANHA } from '../lib/modeloCampanha';
-import { Campanha, CampanhaProduto, ModeloCampanha, ModoSugestaoCampanha, ProdutoElegibilidade } from '../types/domain';
+import {
+  Campanha,
+  CampanhaProduto,
+  ModeloCampanha,
+  ModoSugestaoCampanha,
+  ProdutoCatalogo,
+  ProdutoElegibilidade,
+} from '../types/domain';
 
 type Modo = 'lista' | 'nova';
 const TODOS_OS_GRUPOS = '__todos__';
@@ -65,6 +72,8 @@ export function CampanhasScreen() {
   const [modoSugestao, setModoSugestao] = useState<ModoSugestaoCampanha>('popularidade');
   const [macroGrupoFiltro, setMacroGrupoFiltro] = useState<MacroGrupo | typeof TODOS_OS_GRUPOS>(TODOS_OS_GRUPOS);
   const [modeloSelecionado, setModeloSelecionado] = useState<SelecaoModelo>(PERSONALIZADO);
+  const [catalogo, setCatalogo] = useState<ProdutoCatalogo[]>([]);
+  const [buscaProduto, setBuscaProduto] = useState('');
 
   const escolherModelo = (selecao: SelecaoModelo) => {
     setModeloSelecionado(selecao);
@@ -108,6 +117,43 @@ export function CampanhasScreen() {
     setItens((atual) => atual.filter((i) => i.codigoProduto !== codigoProduto));
   };
 
+  // Complementa a sugestão automática (e a edição de campanha já
+  // salva): busca no catálogo por nome OU código e adiciona na hora,
+  // usando o desconto alvo já configurado pra sugerir o preço
+  // promocional — editável depois, igual aos itens vindos da sugestão.
+  const resultadosBuscaProduto =
+    buscaProduto.trim().length < 2
+      ? []
+      : catalogo
+          .filter((p) => {
+            const termo = buscaProduto.trim().toLowerCase();
+            return p.nome.toLowerCase().includes(termo) || String(p.codigo).includes(termo);
+          })
+          .filter((p) => !itens.some((i) => i.codigoProduto === p.codigo))
+          .slice(0, 8);
+
+  const adicionarProdutoManual = (produto: ProdutoCatalogo) => {
+    const descontoPct = Number(descontoAlvo.replace(',', '.')) || 0;
+    const precoPromocional = Math.max(0, produto.precoVenda * (1 - descontoPct / 100));
+    setItens((atual) => [
+      ...atual,
+      {
+        codigoProduto: produto.codigo,
+        codigoBarras: produto.codigoBarras,
+        nomeProduto: produto.nome,
+        precoRegular: produto.precoVenda,
+        precoPromocional: Number(precoPromocional.toFixed(2)),
+        percentualDesconto: descontoPct,
+        quantidadeCartazes: 1,
+        dataInicio,
+        dataFim,
+        tipoPromocao: 'unitario',
+        kit: null,
+      },
+    ]);
+    setBuscaProduto('');
+  };
+
   const ajustarPreco = (codigoProduto: number, texto: string) => {
     setItens((atual) =>
       atual.map((i) => {
@@ -127,20 +173,37 @@ export function CampanhasScreen() {
     setModoSugestao('popularidade');
     setMacroGrupoFiltro(TODOS_OS_GRUPOS);
     setModeloSelecionado(PERSONALIZADO);
+    setBuscaProduto('');
   };
 
-  const abrirNova = () => {
+  const abrirNova = async () => {
     resetFormulario();
     setModo('nova');
+    if (catalogo.length === 0 && profile) {
+      setCatalogo(await repository.getCatalogoProdutos(profile));
+    }
   };
 
-  const abrirEdicao = (campanha: Campanha) => {
+  const abrirEdicao = async (campanha: Campanha) => {
     setEditandoId(campanha.id);
     setNome(campanha.nome);
     setDataInicio(campanha.dataInicio);
     setDataFim(campanha.dataFim);
+    // Otimista com o que já tinha da lista — a lista agora é "leve"
+    // (não resolve nome/código de barras, só usados na edição), então
+    // busca a campanha completa em seguida e substitui.
     setItens(campanha.produtos);
     setModo('nova');
+    if (catalogo.length === 0 && profile) {
+      setCatalogo(await repository.getCatalogoProdutos(profile));
+    }
+    if (!profile) return;
+    try {
+      const completa = await repository.getCampanha(profile, campanha.id);
+      if (completa) setItens(completa.produtos);
+    } catch {
+      // mantém o que já tinha (nomes podem vir vazios da lista leve)
+    }
   };
 
   const salvar = async () => {
@@ -307,6 +370,24 @@ export function CampanhasScreen() {
           </Card>
         )}
 
+        <Card>
+          <Text style={styles.cardTitulo}>Adicionar produto manualmente</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Buscar produto pelo nome ou código"
+            value={buscaProduto}
+            onChangeText={setBuscaProduto}
+          />
+          {resultadosBuscaProduto.map((p) => (
+            <Pressable key={p.codigo} style={styles.resultadoBusca} onPress={() => adicionarProdutoManual(p)}>
+              <Text style={styles.resultadoBuscaTexto} numberOfLines={1}>
+                {p.nome} · cód. {p.codigo}
+              </Text>
+              <Ionicons name="add-circle" size={20} color={colors.navy} />
+            </Pressable>
+          ))}
+        </Card>
+
         {(itens.length > 0 || editandoId) && (
           <>
             <Text style={styles.sectionTitulo}>
@@ -469,6 +550,16 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: 4,
   },
+  resultadoBusca: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  resultadoBuscaTexto: { flex: 1, fontSize: 13, color: colors.textPrimary, marginRight: 8 },
   linhaDatas: { flexDirection: 'row', gap: 10, marginTop: 4 },
   campoData: { flex: 1 },
   botaoGerar: { backgroundColor: colors.navy, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 14 },

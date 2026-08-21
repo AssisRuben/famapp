@@ -224,6 +224,9 @@ export interface DataRepository {
   getCatalogoProdutos(profile: Profile): Promise<ProdutoCatalogo[]>;
   sugerirProdutosCampanha(profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]>;
   getCampanhas(profile: Profile): Promise<Campanha[]>;
+  // Fetch dedicado de UMA campanha (edição) — resolve nome/código de
+  // barras de verdade, diferente de getCampanhas (lista, mais leve).
+  getCampanha(profile: Profile, id: string): Promise<Campanha | null>;
   salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha>;
   excluirCampanha(id: string): Promise<void>;
 

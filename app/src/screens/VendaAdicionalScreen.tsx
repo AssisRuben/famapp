@@ -176,7 +176,10 @@ export function VendaAdicionalScreen() {
     buscaProduto.trim().length < 2
       ? []
       : catalogo
-          .filter((p) => p.nome.toLowerCase().includes(buscaProduto.trim().toLowerCase()))
+          .filter((p) => {
+            const termo = buscaProduto.trim().toLowerCase();
+            return p.nome.toLowerCase().includes(termo) || String(p.codigo).includes(termo);
+          })
           .filter((p) => !produtosSelecionados.some((s) => s.codigoProduto === p.codigo))
           .slice(0, 8);
 
@@ -330,13 +333,15 @@ export function VendaAdicionalScreen() {
           <Text style={styles.cardTitulo}>Produtos da campanha</Text>
           <TextInput
             style={styles.input}
-            placeholder="Buscar produto pelo nome"
+            placeholder="Buscar produto pelo nome ou código"
             value={buscaProduto}
             onChangeText={setBuscaProduto}
           />
           {resultadosBusca.map((p) => (
             <Pressable key={p.codigo} style={styles.resultadoBusca} onPress={() => adicionarProduto(p)}>
-              <Text style={styles.resultadoBuscaTexto} numberOfLines={1}>{p.nome}</Text>
+              <Text style={styles.resultadoBuscaTexto} numberOfLines={1}>
+                {p.nome} · cód. {p.codigo}
+              </Text>
               <Ionicons name="add-circle" size={20} color={colors.navy} />
             </Pressable>
           ))}

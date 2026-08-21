@@ -1226,17 +1226,32 @@ class SupabaseRepository implements DataRepository {
 
     const { data, error } = await query;
     if (error) throw error;
+    const linhas = data ?? [];
 
     // produto_catalogo dá nome/código de barras — campanha_produtos só
-    // guarda o código. precoRegular é derivado do desconto salvo (não
-    // do preço ATUAL do catálogo), pra uma campanha antiga continuar
-    // consistente mesmo se o preço de tabela mudar depois.
-    const catalogo = await this.buscarPaginado((inicio, fim) =>
-      this.queryProdutoCatalogo('codigo, codigo_barras, nome').order('codigo', { ascending: true }).range(inicio, fim)
-    );
-    const catalogoPorCodigo = new Map(catalogo.map((p: any) => [p.codigo, p]));
+    // guarda o código. Só resolve isso quando filtroId está definido
+    // (uma campanha específica, pra edição): a LISTA (filtroId
+    // indefinido) não usa nome/código de barras, só quantidade e soma
+    // de cartazes (ver CampanhasScreen) — buscar o catálogo inteiro
+    // (paginado, milhares de produtos numa farmácia) em toda carga da
+    // lista deixava a tela lenta à toa (achado 21/08/2026). Com
+    // filtroId, busca só os códigos daquela campanha via `.in()` — uma
+    // consulta rápida e direta, sem paginação.
+    let catalogoPorCodigo = new Map<number, any>();
+    if (filtroId !== undefined) {
+      const codigos = [
+        ...new Set(linhas.flatMap((c: any) => (c.campanha_produtos ?? []).map((cp: any) => cp.codigo_produto))),
+      ];
+      if (codigos.length > 0) {
+        const { data: produtos, error: erroProdutos } = await this.queryProdutoCatalogo(
+          'codigo, codigo_barras, nome'
+        ).in('codigo', codigos);
+        if (erroProdutos) throw erroProdutos;
+        catalogoPorCodigo = new Map((produtos ?? []).map((p: any) => [p.codigo, p]));
+      }
+    }
 
-    return (data ?? []).map((c: any) => ({
+    return linhas.map((c: any) => ({
       id: String(c.id),
       nome: c.nome,
       dataInicio: c.data_inicio,
@@ -1249,8 +1264,10 @@ class SupabaseRepository implements DataRepository {
         const precoRegular = percentualDesconto > 0 ? round2(precoPromocional / (1 - percentualDesconto / 100)) : precoPromocional;
         return {
           codigoProduto: cp.codigo_produto,
+          // Vazio quando veio da lista (filtroId indefinido) — de
+          // propósito, ver comentário acima. getCampanha resolve certo.
           codigoBarras: produto?.codigo_barras ?? '',
-          nomeProduto: produto?.nome ?? `Produto ${cp.codigo_produto}`,
+          nomeProduto: produto?.nome ?? (filtroId !== undefined ? `Produto ${cp.codigo_produto}` : ''),
           precoRegular,
           precoPromocional,
           percentualDesconto,
@@ -1276,6 +1293,14 @@ class SupabaseRepository implements DataRepository {
 
   async getCampanhas(_profile: Profile): Promise<Campanha[]> {
     return this.carregarCampanhas();
+  }
+
+  // Fetch dedicado pra UMA campanha (usado na edição) — resolve nome
+  // e código de barras de verdade, diferente da lista (ver
+  // carregarCampanhas).
+  async getCampanha(_profile: Profile, id: string): Promise<Campanha | null> {
+    const [campanha] = await this.carregarCampanhas(Number(id));
+    return campanha ?? null;
   }
 
   async salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha> {

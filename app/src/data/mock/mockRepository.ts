@@ -1173,6 +1173,11 @@ class MockRepository implements DataRepository {
     return delay([...campanhas].sort((a, b) => b.criadaEm.localeCompare(a.criadaEm)));
   }
 
+  async getCampanha(_profile: Profile, id: string): Promise<Campanha | null> {
+    const campanhas = await getCampanhasStore();
+    return delay(campanhas.find((c) => c.id === id) ?? null);
+  }
+
   async salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha> {
     const campanhas = await getCampanhasStore();
     let salva: Campanha;
