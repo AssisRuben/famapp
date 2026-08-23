@@ -204,6 +204,37 @@ where exists (
 order by v.nome;
 
 -- ============================================================
+-- METRICAS_MENSAIS (23/08/2026) — relatório mensal de acompanhamento
+-- (aba "Relatório mensal", só gestor). Formato chave/valor (não uma
+-- coluna fixa por métrica) pra métrica nova não exigir migração de
+-- schema. codigo_vendedor NULL = métrica da farmácia inteira (ex.:
+-- produtos em falta reportados, pendências dadas baixa — só a
+-- quantidade, sem quebrar por vendedor); não-nulo = métrica daquele
+-- vendedor (carteira, whatsapp, vendas, etc.). Escrito pelo workflow
+-- n8n de fechamento de mês (service_role) + pelo trigger abaixo.
+-- ============================================================
+create table metricas_mensais (
+  id bigserial primary key,
+  mes_referencia date not null,
+  codigo_vendedor integer references vendedores(codigo),
+  chave text not null,
+  valor numeric(14,2) not null default 0,
+  atualizado_em timestamptz not null default now()
+);
+
+-- unique por expressão (coalesce) — unique constraint comum trata cada
+-- NULL como distinto, o que quebraria o ON CONFLICT do upsert de
+-- fechamento pra métrica da farmácia (codigo_vendedor null).
+create unique index metricas_mensais_unique
+  on metricas_mensais (mes_referencia, chave, coalesce(codigo_vendedor, -1));
+
+create index idx_metricas_mensais_mes on metricas_mensais (mes_referencia desc);
+
+-- Trigger de contador ao vivo (incrementar_metrica_produtos_em_falta)
+-- fica declarado mais abaixo, junto da tabela produtos_em_falta —
+-- precisa dela já existir antes de criar o trigger.
+
+-- ============================================================
 -- FAIXAS_COMISSAO — régua de comissão sobre margem bruta, por
 -- percentual de meta MENSAL atingido (comissão não é calculada por
 -- semana nem por dia, só no fechamento do mês). Tabela (não CASE fixo
@@ -617,6 +648,34 @@ create table produtos_em_falta (
 );
 
 create index idx_produtos_em_falta_data on produtos_em_falta (data desc);
+
+-- Contador ao vivo de produtos em falta reportados, pro relatório
+-- mensal (ver metricas_mensais acima) — produtos_em_falta é lista de
+-- trabalho compartilhada (qualquer um apaga ao resolver), não log de
+-- auditoria, então snapshot no fechamento do mês SUBESTIMARIA a
+-- contagem real (item reportado E resolvido no mesmo mês nunca seria
+-- contado). Trigger incrementa na hora do INSERT, sobrevivendo ao
+-- DELETE. SECURITY DEFINER pra funcionar mesmo quando quem reporta é
+-- vendedor comum (sem permissão de escrita direta em metricas_mensais).
+create or replace function incrementar_metrica_produtos_em_falta()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into metricas_mensais (mes_referencia, codigo_vendedor, chave, valor)
+  values (date_trunc('month', new.data)::date, null, 'produtos_em_falta_reportados', 1)
+  on conflict (mes_referencia, chave, coalesce(codigo_vendedor, -1))
+  do update set valor = metricas_mensais.valor + 1, atualizado_em = now();
+  return new;
+end;
+$$;
+
+create trigger trg_incrementar_produtos_em_falta
+after insert on produtos_em_falta
+for each row
+execute function incrementar_metrica_produtos_em_falta();
 
 -- ============================================================
 -- COMPRAS_CLASSIFICACOES (18/08/2026) — classificação em lote de itens

@@ -1,0 +1,146 @@
+{
+  "name": "Fechamento mensal - Relatório de resultados",
+  "nodes": [
+    {
+      "id": "trigger-fechamento",
+      "name": "Todo dia 1 às 00:10",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        460
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "triggerAtDayOfMonth": 1,
+              "triggerAtHour": 0,
+              "triggerAtMinute": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fechar-metricas",
+      "name": "Calcular e gravar métricas do mês anterior",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        460
+      ],
+      "notes": "Fecha o mês que ACABOU de terminar (current_date já está no mês novo quando isso roda dia 1). Chama calcular_metricas_mes (mesma função usada pela prévia ao vivo no app — ver migracao_metricas_mensais_calculo_ao_vivo.sql), grava o resultado em metricas_mensais. produtos_em_falta_reportados fica de fora do upsert: já está gravado ao vivo pelo trigger, não precisa (nem deve) ser sobrescrito por aqui.",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into metricas_mensais (mes_referencia, codigo_vendedor, chave, valor)\nselect\n  date_trunc('month', current_date - interval '1 month')::date,\n  codigo_vendedor,\n  chave,\n  valor\nfrom calcular_metricas_mes(date_trunc('month', current_date - interval '1 month')::date)\nwhere chave <> 'produtos_em_falta_reportados'\non conflict (mes_referencia, chave, coalesce(codigo_vendedor, -1))\ndo update set valor = excluded.valor, atualizado_em = now();\n\nselect date_trunc('month', current_date - interval '1 month')::date as mes_fechado;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "buscar-resumo",
+      "name": "Buscar resumo da farmácia",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        280,
+        460
+      ],
+      "notes": "Só o resumo farmácia-inteira (soma de todos os vendedores) pra mensagem curta — usa margem_bruta_total_deduplicada (já calculada sem contar a mesma venda duas vezes quando um produto está em mais de uma categoria ao mesmo tempo, ver migracao_metricas_mensais_calculo_ao_vivo.sql), não soma as categorias na mão.",
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  to_char(date_trunc('month', current_date - interval '1 month'), 'MM/YYYY') as mes_label,\n  coalesce(sum(valor) filter (where chave = 'margem_bruta_total_deduplicada'), 0) as margem_total,\n  coalesce(max(valor) filter (where chave = 'produtos_em_falta_reportados' and codigo_vendedor is null), 0) as produtos_em_falta,\n  coalesce(max(valor) filter (where chave = 'pendencias_dadas_baixa' and codigo_vendedor is null), 0) as pendencias_baixadas,\n  coalesce(sum(valor) filter (where chave = 'cliente_alto_valor_recuperado_quantidade'), 0) as clientes_recuperados\nfrom metricas_mensais\nwhere mes_referencia = date_trunc('month', current_date - interval '1 month')::date;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "montar-mensagem-fechamento",
+      "name": "Montar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        460
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "const r = $input.first().json;\nconst brl = (v) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\nconst inteiro = (v) => Math.round(Number(v));\n\nconst mensagem = `📈 *Relatório mensal fechado — ${r.mes_label}*\n\n` +\n  `💰 Margem bruta (venda adicional + complementar + campanha + promoção + recuperação): ${brl(r.margem_total)}\n` +\n  `📦 Produtos em falta reportados: ${inteiro(r.produtos_em_falta)}\n` +\n  `🗒️ Pendências dadas baixa: ${inteiro(r.pendencias_baixadas)}\n` +\n  `👥 Clientes de alto valor recuperados: ${inteiro(r.clientes_recuperados)}\n\n` +\n  `Detalhe completo por vendedor: aba Relatório mensal no app.`;\n\nreturn [{ json: { mensagem } }];"
+      }
+    },
+    {
+      "id": "enviar-evolution-fechamento",
+      "name": "➡️ Enviar via Evolution API (troque por aqui)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        840,
+        460
+      ],
+      "notes": "Placeholder — troque este nó pelo nó de envio de mensagem da sua instância Evolution API (mandar pro gestor). O texto pronto pra enviar chega em $json.mensagem.",
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Todo dia 1 às 00:10": {
+      "main": [
+        [
+          {
+            "node": "Calcular e gravar métricas do mês anterior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular e gravar métricas do mês anterior": {
+      "main": [
+        [
+          {
+            "node": "Buscar resumo da farmácia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar resumo da farmácia": {
+      "main": [
+        [
+          {
+            "node": "Montar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar mensagem": {
+      "main": [
+        [
+          {
+            "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

@@ -863,6 +863,24 @@ export interface ItemRelatorioFalta {
 }
 
 // ============================================================
+// RELATÓRIO MENSAL (23/08/2026) — espelha metricas_mensais: formato
+// chave/valor (não uma interface por métrica), fechado mês a mês pelo
+// workflow n8n de fechamento + o contador ao vivo de produtos em
+// falta. codigoVendedor null = métrica da farmácia inteira (ex.:
+// produtos em falta reportados, pendências dadas baixa); não-nulo =
+// daquele vendedor específico. A tela (RelatorioMensalScreen) decide
+// como agrupar/rotular cada chave — o repositório só entrega a lista
+// crua de um mês.
+// ============================================================
+export interface MetricaMensal {
+  // Sempre o dia 1 do mês, ex. "2026-08-01".
+  mesReferencia: string;
+  codigoVendedor: number | null;
+  chave: string;
+  valor: number;
+}
+
+// ============================================================
 // PENDÊNCIAS (06/08/2026) — vendedor separa/reserva produto(s) pra um
 // cliente buscar depois: foto de comprovante, produtos (texto livre),
 // nome do cliente, data automática (hoje). Lista compartilhada — todo

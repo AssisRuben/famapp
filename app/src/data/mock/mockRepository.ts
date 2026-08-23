@@ -28,6 +28,7 @@ import {
   ItemVendaComplementar,
   MetaSemana,
   MetaVendedor,
+  MetricaMensal,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
@@ -1293,6 +1294,50 @@ class MockRepository implements DataRepository {
     const catalogoComEstoque = catalogoProdutosSeed.filter((p) => p.estoqueAtual > 0);
     const relatorio = calcularRelatorioPrecificacao(catalogoComEstoque, vendaPorProduto, codigosComDescontoAtivo);
     return delay(relatorio);
+  }
+
+  async getMetricasMensais(_profile: Profile, mesReferencia: string, _ateData?: string): Promise<MetricaMensal[]> {
+    // Mock não tem fechamento mensal de verdade (isso é feito pelo
+    // workflow n8n na conta real, direto em SQL sobre as tabelas
+    // cruas) — aqui só aproxima o mês ATUAL a partir dos stores já
+    // existentes, o suficiente pra testar a tela. Qualquer outro mês
+    // volta vazio. Envios de WhatsApp/ligação ficam de fora da
+    // aproximação: ContatoCliente (tipo devolvido por
+    // getContatosRecentes) não carrega tipoContato/codigoVendedor —
+    // só a tabela real tem essas colunas, e o mock guarda no mesmo
+    // formato enxuto.
+    const mesAtual = new Date().toISOString().slice(0, 7);
+    if (!mesReferencia.startsWith(mesAtual)) return delay([]);
+
+    const [produtosEmFalta, pendencias, carteira] = await Promise.all([
+      getProdutosEmFaltaStore(),
+      getPendenciasStore(),
+      getCarteiraClientesStore(),
+    ]);
+
+    const metricas: MetricaMensal[] = [
+      {
+        mesReferencia,
+        codigoVendedor: null,
+        chave: 'produtos_em_falta_reportados',
+        valor: produtosEmFalta.filter((p) => p.data.startsWith(mesAtual)).length,
+      },
+      {
+        mesReferencia,
+        codigoVendedor: null,
+        chave: 'pendencias_dadas_baixa',
+        valor: pendencias.filter((p) => p.baixadaEm?.startsWith(mesAtual)).length,
+      },
+    ];
+
+    for (const v of vendedoresSeed) {
+      const totalCarteira = carteira.filter((c) => c.codigoVendedor === v.codigo).length;
+      if (totalCarteira > 0) {
+        metricas.push({ mesReferencia, codigoVendedor: v.codigo, chave: 'carteira_clientes_total', valor: totalCarteira });
+      }
+    }
+
+    return delay(metricas);
   }
 
   async excluirCampanha(id: string): Promise<void> {

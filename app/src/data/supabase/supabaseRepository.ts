@@ -30,6 +30,7 @@ import {
   ItemVendaComplementar,
   MetaSemana,
   MetaVendedor,
+  MetricaMensal,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
@@ -2045,6 +2046,42 @@ class SupabaseRepository implements DataRepository {
     );
 
     return calcularRelatorioPrecificacao(catalogo, vendaPorProduto, codigosComDescontoAtivo);
+  }
+
+  async getMetricasMensais(_profile: Profile, mesReferencia: string, ateData?: string): Promise<MetricaMensal[]> {
+    const hoje = new Date();
+    const mesAtualIso = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
+
+    // Mês em andamento (ou pedido explícito de recorte via ateData —
+    // usado pra comparar "mesmo período do mês anterior", ver
+    // RelatorioMensalScreen): não tem linha congelada em
+    // metricas_mensais que sirva, calcula na hora via RPC, mesma
+    // função que o fechamento usa (calcular_metricas_mes).
+    if (mesReferencia === mesAtualIso || ateData) {
+      const { data, error } = await supabase.rpc('calcular_metricas_mes', {
+        mes_ref: mesReferencia,
+        data_fim: ateData ?? null,
+      });
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({
+        mesReferencia,
+        codigoVendedor: r.codigo_vendedor,
+        chave: r.chave,
+        valor: Number(r.valor),
+      }));
+    }
+
+    const { data, error } = await supabase
+      .from('metricas_mensais')
+      .select('mes_referencia, codigo_vendedor, chave, valor')
+      .eq('mes_referencia', mesReferencia);
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      mesReferencia: r.mes_referencia,
+      codigoVendedor: r.codigo_vendedor,
+      chave: r.chave,
+      valor: Number(r.valor),
+    }));
   }
 }
 

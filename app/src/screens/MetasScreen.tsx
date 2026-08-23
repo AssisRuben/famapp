@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,7 +17,7 @@ import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { colors } from '../theme/colors';
 import { formatBRL } from '../lib/format';
-import { badgeFaixaComissao, mesAnoLabel, PESOS_SEMANA, rotuloSemana } from '../lib/metas';
+import { badgeFaixaComissao, mesAnoLabel, PESOS_SEMANA } from '../lib/metas';
 import { alertar } from '../lib/alert';
 import { ComissaoMensal, MetaVendedor, VendedorAtivo } from '../types/domain';
 
@@ -31,19 +31,14 @@ export function MetasScreen() {
 
   const [{ ano, mes }, setAnoMes] = useState(hojeAnoMes());
   const [vendedores, setVendedores] = useState<VendedorAtivo[]>([]);
-  const [vendedorSelecionado, setVendedorSelecionado] = useState<number | null>(null);
   const [metas, setMetas] = useState<MetaVendedor[]>([]);
   const [loadingMetas, setLoadingMetas] = useState(true);
-  const [salvando, setSalvando] = useState(false);
 
   const [comissoes, setComissoes] = useState<ComissaoMensal[]>([]);
 
-  const [valorMensal, setValorMensal] = useState('');
-  const [valoresSemana, setValoresSemana] = useState(['', '', '', '']);
-
   // Lançamento em massa da meta mensal — seção própria no fim da tela,
-  // com seletor de mês independente do formulário de cima (não afeta
-  // nem é afetado pelo mês do detalhamento semanal).
+  // com seletor de mês independente do "Panorama da equipe" lá em
+  // cima (não afeta nem é afetado pelo mês do panorama).
   const [{ ano: anoLote, mes: mesLote }, setAnoMesLote] = useState(hojeAnoMes());
   const [metasLote, setMetasLote] = useState<MetaVendedor[]>([]);
   const [loadingLote, setLoadingLote] = useState(true);
@@ -78,19 +73,8 @@ export function MetasScreen() {
 
   useEffect(() => {
     if (!profile) return;
-    repository.getVendedoresAtivos(profile).then((lista) => {
-      setVendedores(lista);
-      setVendedorSelecionado((atual) => atual ?? lista[0]?.codigo ?? null);
-    });
+    repository.getVendedoresAtivos(profile).then(setVendedores);
   }, [profile]);
-
-  useEffect(() => {
-    const meta = metas.find((m) => m.codigoVendedor === vendedorSelecionado);
-    if (meta) {
-      setValorMensal(String(meta.valorMetaMensal));
-      setValoresSemana(meta.semanas.map((s) => String(s.valorMeta)));
-    }
-  }, [metas, vendedorSelecionado]);
 
   // Preenche o lote com o valor já lançado (se tiver) assim que os
   // vendedores ou as metas do mês selecionado carregam/mudam — quem
@@ -121,32 +105,6 @@ export function MetasScreen() {
     });
   };
 
-  const salvar = async () => {
-    if (vendedorSelecionado == null) return;
-    const mensal = Number(valorMensal.replace(',', '.'));
-    const semanas = valoresSemana.map((v) => Number(v.replace(',', '.'))) as [number, number, number, number];
-
-    if (Number.isNaN(mensal) || semanas.some((s) => Number.isNaN(s))) {
-      alertar('Valores inválidos', 'Preencha todos os campos com números válidos.');
-      return;
-    }
-
-    setSalvando(true);
-    try {
-      await repository.salvarMeta({
-        codigoVendedor: vendedorSelecionado,
-        ano,
-        mes,
-        valorMetaMensal: mensal,
-        valoresMetaSemanal: semanas,
-      });
-      await carregarMetas();
-      alertar('Meta salva', 'A meta foi atualizada com sucesso.');
-    } finally {
-      setSalvando(false);
-    }
-  };
-
   const mudarMesLote = (delta: number) => {
     setAnoMesLote(({ ano, mes }) => {
       let novoMes = mes + delta;
@@ -162,12 +120,12 @@ export function MetasScreen() {
     });
   };
 
-  // Lançamento rápido: só a meta mensal por vendedor, sem detalhar
-  // semana a semana — sugere as 4 semanas com os pesos fixos de
-  // PESOS_SEMANA (25,5% / 22,6% / 22,6% / 29,2%, dados pelo usuário),
-  // não mais 4 partes iguais nem proporcional aos dias corridos de cada
-  // bucket. O formulário de cima continua disponível pra quem precisar
-  // ajustar cada semana à mão. Vendedor com campo em branco é pulado
+  // Único lançamento de meta mensal do app (21/08/2026 — existia um
+  // segundo formulário aqui, individual por vendedor com ajuste fino
+  // semana a semana; removido a pedido do usuário por redundância).
+  // Meta mensal de todos os vendedores de uma vez, distribuída nas 4
+  // semanas pelos pesos fixos de PESOS_SEMANA (25,5% / 22,6% / 22,6% /
+  // 29,2%, dados pelo usuário). Vendedor com campo em branco é pulado
   // (não zera meta de quem não for atualizado nesse lançamento).
   const salvarLote = async () => {
     const entradas = Object.entries(valoresLote).filter(([, texto]) => texto.trim() !== '');
@@ -207,8 +165,6 @@ export function MetasScreen() {
     }
   };
 
-  const rotulos = useMemo(() => ([1, 2, 3, 4] as const).map((s) => rotuloSemana(s, ano, mes)), [ano, mes]);
-
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
@@ -223,55 +179,6 @@ export function MetasScreen() {
           <Ionicons name="chevron-forward" size={20} color={colors.navy} />
         </Pressable>
       </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-        {vendedores.map((v) => (
-          <Pressable
-            key={v.codigo}
-            style={[styles.chip, vendedorSelecionado === v.codigo && styles.chipAtivo]}
-            onPress={() => setVendedorSelecionado(v.codigo)}
-          >
-            <Text style={[styles.chipTexto, vendedorSelecionado === v.codigo && styles.chipTextoAtivo]}>
-              {v.nome}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      <Card>
-        <Text style={styles.cardTitulo}>Meta mensal (margem bruta)</Text>
-        <TextInput
-          style={styles.input}
-          keyboardType="numeric"
-          value={valorMensal}
-          onChangeText={setValorMensal}
-          placeholder="Valor em R$"
-        />
-
-        <Text style={[styles.cardTitulo, styles.cardTituloEspacado]}>Metas semanais (margem bruta)</Text>
-        {rotulos.map((rotulo, index) => (
-          <View key={rotulo} style={styles.semanaInputRow}>
-            <Text style={styles.semanaRotulo}>{rotulo}</Text>
-            <TextInput
-              style={[styles.input, styles.inputSemana]}
-              keyboardType="numeric"
-              value={valoresSemana[index]}
-              onChangeText={(texto) =>
-                setValoresSemana((atual) => atual.map((v, i) => (i === index ? texto : v)))
-              }
-              placeholder="R$"
-            />
-          </View>
-        ))}
-
-        <Pressable style={styles.salvarButton} onPress={salvar} disabled={salvando}>
-          {salvando ? (
-            <ActivityIndicator color={colors.white} size="small" />
-          ) : (
-            <Text style={styles.salvarTexto}>Salvar meta</Text>
-          )}
-        </Pressable>
-      </Card>
 
       <Text style={styles.sectionTitulo}>Panorama da equipe — {mesAnoLabel(ano, mes)}</Text>
       {loadingMetas ? (
@@ -362,20 +269,6 @@ const styles = StyleSheet.create({
   },
   mesBotao: { padding: 6 },
   mesLabel: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, minWidth: 150, textAlign: 'center' },
-  chipRow: { gap: 8, paddingBottom: 12 },
-  chip: {
-    backgroundColor: colors.white,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  chipAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
-  chipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
-  chipTextoAtivo: { color: colors.white },
-  cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
-  cardTituloEspacado: { marginTop: 14 },
   input: {
     backgroundColor: colors.background,
     borderRadius: 8,
@@ -386,9 +279,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textPrimary,
   },
-  semanaInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 10 },
-  semanaRotulo: { fontSize: 12, color: colors.textSecondary, width: 56 },
-  inputSemana: { flex: 1 },
   salvarButton: {
     backgroundColor: colors.navy,
     borderRadius: 10,

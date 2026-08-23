@@ -23,6 +23,7 @@ import {
   ItemRelatorioFalta,
   ItemVendaComplementar,
   MetaVendedor,
+  MetricaMensal,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
@@ -319,4 +320,13 @@ export interface DataRepository {
   // Precificação — gestor-only na UI. Diagnóstico (quem merece atenção
   // e por quê), diferente de Campanhas (decide quanto descontar).
   getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]>;
+
+  // Relatório mensal (23/08/2026) — gestor-only. mesReferencia sempre
+  // dia 1 do mês (ex.: "2026-08-01"). Devolve a lista crua daquele mês
+  // (farmácia + cada vendedor) — a tela decide como agrupar.
+  // ateData (opcional, "YYYY-MM-DD"): recorta o período até esse dia
+  // em vez do mês inteiro — usado pra comparar o mês em andamento com
+  // o "mesmo período" do mês anterior (dia 1 até hoje dos dois lados),
+  // em vez de mês parcial vs mês fechado inteiro (comparação injusta).
+  getMetricasMensais(profile: Profile, mesReferencia: string, ateData?: string): Promise<MetricaMensal[]>;
 }

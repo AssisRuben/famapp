@@ -904,3 +904,16 @@ alter view vw_vendedores_ativos set (security_invoker = true);
 -- (checando profiles/auth.uid()) em vez de confiar na RLS automática
 -- das tabelas base; ranking e clientes_valor_geral não precisam nem
 -- disso, rodam liberadas.
+
+-- metricas_mensais (23/08/2026) — relatório mensal, só gestor lê (ver
+-- comentário completo em schema.sql). Escrita só via service_role
+-- (workflow n8n de fechamento de mês) + trigger SECURITY DEFINER de
+-- produtos_em_falta — sem policy de insert/update/delete pra
+-- authenticated de propósito.
+alter table metricas_mensais enable row level security;
+
+create policy "metricas_mensais: gestor le"
+on metricas_mensais for select
+using (exists (
+  select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'
+));

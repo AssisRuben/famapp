@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme/colors';
 
 const LARGURA_PAINEL = 260;
@@ -37,15 +37,21 @@ export function SideDrawer({ visible, onClose, items }: SideDrawerProps) {
       <Pressable style={styles.backdrop} onPress={onClose} />
       <Animated.View style={[styles.painel, { transform: [{ translateX }] }]}>
         <Text style={styles.titulo}>Mais opções</Text>
-        {items.map((item, index) => (
-          <React.Fragment key={item.label}>
-            {item.perigo && index > 0 && <View style={styles.divisor} />}
-            <Pressable style={styles.item} onPress={item.onPress}>
-              <Text style={styles.itemEmoji}>{item.emoji}</Text>
-              <Text style={[styles.itemLabel, item.perigo && styles.itemLabelPerigo]}>{item.label}</Text>
-            </Pressable>
-          </React.Fragment>
-        ))}
+        <ScrollView
+          style={styles.itemsScroll}
+          contentContainerStyle={styles.itemsConteudo}
+          showsVerticalScrollIndicator={false}
+        >
+          {items.map((item, index) => (
+            <React.Fragment key={item.label}>
+              {item.perigo && index > 0 && <View style={styles.divisor} />}
+              <Pressable style={styles.item} onPress={item.onPress}>
+                <Text style={styles.itemEmoji}>{item.emoji}</Text>
+                <Text style={[styles.itemLabel, item.perigo && styles.itemLabelPerigo]}>{item.label}</Text>
+              </Pressable>
+            </React.Fragment>
+          ))}
+        </ScrollView>
       </Animated.View>
     </Modal>
   );
@@ -64,7 +70,6 @@ const styles = StyleSheet.create({
     width: LARGURA_PAINEL,
     backgroundColor: colors.white,
     paddingTop: 56,
-    paddingHorizontal: 12,
     shadowColor: '#000',
     shadowOpacity: 0.2,
     shadowRadius: 10,
@@ -77,8 +82,10 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textTransform: 'uppercase',
     marginBottom: 8,
-    paddingHorizontal: 8,
+    paddingHorizontal: 20,
   },
+  itemsScroll: { flex: 1, paddingHorizontal: 12 },
+  itemsConteudo: { paddingBottom: 24 },
   item: {
     flexDirection: 'row',
     alignItems: 'center',

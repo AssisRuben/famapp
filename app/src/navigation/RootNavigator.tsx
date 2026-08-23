@@ -24,6 +24,7 @@ import { ProdutoEmFaltaScreen } from '../screens/ProdutoEmFaltaScreen';
 import { PrecificacaoScreen } from '../screens/PrecificacaoScreen';
 import { PendenciasScreen } from '../screens/PendenciasScreen';
 import { CarteiraClientesScreen } from '../screens/CarteiraClientesScreen';
+import { RelatorioMensalScreen } from '../screens/RelatorioMensalScreen';
 import { SideDrawer } from '../components/SideDrawer';
 import { colors } from '../theme/colors';
 
@@ -100,6 +101,7 @@ function AppTabs() {
     ...(ehGestor
       ? [
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
+          { label: 'Relatório mensal', emoji: '📈', onPress: () => irPara('RelatorioMensal') },
           { label: 'Venda adicional', emoji: '🎁', onPress: () => irPara('VendaAdicional') },
           { label: 'Campanhas', emoji: '📢', onPress: () => irPara('Campanhas') },
           { label: 'Cartazetes', emoji: '🖨️', onPress: () => irPara('Cartazetes') },
@@ -266,6 +268,15 @@ function AppTabs() {
           options={{
             title: 'Compras',
             tabBarIcon: ({ focused }) => <TabIcon emoji="🛒" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="RelatorioMensal"
+          component={RelatorioMensalScreen}
+          options={{
+            title: 'Relatório mensal',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="📈" focused={focused} />,
             ...abaOculta(true),
           }}
         />
