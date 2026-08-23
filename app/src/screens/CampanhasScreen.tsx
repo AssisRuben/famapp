@@ -66,6 +66,13 @@ export function CampanhasScreen() {
   const [descontoAlvo, setDescontoAlvo] = useState('15');
   const [quantidadeMaxima, setQuantidadeMaxima] = useState('10');
   const [gerando, setGerando] = useState(false);
+  // Diferencia "ainda não gerou nada" (não mostra seção) de "gerou e
+  // não achou nenhum produto elegível" (mostra seção com aviso) — sem
+  // isso, um critério restritivo demais (margem mínima alta, modelo
+  // temático sem produto no grupo) fazia o botão "Gerar sugestão"
+  // parecer não fazer nada: setItens([]) some a seção inteira sem
+  // nenhum feedback (achado 23/08/2026).
+  const [gerada, setGerada] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [itens, setItens] = useState<CampanhaProduto[]>([]);
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -106,6 +113,7 @@ export function CampanhasScreen() {
     try {
       const sugestoes = await repository.sugerirProdutosCampanha(profile, params);
       setItens(sugestoes.map((s) => mapearSugestaoParaItem(s, dataInicio, dataFim)));
+      setGerada(true);
     } catch (erro) {
       alertar('Erro ao gerar sugestão', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
@@ -174,6 +182,7 @@ export function CampanhasScreen() {
     setMacroGrupoFiltro(TODOS_OS_GRUPOS);
     setModeloSelecionado(PERSONALIZADO);
     setBuscaProduto('');
+    setGerada(false);
   };
 
   const abrirNova = async () => {
@@ -388,11 +397,19 @@ export function CampanhasScreen() {
           ))}
         </Card>
 
-        {(itens.length > 0 || editandoId) && (
+        {(itens.length > 0 || editandoId || gerada) && (
           <>
             <Text style={styles.sectionTitulo}>
               {editandoId ? `Produtos da campanha (${itens.length})` : `Produtos sugeridos (${itens.length})`}
             </Text>
+            {itens.length === 0 && (
+              <Card>
+                <Text style={styles.empty}>
+                  Nenhum produto elegível com esses critérios — tente reduzir a margem mínima, aumentar o desconto
+                  alvo ou trocar o grupo/modelo.
+                </Text>
+              </Card>
+            )}
             {itens.map((item) => (
               <Card key={item.codigoProduto}>
                 <View style={styles.itemHeader}>

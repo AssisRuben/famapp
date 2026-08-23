@@ -32,7 +32,7 @@ export const JANELA_DIAS_POR_MOTIVO: Record<Exclude<MotivoContato, 'antibiotico'
 export function foiContatadoRecentemente(
   contatos: ContatoCliente[],
   codigoCliente: number,
-  motivo: Exclude<MotivoContato, 'antibiotico'>,
+  motivo: Exclude<MotivoContato, 'antibiotico' | 'carteira'>,
   codigoProduto?: number | null
 ): boolean {
   const limite = Date.now() - JANELA_DIAS_POR_MOTIVO[motivo] * 86400000;

@@ -23,8 +23,9 @@ import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import {
   agruparResultadoComplementarPorDia,
+  agruparVendasPorDiaDoVendedor,
   calcularRankingComplementar,
-  produtosMarcadosPorVendedor,
+  medalhaPosicaoComplementar,
   totalComplementarPorVendedor,
 } from '../lib/vendaComplementar';
 import {
@@ -510,13 +511,14 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
       {loading ? (
         <ActivityIndicator style={{ marginTop: 8 }} />
       ) : ranking.length === 0 ? (
-        <Text style={[styles.empty, styles.espacado]}>Ninguém bateu a meta ainda nesse período.</Text>
+        <Text style={[styles.empty, styles.espacado]}>Ninguém marcou venda complementar ainda nesse período.</Text>
       ) : (
         <View style={styles.espacado}>
           {ranking.map((item) => (
             <View key={item.codigoVendedor} style={styles.andamentoLinha}>
               <Text style={styles.andamentoNome} numberOfLines={1}>
-                {item.posicao}º {item.nomeVendedor}
+                {item.premio != null ? medalhaPosicaoComplementar(item.posicao) : `${item.posicao}º`}{' '}
+                {item.nomeVendedor}
               </Text>
               <Text style={styles.andamentoValor}>
                 {formatBRL(item.valorTotal)} · {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'}
@@ -758,6 +760,10 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
   const [aberto, setAberto] = useState(false);
   const [vendas, setVendas] = useState<VendaComplementarMarcada[]>([]);
   const [carregando, setCarregando] = useState(false);
+  // Qual dia (de qual vendedor) está expandido mostrando os produtos —
+  // chave `${codigoVendedor}:${data}`, um painel só compartilhado entre
+  // todos os vendedores dessa campanha.
+  const [diaAberto, setDiaAberto] = useState<string | null>(null);
 
   const alternar = async () => {
     if (aberto) {
@@ -787,20 +793,49 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
           ) : vendas.length === 0 ? (
             <Text style={styles.empty}>Nenhuma venda complementar marcada nesse período ainda.</Text>
           ) : (
-            calcularRankingComplementar(vendas, campanha).map((item) => (
-              <View key={item.codigoVendedor} style={styles.andamentoBloco}>
-                <View style={styles.andamentoLinha}>
-                  <Text style={styles.andamentoNome} numberOfLines={1}>
-                    {item.posicao}º {item.nomeVendedor}
-                  </Text>
-                  <Text style={styles.andamentoValor}>
-                    {formatBRL(item.valorTotal)} · {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'}
-                    {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
-                  </Text>
+            calcularRankingComplementar(vendas, campanha).map((item) => {
+              const diasDoVendedor = agruparVendasPorDiaDoVendedor(vendas, item.codigoVendedor);
+              return (
+                <View key={item.codigoVendedor} style={styles.andamentoBloco}>
+                  <View style={styles.andamentoLinha}>
+                    <Text style={styles.andamentoNome} numberOfLines={1}>
+                      {item.premio != null ? medalhaPosicaoComplementar(item.posicao) : `${item.posicao}º`}{' '}
+                      {item.nomeVendedor}
+                    </Text>
+                    <Text style={styles.andamentoValor}>
+                      {formatBRL(item.valorTotal)} · {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'}
+                      {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
+                    </Text>
+                  </View>
+                  {diasDoVendedor.map((dia) => {
+                    const chave = `${item.codigoVendedor}:${dia.data}`;
+                    const diaEstaAberto = diaAberto === chave;
+                    return (
+                      <View key={dia.data} style={styles.diaVendedorBloco}>
+                        <Pressable
+                          style={styles.diaVendedorLinha}
+                          onPress={() => setDiaAberto((atual) => (atual === chave ? null : chave))}
+                        >
+                          <View style={styles.diaVendedorInfo}>
+                            <Text style={styles.resultadoDiaData}>{formatDateBR(dia.data)}</Text>
+                            <Text style={styles.andamentoValor}>
+                              {dia.quantidadeItens} {dia.quantidadeItens === 1 ? 'venda' : 'vendas'} ·{' '}
+                              {formatBRL(dia.valorVenda)}
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name={diaEstaAberto ? 'chevron-up' : 'chevron-down'}
+                            size={14}
+                            color={colors.textMuted}
+                          />
+                        </Pressable>
+                        {diaEstaAberto && <Text style={styles.andamentoProdutos}>{dia.produtos}</Text>}
+                      </View>
+                    );
+                  })}
                 </View>
-                <Text style={styles.andamentoProdutos}>{produtosMarcadosPorVendedor(vendas, item.codigoVendedor)}</Text>
-              </View>
-            ))
+              );
+            })
           )}
         </View>
       )}
@@ -1268,7 +1303,17 @@ const styles = StyleSheet.create({
   andamentoLinha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   andamentoNome: { flex: 1, fontSize: 12, color: colors.textPrimary },
   andamentoValor: { fontSize: 12, color: colors.textSecondary },
-  andamentoProdutos: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  andamentoProdutos: { fontSize: 11, color: colors.textMuted, marginTop: 2, marginLeft: 10 },
+  diaVendedorBloco: { marginTop: 2 },
+  diaVendedorLinha: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 3,
+    paddingLeft: 10,
+  },
+  diaVendedorInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   resultadoDiaBloco: { marginTop: 8 },
   resultadoDiaToggle: {
     flexDirection: 'row',

@@ -10,9 +10,15 @@ export interface RankingComplementarItem {
 }
 
 // Mesmo padrão de calcularRankingVendaAdicional: soma por vendedor,
-// aplica os pisos (valorMinimo em R$ e quantidadeMinima em nº de itens
-// — independentes, quem tem os dois configurados precisa bater ambos),
-// ordena desc por valor e casa a posição com premiacaoRanking.
+// ordena desc por valor e numera a posição de TODO MUNDO que marcou
+// alguma coisa (transparência do ranqueamento completo — pedido
+// explícito 21/08/2026, mesma decisão tomada pra Venda Adicional:
+// antes, quem não batia os pisos de valor/quantidade sumia inteiro do
+// ranking, e campanha encerrada sem ninguém bater o piso aparecia
+// vazia mesmo com venda marcada, parecendo quebrada). Os pisos
+// (valorMinimo em R$ e quantidadeMinima em nº de itens — independentes,
+// quem tem os dois configurados precisa bater ambos) continuam
+// decidindo só quem GANHA o prêmio.
 export function calcularRankingComplementar(
   vendas: VendaComplementarMarcada[],
   campanha: CampanhaComplementar
@@ -31,12 +37,22 @@ export function calcularRankingComplementar(
 
   return Array.from(porVendedor.entries())
     .map(([codigoVendedor, item]) => ({ codigoVendedor, ...item }))
-    .filter((item) => item.valorTotal >= valorMinimo && item.quantidadeTotal >= quantidadeMinima)
     .sort((a, b) => b.valorTotal - a.valorTotal)
     .map((item, index) => {
       const posicao = index + 1;
-      return { ...item, posicao, premio: premios.find((p) => p.posicao === posicao)?.valor ?? null };
+      const concorre = item.valorTotal >= valorMinimo && item.quantidadeTotal >= quantidadeMinima;
+      return { ...item, posicao, premio: concorre ? premios.find((p) => p.posicao === posicao)?.valor ?? null : null };
     });
+}
+
+// Medalha/troféu pra quem realmente ganhou prêmio numa posição (não só
+// quem está naquela posição no ranking — dá pra estar em 1º sem
+// prêmio se não bateu os pisos). Chamar só quando premio != null.
+export function medalhaPosicaoComplementar(posicao: number): string {
+  if (posicao === 1) return '🥇';
+  if (posicao === 2) return '🥈';
+  if (posicao === 3) return '🥉';
+  return '🏆';
 }
 
 export interface ResultadoDiaVendedor {
@@ -139,14 +155,42 @@ export function totalComplementarPorVendedor(
   return Array.from(porVendedor.values()).sort((a, b) => b.valorVenda - a.valorVenda);
 }
 
-// Resumo "Dipirona 500mg (2x), Vitamina C" dos produtos que um
-// vendedor marcou no período — usado no "ver ranking" pra mostrar não
-// só quanto ele vendeu, mas O QUE.
-export function produtosMarcadosPorVendedor(vendas: VendaComplementarMarcada[], codigoVendedor: number): string {
-  const porProduto = new Map<string, number>();
+export interface DiaVendedorComplementar {
+  data: string;
+  quantidadeItens: number;
+  valorVenda: number;
+  // "Dipirona 500mg (2x), Vitamina C" — já formatado, um item por
+  // produto distinto naquele dia.
+  produtos: string;
+}
+
+// Vendas de UM vendedor, agrupadas por dia — usado no "Ver ranking"
+// (21/08/2026): mostrar a lista inteira de produtos marcados no
+// período todo, tudo junto e sem estrutura, ficava ilegível pra quem
+// marca bastante coisa (achado com dado real: mais de 30 produtos numa
+// linha só). Lista por dia primeiro (nº de vendas + valor); os
+// produtos em si só aparecem quando clica no dia.
+export function agruparVendasPorDiaDoVendedor(
+  vendas: VendaComplementarMarcada[],
+  codigoVendedor: number
+): DiaVendedorComplementar[] {
+  const porDia = new Map<string, { quantidadeItens: number; valorVenda: number; produtos: Map<string, number> }>();
   for (const v of vendas) {
     if (v.codigoVendedor !== codigoVendedor) continue;
-    porProduto.set(v.nomeProduto, (porProduto.get(v.nomeProduto) ?? 0) + 1);
+    const atual = porDia.get(v.dataVenda) ?? { quantidadeItens: 0, valorVenda: 0, produtos: new Map<string, number>() };
+    atual.quantidadeItens += 1;
+    atual.valorVenda += v.valor;
+    atual.produtos.set(v.nomeProduto, (atual.produtos.get(v.nomeProduto) ?? 0) + 1);
+    porDia.set(v.dataVenda, atual);
   }
-  return [...porProduto.entries()].map(([nome, qtd]) => (qtd > 1 ? `${nome} (${qtd}x)` : nome)).join(', ');
+  return Array.from(porDia.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([data, info]) => ({
+      data,
+      quantidadeItens: info.quantidadeItens,
+      valorVenda: info.valorVenda,
+      produtos: Array.from(info.produtos.entries())
+        .map(([nome, qtd]) => (qtd > 1 ? `${nome} (${qtd}x)` : nome))
+        .join(', '),
+    }));
 }
