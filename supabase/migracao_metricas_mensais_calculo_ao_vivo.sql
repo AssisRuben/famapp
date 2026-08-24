@@ -235,10 +235,19 @@ begin
   -- do cliente (não uma ação pontual como as outras 4), incluir ali
   -- infla o total sem representar resultado incremental de alguma
   -- iniciativa.
+  --
+  -- "quantidade" = Nº DE VENDAS (atendimentos) distintas, não soma de
+  -- quantidade_produtos — achado com dado real (23/08/2026): essa
+  -- categoria varre TODA compra de TODO cliente da carteira no mês
+  -- (sem recorte de campanha como as outras 4), então somar unidades
+  -- de produto inflava o número bem além da quantidade real de vendas
+  -- (ex.: 90 "vendas" que eram na real ~20 atendimentos com vários
+  -- itens cada). receita/margem continuam somando TODOS os itens da
+  -- venda, só a contagem mudou.
   agr_venda_carteira as (
     select
       cc.codigo_vendedor,
-      sum(vi.quantidade_produtos) as qtd,
+      count(distinct v.id) as qtd,
       sum(vi.valor_total_liquido) as receita,
       sum(vi.valor_total_liquido - vi.valor_total_custo) as margem
     from carteira_clientes cc

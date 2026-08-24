@@ -274,7 +274,7 @@ export function RelatorioMensalScreen() {
   }, [ano, mes]);
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.conteudo}>
       <Text style={styles.title}>📈 Relatório mensal</Text>
       <Text style={styles.subtitle}>Métricas fechadas mês a mês — carteira, contato, vendas e margem por vendedor.</Text>
 
@@ -340,7 +340,8 @@ export function RelatorioMensalScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, padding: 16 },
+  container: { flex: 1, backgroundColor: colors.background },
+  conteudo: { padding: 16, paddingBottom: 32 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 4 },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 14, lineHeight: 18 },
   mesSeletor: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 14 },
