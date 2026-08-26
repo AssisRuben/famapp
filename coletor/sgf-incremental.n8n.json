@@ -13,7 +13,7 @@
       "parameters": {
         "width": 560,
         "height": 460,
-        "content": "## Coletor SGF -> Supabase\n\nRoda a cada 15 min (Schedule Trigger). Para cada entidade (vendedor, cliente, venda+itens, atendimentos diarios):\n1. Le o cursor em `sync_control` (autoinicializa se nao existir linha ainda)\n2. HTTP Request node chama `obter-alterados-v1` na API SGF com esse cursor como `dataInicial` (autenticacao via credencial Header Auth, nunca no workflow)\n3. Code node monta um INSERT...ON CONFLICT (upsert) em SQL puro a partir da resposta\n4. Executa no Postgres (Supabase) e atualiza o cursor\n\n**Antes de importar, crie 2 credenciais no n8n:**\n- Header Auth chamada **SGF Trier - Bearer**: header `Authorization`, valor `Bearer <token>` (o token que a Trier liberou -- NUNCA cole no workflow, so no cofre de credenciais)\n- Postgres chamada **Supabase Postgres**: use o host do Session Pooler (nao o de conexao direta -- direto e IPv6-only e pode nao ser alcancavel da sua VPS), porta 5432, user `postgres.<project-ref>`\n\n**Antes de rodar pela 1a vez**, aplique `coletor/migracao_coletor.sql` no Supabase (adiciona constraint que falta em `venda_itens`).\n\n**[12/08/2026] Fluxo de Cancelamento removido** -- existiu brevemente, foi desfeito. `tipoCancelamento='E'` de `/venda/cancelamento/obter-alterados-v1` marca qualquer nota que teve ALGUM estorno de pagamento (ex.: reprocessamento de autorizacao Farmacia Popular), nao so venda genuinamente cancelada -- confirmado com nota 750651 (Finalizada Caixa, R$114,24, sem nada de cancelamento) aparecendo la mesmo assim. Venda genuinamente cancelada/excluida NUNCA aparece em `/venda/obter-alterados-v1` (confirmado com varios exemplos reais) -- ou seja, o Painel ja fica correto sem precisar filtrar nada, o coletor nao precisa desse endpoint. Ver `coletor/README.md` pro historico completo (achado + reversao).\n\n**Limitacao conhecida**: sem paginacao real. Cada chamada pede ate 999 registros (limite da propria API -- valores acima disso retornam 400 'nao pode ser superior a 999'); se um ciclo de 15 min tiver mais alteracoes que isso (deveria ser raro), sobra pro proximo ciclo (o cursor so avanca pra 'agora' mesmo tendo cortado, entao registros no meio do corte NAO se perdem, so atrasam pro fim da fila incremental seguinte -- mas revise se aparecer o aviso 'pagina cheia' no log com frequencia)."
+        "content": "## Coletor SGF -> Supabase\n\nRoda a cada 15 min (Schedule Trigger). Para cada entidade (vendedor, cliente, venda+itens, atendimentos diarios, cancelamento de venda, devolucao):\n1. Le o cursor em `sync_control` (autoinicializa se nao existir linha ainda) -- exceto Devolucao, que nao usa cursor (ver nota do fluxo)\n2. HTTP Request node chama a API SGF (`obter-alterados-v1` com o cursor como `dataInicial`, autenticacao via credencial Header Auth, nunca no workflow)\n3. Code node monta um INSERT...ON CONFLICT (upsert) em SQL puro a partir da resposta -- exceto Cancelamento/Devolucao, que so fazem UPDATE em vendas ja existentes (ver nota de cada fluxo)\n4. Executa no Postgres (Supabase) e atualiza o cursor\n\n**Antes de importar, crie 2 credenciais no n8n:**\n- Header Auth chamada **SGF Trier - Bearer**: header `Authorization`, valor `Bearer <token>` (o token que a Trier liberou -- NUNCA cole no workflow, so no cofre de credenciais)\n- Postgres chamada **Supabase Postgres**: use o host do Session Pooler (nao o de conexao direta -- direto e IPv6-only e pode nao ser alcancavel da sua VPS), porta 5432, user `postgres.<project-ref>`\n\n**Antes de rodar pela 1a vez**, aplique `coletor/migracao_coletor.sql` no Supabase (adiciona constraint que falta em `venda_itens`).\n\n**[12/08 removido, 26/08 reativado] Fluxo de Cancelamento**: removido em 12/08 apos achar que `tipoCancelamento='E'` marcava vendas normais (nota 750651 aparecia 'Finalizada Caixa' num relatorio da Trier sem nada de cancelamento). Reativado em 26/08 depois do suporte da Trier confirmar, com print do relatorio 'Vendas Excluidas', que a propria 750651 foi excluida de verdade -- a verificacao de 12/08 checou o relatorio errado (uma nota pode ficar 'Finalizada Caixa' num relatorio e aparecer excluida em outro, o status nao e retroativamente atualizado). Confirmado tambem que venda excluida SINCRONIZA normalmente via `/venda/obter-alterados-v1` sem nenhum sinal de exclusao -- so o endpoint separado `/venda/cancelamento/obter-alterados-v1` traz `tipoCancelamento`. Ver `coletor/README.md` pro historico completo.\n\n**[26/08/2026] Fluxo de Devolucao (novo)**: mecanismo DIFERENTE de cancelamento -- devolucao nao aparece em `tipoCancelamento` (so viu valor 'E' na pratica, nunca 'D'), o vinculo mora num endpoint totalmente separado, de PARCELAS DE CARTAO: `/parcelas-cartao/estorno-v1`. Ver nota do proprio fluxo mais abaixo pros detalhes.\n\n**Se o fluxo de Venda ja rodava antes dos fluxos de Cancelamento/Devolucao voltarem a existir/serem criados**, rode `coletor/backfill_cancelamentos.js` e `coletor/backfill_devolucoes.js` uma vez cada pra marcar o que ja sincronizou sem essa informacao -- os fluxos novos so cobrem daqui pra frente.\n\n**Limitacao conhecida**: sem paginacao real. Cada chamada pede ate 999 registros (limite da propria API -- valores acima disso retornam 400 'nao pode ser superior a 999'); se um ciclo de 15 min tiver mais alteracoes que isso (deveria ser raro), sobra pro proximo ciclo (o cursor so avanca pra 'agora' mesmo tendo cortado, entao registros no meio do corte NAO se perdem, so atrasam pro fim da fila incremental seguinte -- mas revise se aparecer o aviso 'pagina cheia' no log com frequencia)."
       }
     },
     {
@@ -517,6 +517,210 @@
           "name": "Supabase Postgres"
         }
       }
+    },
+    {
+      "id": "can-nota",
+      "name": "Nota - Cancelamento venda",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1440
+      ],
+      "parameters": {
+        "width": 1800,
+        "height": 160,
+        "content": "### Cancelamento de venda (estorno/devolucao/exclusao)\nsync_control.entity_name = 'venda_cancelamento' | so UPDATE em vendas.tipo_cancelamento (nao insere venda nova).\n\n[12/08/2026 removido, 26/08/2026 reativado] /venda/obter-alterados-v1 NUNCA traz tipoCancelamento/numeroNotaOrigem preenchidos, mesmo pra venda excluida (confirmado pelo suporte da Trier em 26/08 -- nota 750651 sincroniza como venda normal, sem nenhum sinal de exclusao) -- so esse endpoint separado tem esse dado. Sem isso, vendas estornadas/excluidas contavam como venda normal no Painel e no Relatorio mensal (ver migracao_exclui_estorno_desempenho.sql, calcular_metricas_mes() e coletor/backfill_cancelamentos.js pro que ja estava sincronizado antes desse fluxo existir/voltar a existir)."
+      }
+    },
+    {
+      "id": "can-cursor",
+      "name": "Ler cursor - Cancelamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        1620
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH boot AS (\n  INSERT INTO sync_control (entity_name, last_cursor)\n  VALUES ('venda_cancelamento', '2000-01-01T00:00:00-03:00')\n  ON CONFLICT (entity_name) DO NOTHING\n  RETURNING last_cursor\n),\ncursor_atual AS (\n  SELECT COALESCE(\n    (SELECT last_cursor FROM boot),\n    (SELECT last_cursor FROM sync_control WHERE entity_name = 'venda_cancelamento')\n  ) AS last_cursor\n)\nSELECT\n  to_char(last_cursor AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_inicial,\n  to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '-0300' AS data_final\nFROM cursor_atual;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "can-http",
+      "name": "Buscar cancelamentos (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        1620
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao/venda/cancelamento/obter-alterados-v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "primeiroRegistro",
+              "value": "0"
+            },
+            {
+              "name": "quantidadeRegistros",
+              "value": "999"
+            },
+            {
+              "name": "dataInicial",
+              "value": "={{ $json.data_inicial }}"
+            },
+            {
+              "name": "dataFinal",
+              "value": "={{ $json.data_final }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "SGF Trier - Bearer"
+        }
+      }
+    },
+    {
+      "id": "can-mapear",
+      "name": "Mapear cancelamentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        1620
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// resposta da API pode chegar como 1 item cujo json E o array, ou ja\n// separada em N items (depende da versao do n8n) -- cobre os dois casos.\nconst brutos = $input.all().map((i) => i.json);\nconst linhas = brutos.length === 1 && Array.isArray(brutos[0]) ? brutos[0] : brutos;\nconst dataFinal = new Date().toISOString();\nconst QUANTIDADE = 999; // tem que bater com o 'quantidadeRegistros' do node HTTP Request\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  if (typeof v === 'object') return `'${JSON.stringify(v).replace(/'/g, \"''\")}'::jsonb`;\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\nif (linhas.length >= QUANTIDADE) {\n  console.warn(`[cancelamento] pagina cheia (${QUANTIDADE}) neste ciclo -- pode ter cortado registros.`);\n}\n\n// So UPDATE em venda que ja existe (match por numero_nota+cod_filial) --\n// esse endpoint devolve o cancelamento em si, nao os dados completos da\n// venda original, entao nao da pra fazer upsert/insert aqui. Se a venda\n// original ainda nao sincronizou (ordem de chegada entre os 2 fluxos nao\n// e garantida), esse UPDATE simplesmente nao acha nada pra marcar --\n// tipo_cancelamento fica nulo ate um ciclo futuro reprocessar (a API\n// manda de novo enquanto estiver dentro da janela de \"alterados\").\nlet sql = 'SELECT 1';\nif (linhas.length > 0) {\n  const valores = linhas.map((c) =>\n    `(${pgVal(c.numeroNota)}, ${pgVal(c.codFilial)}, ${pgVal(c.tipoCancelamento ?? 'E')})`\n  ).join(',\\n');\n  sql = `UPDATE vendas SET tipo_cancelamento = c.tipo_cancelamento, updated_at = now()\nFROM (VALUES ${valores}) AS c(numero_nota, cod_filial, tipo_cancelamento)\nWHERE vendas.numero_nota = c.numero_nota AND vendas.cod_filial = c.cod_filial\n  AND vendas.tipo_cancelamento IS DISTINCT FROM c.tipo_cancelamento;`;\n}\nsql += `\\nUPDATE sync_control SET last_cursor = '${dataFinal}', last_synced_at = now() WHERE entity_name = 'venda_cancelamento';`;\n\nreturn [{ json: { sql, quantidade: linhas.length } }];"
+      }
+    },
+    {
+      "id": "can-executar",
+      "name": "Executar - Cancelamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        840,
+        1620
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "dev-nota",
+      "name": "Nota - Devolução",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1840
+      ],
+      "parameters": {
+        "width": 1800,
+        "height": 180,
+        "content": "### Devolução total (26/08/2026)\nSó UPDATE em vendas.tipo_cancelamento (nao insere venda nova) -- sem sync_control/cursor, roda com janela fixa de 7 dias pra tras a cada ciclo (o endpoint só aceita data, sem hora, entao um cursor fino nao ajuda; idempotente via IS DISTINCT FROM, reprocessar a mesma devolução nao faz nada).\n\nAchado: devolução é um mecanismo DIFERENTE de cancelamento/estorno -- a nota original sincroniza normal via /venda/obter-alterados-v1, sem nenhum sinal de devolução; só /parcelas-cartao/estorno-v1 (endpoint de PARCELAS DE CARTÃO, não de vendas) traz o vínculo numeroNotaDevolucao -> numeroNotaOrigem. Reaproveita tipo_cancelamento='D' (a Trier já documenta esse valor pro campo). Só marca devolução TOTAL (valorNotaDevolucao == valorNotaOrigem) -- parcial fica de fora, ver Code node."
+      }
+    },
+    {
+      "id": "dev-http",
+      "name": "Buscar devoluções (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        1840
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao/parcelas-cartao/estorno-v1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "primeiroRegistro",
+              "value": "0"
+            },
+            {
+              "name": "quantidadeRegistros",
+              "value": "999"
+            },
+            {
+              "name": "dataEmissaoInicial",
+              "value": "={{ $now.minus({ days: 7 }).toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "dataEmissaoFinal",
+              "value": "={{ $now.toFormat('yyyy-MM-dd') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "SGF Trier - Bearer"
+        }
+      }
+    },
+    {
+      "id": "dev-mapear",
+      "name": "Mapear devoluções",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        1840
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// resposta vem como 1 objeto { estornos: [...] } (não array solto\n// como os outros endpoints do coletor).\nconst brutos = $input.all().map((i) => i.json);\nconst payload = brutos.length === 1 ? brutos[0] : {};\nconst linhas = Array.isArray(payload.estornos) ? payload.estornos : [];\n\nfunction pgVal(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';\n  return `'${String(v).replace(/'/g, \"''\")}'`;\n}\n\n// Só devolução TOTAL (valor devolvido == valor da nota original) --\n// devolução parcial não deveria zerar a nota inteira, fica de fora até\n// existir tratamento pra abater só o item devolvido (achado 26/08/2026:\n// 7 de 365 no histórico eram parciais).\nconst totais = linhas.filter((d) => Math.abs(d.totalNotaDevolucao - d.totalNotaOrigem) < 0.01);\n\nconst COD_FILIAL = 1; // endpoint não devolve cod_filial no payload -- farmácia só tem essa filial\n\nlet sql = 'SELECT 1';\nif (totais.length > 0) {\n  const valores = totais.map((d) => `(${pgVal(d.numeroNotaOrigem)}, ${COD_FILIAL})`).join(',\\n');\n  sql = `UPDATE vendas SET tipo_cancelamento = 'D', updated_at = now()\nFROM (VALUES ${valores}) AS d(numero_nota, cod_filial)\nWHERE vendas.numero_nota = d.numero_nota AND vendas.cod_filial = d.cod_filial\n  AND vendas.tipo_cancelamento IS DISTINCT FROM 'D';`;\n}\n\nreturn [{ json: { sql, quantidade: totais.length, parciais: linhas.length - totais.length } }];"
+      }
+    },
+    {
+      "id": "dev-executar",
+      "name": "Executar - Devolução",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        840,
+        1840
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
     }
   ],
   "connections": {
@@ -540,6 +744,16 @@
           },
           {
             "node": "Ler cursor - Venda",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ler cursor - Cancelamento",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar devoluções (API)",
             "type": "main",
             "index": 0
           }
@@ -694,6 +908,61 @@
         [
           {
             "node": "Executar itens + cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler cursor - Cancelamento": {
+      "main": [
+        [
+          {
+            "node": "Buscar cancelamentos (API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar cancelamentos (API)": {
+      "main": [
+        [
+          {
+            "node": "Mapear cancelamentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapear cancelamentos": {
+      "main": [
+        [
+          {
+            "node": "Executar - Cancelamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar devoluções (API)": {
+      "main": [
+        [
+          {
+            "node": "Mapear devoluções",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapear devoluções": {
+      "main": [
+        [
+          {
+            "node": "Executar - Devolução",
             "type": "main",
             "index": 0
           }

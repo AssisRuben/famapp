@@ -244,7 +244,69 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
 
 ## Coisas que valem revisão futura
 
-- **[REVERTIDO 12/08/2026, mesmo dia] O fluxo "Cancelamento de venda"
+- **[RESOLVIDO 26/08/2026] Devolução é um mecanismo DIFERENTE de
+  cancelamento/estorno — endpoint separado**: depois de reativar o
+  filtro de cancelamento (item logo abaixo), comparação nota a nota
+  contra a API bruta da Trier fechou em 99,95% (só 2 notas de diferença
+  em 3.827), mas contra o relatório oficial "Totais por Vendedor"
+  ("VENDAS MENOS DEVOLUÇÕES") ainda sobrava um gap de 41 notas/~R$1.900
+  no período 01-25/08 — o mesmo "resíduo de ~1,4%" já documentado antes
+  (ver pendência mais abaixo). Causa: uma nota devolvida sincroniza
+  NORMAL via `/venda/obter-alterados-v1`, sem nenhum sinal de devolução
+  — `tipoCancelamento` (endpoint de cancelamento) só tinha valor 'E'
+  nesse período, nunca 'D' (Devolução), apesar de `docs/api-sgf-openapi.json`
+  documentar os dois valores no mesmo campo. O vínculo devolução→nota
+  original mora num endpoint totalmente diferente, de PARCELAS DE
+  CARTÃO: `/parcelas-cartao/estorno-v1` (`dataEmissaoInicial`/
+  `dataEmissaoFinal`, resposta em `{ estornos: [...] }`, cada item com
+  `numeroNotaDevolucao`/`totalNotaDevolucao`/`numeroNotaOrigem`/
+  `totalNotaOrigem`). Testado: 28 devoluções no período, todas TOTAIS
+  (valor devolvido = valor original), todas as 28 notas-origem
+  existentes no banco — bateu quase exato com o resíduo (R$1.396,69 de
+  R$1.900). Corrigido: `coletor/backfill_devolucoes.js` (novo, marca
+  `vendas.tipo_cancelamento = 'D'` na nota-origem — reaproveita o mesmo
+  valor que a Trier documenta pro campo, então todo filtro que já
+  existe `tipo_cancelamento is null` passa a excluir devolução de
+  graça) + fluxo "Devolução" adicionado em `sgf-incremental.n8n.json`
+  (sem cursor — o endpoint só filtra por DATA, sem hora, então roda com
+  janela fixa de 7 dias pra trás a cada ciclo de 15 min, idempotente).
+  Rodado o backfill histórico (01/2026 até hoje): 355 de 365 devoluções
+  marcadas (3 sem nota correspondente no banco, mesma explicação de
+  sempre). Resultado: gap contra o relatório oficial caiu de 41 pra 13
+  notas (R$1.900 → R$510) no período de teste — a Aline bateu EXATO
+  (quantidade e valor). **Limitação conhecida**: 7 de 365 devoluções no
+  histórico são PARCIAIS (valor devolvido ≠ valor da nota original) —
+  ficam de propósito SEM marcar (zerar a nota inteira seria errado),
+  nenhum tratamento de devolução parcial existe ainda; é provavelmente
+  o que sobra do resíduo de 13 notas.
+
+- **[RESOLVIDO 26/08/2026, supersede os dois itens abaixo] Fluxo de
+  Cancelamento reativado — a verificação de 12/08 checou o relatório
+  errado**: o suporte da Trier confirmou por WhatsApp, com print do
+  relatório "Vendas Excluídas" da própria plataforma, que a nota 750651
+  — o exemplo usado em 12/08 pra provar que `tipoCancelamento='E'` era
+  falso positivo — **foi excluída de verdade**. A verificação de 12/08
+  checou um relatório diferente (que ainda mostrava "Finalizada Caixa"
+  pra essa nota) — o status de exclusão não é retroativo nesse outro
+  relatório, só aparece em "Vendas Excluídas". Ou seja: o campo
+  `tipoCancelamento` do endpoint `/venda/cancelamento/obter-alterados-v1`
+  provavelmente estava certo o tempo todo; o erro foi de verificação,
+  não do dado da Trier. Confirmado também nessa troca: venda excluída
+  **sincroniza normalmente** via `/venda/obter-alterados-v1` (usado no
+  dia a dia pelo coletor), sem nenhum campo indicando a exclusão — só
+  o endpoint separado de cancelamento tem esse dado, então cruzar os
+  dois continua sendo a única forma de saber. Reativado: nó
+  "Cancelamento de venda" de volta em `sgf-incremental.n8n.json`
+  (reimportar o workflow no n8n) + `backfill_cancelamentos.js` rodado
+  de novo pro histórico que sincronizou sem essa marcação desde 12/08 +
+  filtro `tipo_cancelamento is null` adicionado também em
+  `calcular_metricas_mes()` (Relatório mensal), que não existia em
+  12/08. Os outros 6 números de nota do teste original de 12/08 nunca
+  foram registrados no repo — não dá pra re-verificar individualmente,
+  mas dado que o único exemplo concreto (750651) era genuíno, não há
+  mais razão pra desconfiar do campo.
+
+- **[SUPERSEDIDO 26/08/2026 — ver item acima] O fluxo "Cancelamento de venda"
   descrito no item abaixo foi removido** — `tipoCancelamento='E'` do
   endpoint `/venda/cancelamento/obter-alterados-v1` provou ser um sinal
   ruim: ele marca qualquer nota que teve **algum estorno de pagamento**
@@ -269,8 +331,8 @@ sincronizado. Conclusão (30/07/2026, sem mudança de código necessária):
   (inofensivo, sempre verdadeiro agora que nada mais popula o campo),
   mas não é mais necessário pra nada.
 
-- **[RESOLVIDO 12/08/2026, revertido no mesmo dia — ver item acima]
-  Vendas estornadas contando como venda normal
+- **[RESOLVIDO 12/08/2026, revertido no mesmo dia, reativado 26/08/2026
+  — ver item mais acima] Vendas estornadas contando como venda normal
   no Painel**: achado investigando divergência entre o card Desempenho
   do app e o relatório "Totais por Vendedor" da Trier (mesmo período,
   01/08-12/08, filial 1) — banco com 1.799 vendas/R$109.085,82 contra

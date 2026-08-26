@@ -1733,9 +1733,18 @@ group by pp.codigo_produto, pp.nome_produto, pp.preco_atual, pp.preco_anterior, 
 -- [01/08/2026] "realizado" é MARGEM BRUTA em R$, não faturamento
 -- líquido — a meta cadastrada pela farmácia é de margem, não de
 -- venda (confirmado pelo usuário; antes comparava valor_meta contra
--- faturamento, o que não fazia sentido). Mesmo fator de correção de
--- custo (* 0.92) usado em vw_metricas_vendedor_diario/mensal — ver
--- comentário lá.
+-- faturamento, o que não fazia sentido).
+--
+-- [26/08/2026] Custo trocado de `coalesce(vlr_custo_produto,
+-- valor_total_custo, vlr_custo_aquisicao) * 0.92` pra
+-- `quantidade_produtos * produto_catalogo.custo_medio` — essa view
+-- tinha ficado pra trás da correção aplicada em
+-- vw_metricas_vendedor_diario/mensal/semanal em 12/08 (custo_medio
+-- bate exato com "Custo Aquisição" da Trier; o fator -8% era só
+-- aproximação em cima do campo errado). Achado comparando o valor de
+-- meta no app com o cálculo direto: batia com a fórmula ANTIGA, não a
+-- corrigida — Metas/Ranking/Comissão ficaram meses calculando margem
+-- (e, por consequência, comissão) com a fórmula desatualizada.
 create view vw_metas_progresso as
 select
   m.id as meta_id,
@@ -1750,9 +1759,10 @@ from metas m
 join vendedores vd on vd.codigo = m.codigo_vendedor
 left join lateral (
   select
-    sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as valor
+    sum(vi.valor_total_liquido) - sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)) as valor
   from vendas v
   join venda_itens vi on vi.venda_id = v.id
+  left join produto_catalogo pc on pc.codigo = vi.codigo_produto
   where v.codigo_vendedor = m.codigo_vendedor
     and v.tipo_cancelamento is null
     and extract(year from v.data_emissao) = m.ano
