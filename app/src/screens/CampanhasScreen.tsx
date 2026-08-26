@@ -273,7 +273,7 @@ export function CampanhasScreen() {
   if (modo === 'nova') {
     return (
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView style={styles.container}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.espacoInferiorExtra} keyboardShouldPersistTaps="handled">
         <Pressable style={styles.voltar} onPress={() => setModo('lista')} hitSlop={8}>
           <Ionicons name="arrow-back" size={18} color={colors.navy} />
           <Text style={styles.voltarTexto}>Campanhas</Text>
@@ -531,6 +531,10 @@ function mapearSugestaoParaItem(sugestao: ProdutoElegibilidade, dataInicio: stri
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { flex: 1, backgroundColor: colors.background, padding: 16 },
+  // "Adicionar produto manualmente" pode ficar o último card da tela (sem
+  // itens gerados ainda) — sem espaço extra pra rolar, o teclado cobre o
+  // campo e nada empurra o conteúdo pra cima dele.
+  espacoInferiorExtra: { paddingBottom: 100 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },
   voltar: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
