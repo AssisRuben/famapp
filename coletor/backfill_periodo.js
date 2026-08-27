@@ -386,8 +386,18 @@ async function sincronizarVendas(client) {
     );
   }
 
+  // tipo_cancelamento e numero_nota_origem ficam FORA daqui de propósito
+  // (26/08/2026): /venda/obter-alterados-v1 nunca traz esses campos
+  // preenchidos, então incluí-los no UPSERT normal sobrescrevia de volta
+  // pra NULL toda vez que uma venda já marcada como cancelada/devolvida
+  // fosse reprocessada por qualquer motivo (endereço alterado, etc.) --
+  // achado com dado real: um backfill derrubou 347 devoluções marcadas
+  // pra 327 rodando isso sem essa exclusão. Esses dois campos são
+  // exclusivos dos fluxos de Cancelamento/Devolução (coletor/
+  // sgf-incremental.n8n.json), que fazem UPDATE isolado, sem tocar o
+  // resto da linha.
   const COLUNAS_VENDA = [
-    'numero_nota', 'numero_nota_origem', 'tipo_cancelamento', 'data_emissao', 'hora_emissao', 'codigo_vendedor',
+    'numero_nota', 'data_emissao', 'hora_emissao', 'codigo_vendedor',
     'codigo_cliente', 'entrega', 'pagamento_na_entrega', 'condicao_pagamento', 'vlr_troco', 'numero_cupom_fiscal',
     'numero_nota_fiscal', 'xml_nfe', 'cod_parceiro', 'cod_filial', 'venda_ifood', 'venda_ecommerce', 'cod_ecommerce',
     'ser_nota_fiscal', 'modelo_venda', 'dados_entrega',
@@ -413,7 +423,7 @@ async function sincronizarVendas(client) {
     const grupos = subset.map((v, i) => {
       const dataEmissao = v.dataEmissao ? String(v.dataEmissao).slice(0, 10) : null;
       const linha = [
-        v.numeroNota, v.numeroNotaOrigem ?? null, v.tipoCancelamento ?? null, dataEmissao, horaParaPg(v.horaEmissao),
+        v.numeroNota, dataEmissao, horaParaPg(v.horaEmissao),
         v.codigoVendedor ?? null, v.codigoCliente ?? null, v.entrega ?? null, v.pagamentoNaEntrega ?? null,
         v.condicaoPagamento ?? null, v.vlrTroco ?? null, v.numeroCupomFiscal ?? null, v.numeroNotaFiscal ?? null,
         v.xmlNfe ?? null, v.codParceiro ?? null, v.codFilial ?? null, v.vendaIfood ?? null, v.vendaEcommerce === 'S',

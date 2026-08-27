@@ -678,6 +678,7 @@ class SupabaseRepository implements DataRepository {
             tipoReceita: r.tipo_receita,
           },
           clientes: [],
+          quantidadeVendidaAcao: Number(r.quantidade_vendida_periodo),
         };
         porProduto.set(r.codigo_produto, alerta);
       }
@@ -1236,9 +1237,18 @@ class SupabaseRepository implements DataRepository {
       .order('created_at', { ascending: false });
     if (filtroId !== undefined) query = query.eq('id', filtroId);
 
-    const { data, error } = await query;
+    let desempenhoQuery = supabase.from('vw_campanhas_desempenho').select('campanha_id, quantidade_vendida, valor_vendido');
+    if (filtroId !== undefined) desempenhoQuery = desempenhoQuery.eq('campanha_id', filtroId);
+
+    const [{ data, error }, { data: desempenho, error: erroDesempenho }] = await Promise.all([query, desempenhoQuery]);
     if (error) throw error;
+    if (erroDesempenho) throw erroDesempenho;
     const linhas = data ?? [];
+    // view só tem linha pra campanha que já vendeu algo (join interno
+    // com venda_itens) — sem entrada aqui = zero vendido, não erro.
+    const desempenhoPorCampanha = new Map(
+      (desempenho ?? []).map((d: any) => [d.campanha_id, { quantidade: Number(d.quantidade_vendida), valor: Number(d.valor_vendido) }])
+    );
 
     // produto_catalogo dá nome/código de barras — campanha_produtos só
     // guarda o código. Só resolve isso quando filtroId está definido
@@ -1269,6 +1279,8 @@ class SupabaseRepository implements DataRepository {
       dataInicio: c.data_inicio,
       dataFim: c.data_fim,
       criadaEm: c.created_at,
+      quantidadeVendida: desempenhoPorCampanha.get(c.id)?.quantidade ?? 0,
+      valorVendido: desempenhoPorCampanha.get(c.id)?.valor ?? 0,
       produtos: (c.campanha_produtos ?? []).map((cp: any) => {
         const produto = catalogoPorCodigo.get(cp.codigo_produto);
         const percentualDesconto = Number(cp.percentual_desconto);

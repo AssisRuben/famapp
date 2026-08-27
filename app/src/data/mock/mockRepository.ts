@@ -761,7 +761,12 @@ class MockRepository implements DataRepository {
           b.ultimaCompraProduto.localeCompare(a.ultimaCompraProduto)
         );
 
-        return { produto, clientes };
+        // Mock não rastreia quando a promoção começou (sem updated_at/
+        // campanha simulados aqui) — usa a soma de tudo no seed como
+        // aproximação razoável, mesmo espírito de "vendido na ação".
+        const quantidadeVendidaAcao = compras.reduce((soma, c) => soma + c.quantidade, 0);
+
+        return { produto, clientes, quantidadeVendidaAcao };
       })
       .sort((a, b) => (b.produto.percentualDesconto ?? 0) - (a.produto.percentualDesconto ?? 0));
 
@@ -1199,6 +1204,10 @@ class MockRepository implements DataRepository {
         dataInicio: input.dataInicio,
         dataFim: input.dataFim,
         criadaEm: new Date().toISOString(),
+        // Mock não simula venda real contra campanha — sempre zero,
+        // igual a uma campanha recém-criada de verdade.
+        quantidadeVendida: 0,
+        valorVendido: 0,
         produtos: input.produtos,
       };
       campanhas.push(salva);

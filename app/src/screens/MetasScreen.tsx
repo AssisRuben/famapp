@@ -167,7 +167,7 @@ export function MetasScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>🎯 Gestão da equipe</Text>
 
       <View style={styles.mesSeletor}>
@@ -258,7 +258,11 @@ export function MetasScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { flex: 1, backgroundColor: colors.background, padding: 16 },
+  container: { flex: 1, backgroundColor: colors.background },
+  // "Lançar meta mensal" tem um campo por vendedor, terminando com o
+  // botão Salvar — sem espaço extra pra rolar, o teclado cobre os
+  // últimos campos e o botão quando a lista de vendedores é grande.
+  conteudo: { padding: 16, paddingBottom: 100 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 12 },
   mesSeletor: {
     flexDirection: 'row',

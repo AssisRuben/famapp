@@ -504,6 +504,10 @@ export function CampanhasScreen() {
               <Text style={styles.campanhaResumo}>
                 {campanha.produtos.length} produto(s) · {totalCartazes} cartaz(es)
               </Text>
+              <Text style={styles.campanhaDesempenho}>
+                {campanha.quantidadeVendida ?? 0} vendido{(campanha.quantidadeVendida ?? 0) === 1 ? '' : 's'} ·{' '}
+                {formatBRL(campanha.valorVendido ?? 0)}
+              </Text>
             </Card>
           );
         })
@@ -556,6 +560,7 @@ const styles = StyleSheet.create({
   itemNome: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   campanhaPeriodo: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
   campanhaResumo: { fontSize: 12, color: colors.textMuted },
+  campanhaDesempenho: { fontSize: 12, fontWeight: '700', color: colors.navy, marginTop: 2 },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
   rotulo: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
   espacado: { marginTop: 10 },
