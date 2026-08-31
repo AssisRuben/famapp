@@ -759,6 +759,11 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
   const { profile } = useAuth();
   const [aberto, setAberto] = useState(false);
   const [vendas, setVendas] = useState<VendaComplementarMarcada[]>([]);
+  // Ofertados (26/08/2026): a lista de períodos só mostrava valor/itens
+  // no "Ver ranking", sem quantidade de clientes ofertados — precisa
+  // dos mesmos dois dados extras que CardResumoCampanha já busca.
+  const [ofertas, setOfertas] = useState<OfertaComplementarDia[]>([]);
+  const [vendedores, setVendedores] = useState<VendedorAtivo[]>([]);
   const [carregando, setCarregando] = useState(false);
   // Qual dia (de qual vendedor) está expandido mostrando os produtos —
   // chave `${codigoVendedor}:${data}`, um painel só compartilhado entre
@@ -774,11 +779,23 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
     if (vendas.length > 0 || !profile) return;
     setCarregando(true);
     try {
-      setVendas(await repository.getVendasComplementaresCampanha(profile, campanha.id));
+      const [vendasResp, ofertasResp, vendedoresResp] = await Promise.all([
+        repository.getVendasComplementaresCampanha(profile, campanha.id),
+        repository.getOfertaComplementarPeriodo(profile, campanha.dataInicio, campanha.dataFim),
+        repository.getVendedoresAtivos(profile),
+      ]);
+      setVendas(vendasResp);
+      setOfertas(ofertasResp);
+      setVendedores(vendedoresResp);
     } finally {
       setCarregando(false);
     }
   };
+
+  const ofertadosPorVendedor = useMemo(
+    () => new Map(totalComplementarPorVendedor(vendas, ofertas, vendedores).map((t) => [t.codigoVendedor, t.clientesOfertados])),
+    [vendas, ofertas, vendedores]
+  );
 
   return (
     <View>
@@ -803,7 +820,11 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                       {item.nomeVendedor}
                     </Text>
                     <Text style={styles.andamentoValor}>
-                      {formatBRL(item.valorTotal)} · {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'}
+                      {(() => {
+                        const ofertados = ofertadosPorVendedor.get(item.codigoVendedor);
+                        return ofertados != null ? `${ofertados} ofertados · ` : '';
+                      })()}
+                      {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'} · {formatBRL(item.valorTotal)}
                       {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
                     </Text>
                   </View>
