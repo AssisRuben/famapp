@@ -75,6 +75,12 @@ export function CampanhasScreen() {
   const [gerada, setGerada] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [itens, setItens] = useState<CampanhaProduto[]>([]);
+  // Texto BRUTO do campo "Preço promocional", por produto — desacoplado
+  // de item.precoPromocional (number). Sem isso, o TextInput reformatava
+  // o valor a cada tecla via String(number): digitar "12," virava
+  // Number("12.") = 12, o value voltava "12" e a vírgula suid ia embora
+  // na hora, tornando impossível digitar decimal (achado 26/08/2026).
+  const [textosPreco, setTextosPreco] = useState<Record<number, string>>({});
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [modoSugestao, setModoSugestao] = useState<ModoSugestaoCampanha>('popularidade');
   const [macroGrupoFiltro, setMacroGrupoFiltro] = useState<MacroGrupo | typeof TODOS_OS_GRUPOS>(TODOS_OS_GRUPOS);
@@ -113,6 +119,7 @@ export function CampanhasScreen() {
     try {
       const sugestoes = await repository.sugerirProdutosCampanha(profile, params);
       setItens(sugestoes.map((s) => mapearSugestaoParaItem(s, dataInicio, dataFim)));
+      setTextosPreco({});
       setGerada(true);
     } catch (erro) {
       alertar('Erro ao gerar sugestão', erro instanceof Error ? erro.message : 'Tente novamente.');
@@ -163,12 +170,15 @@ export function CampanhasScreen() {
   };
 
   const ajustarPreco = (codigoProduto: number, texto: string) => {
+    setTextosPreco((atual) => ({ ...atual, [codigoProduto]: texto }));
+    // Só atualiza o valor numérico quando dá pra parsear (ex.: "12,"
+    // sozinho, no meio da digitação de "12,50", ainda não é um número
+    // válido pra salvar — mas o texto acima já foi atualizado, então a
+    // vírgula continua aparecendo no campo enquanto o usuário digita).
+    const precoPromocional = Number(texto.replace(',', '.'));
+    if (Number.isNaN(precoPromocional)) return;
     setItens((atual) =>
-      atual.map((i) => {
-        if (i.codigoProduto !== codigoProduto) return i;
-        const precoPromocional = Number(texto.replace(',', '.')) || 0;
-        return { ...i, precoPromocional };
-      })
+      atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, precoPromocional } : i))
     );
   };
 
@@ -178,6 +188,7 @@ export function CampanhasScreen() {
     setDataInicio(todayISO());
     setDataFim(somarDias(todayISO(), 7));
     setItens([]);
+    setTextosPreco({});
     setModoSugestao('popularidade');
     setMacroGrupoFiltro(TODOS_OS_GRUPOS);
     setModeloSelecionado(PERSONALIZADO);
@@ -202,6 +213,7 @@ export function CampanhasScreen() {
     // (não resolve nome/código de barras, só usados na edição), então
     // busca a campanha completa em seguida e substitui.
     setItens(campanha.produtos);
+    setTextosPreco({});
     setModo('nova');
     if (catalogo.length === 0 && profile) {
       setCatalogo(await repository.getCatalogoProdutos(profile));
@@ -431,7 +443,7 @@ export function CampanhasScreen() {
                   <TextInput
                     style={styles.inputPreco}
                     keyboardType="numeric"
-                    value={String(item.precoPromocional)}
+                    value={textosPreco[item.codigoProduto] ?? String(item.precoPromocional)}
                     onChangeText={(texto) => ajustarPreco(item.codigoProduto, texto)}
                   />
                 </View>
@@ -492,6 +504,10 @@ export function CampanhasScreen() {
               <Text style={styles.campanhaResumo}>
                 {campanha.produtos.length} produto(s) · {totalCartazes} cartaz(es)
               </Text>
+              <Text style={styles.campanhaDesempenho}>
+                {campanha.quantidadeVendida ?? 0} vendido{(campanha.quantidadeVendida ?? 0) === 1 ? '' : 's'} ·{' '}
+                {formatBRL(campanha.valorVendido ?? 0)}
+              </Text>
             </Card>
           );
         })
@@ -544,6 +560,7 @@ const styles = StyleSheet.create({
   itemNome: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   campanhaPeriodo: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
   campanhaResumo: { fontSize: 12, color: colors.textMuted },
+  campanhaDesempenho: { fontSize: 12, fontWeight: '700', color: colors.navy, marginTop: 2 },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
   rotulo: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
   espacado: { marginTop: 10 },

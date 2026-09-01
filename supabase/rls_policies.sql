@@ -874,6 +874,7 @@ alter view vw_vendas_por_canal set (security_invoker = true);
 alter view vw_vendas_receita_status set (security_invoker = true);
 alter view vw_vendas_antimicrobiano_recente set (security_invoker = true);
 alter view vw_venda_adicional_vendas set (security_invoker = true);
+alter view vw_campanhas_desempenho set (security_invoker = true);
 alter view vw_receita_identificacao_comprador set (security_invoker = true);
 alter view vw_vendas_sem_identificacao_comprador set (security_invoker = true);
 alter view vw_metas_progresso set (security_invoker = true);

@@ -592,6 +592,10 @@ export function AlertasScreen() {
       .sort((a, b) => a.nomeVendedor.localeCompare(b.nomeVendedor));
   }, [profile, carteiraClientes, donosCarteira, contatos, hoje]);
   const [vendedorCarteiraAberto, setVendedorCarteiraAberto] = useState<number | null>(null);
+  // Produto em promoção: card colapsado mostra só nome/desconto/qtd
+  // vendida, clica pra abrir a lista de clientes (antes vinha tudo
+  // aberto de uma vez, poluindo a tela com produto muito comprado).
+  const [produtoPromocaoAberto, setProdutoPromocaoAberto] = useState<number | null>(null);
   // Venda Adicional (21/08/2026): ranking mostra só posição+nome por
   // padrão — clicar no nome abre o resumo (quantidade + valor) daquele
   // vendedor. Chave `${campanhaId}:${codigoVendedor}` porque várias
@@ -809,6 +813,7 @@ export function AlertasScreen() {
       return;
     }
     if (chave === 'carteira_clientes') setVendedorCarteiraAberto(null);
+    if (chave === 'promocao') setProdutoPromocaoAberto(null);
     setExpandido((atual) => (atual === chave ? null : chave));
   };
 
@@ -1019,40 +1024,55 @@ export function AlertasScreen() {
               <Text style={styles.empty}>Nenhum produto em promoção no momento.</Text>
             </Card>
           ) : (
-            alertasPromocaoFiltrados.map((alerta) => (
-              <Card key={alerta.produto.codigo}>
-                <View style={styles.headerRow}>
-                  <Text style={styles.produtoNome}>{alerta.produto.nome}</Text>
-                  <View style={styles.descontoBadge}>
-                    <Text style={styles.descontoBadgeText}>-{alerta.produto.percentualDesconto}%</Text>
-                  </View>
-                </View>
+            alertasPromocaoFiltrados.map((alerta) => {
+              const aberto = produtoPromocaoAberto === alerta.produto.codigo;
+              return (
+                <Card key={alerta.produto.codigo}>
+                  <Pressable
+                    onPress={() => setProdutoPromocaoAberto((atual) => (atual === alerta.produto.codigo ? null : alerta.produto.codigo))}
+                  >
+                    <View style={styles.headerRow}>
+                      <Text style={styles.produtoNome}>{alerta.produto.nome}</Text>
+                      <View style={styles.descontoBadge}>
+                        <Text style={styles.descontoBadgeText}>-{alerta.produto.percentualDesconto}%</Text>
+                      </View>
+                    </View>
 
-                <View style={styles.precoRow}>
-                  {alerta.produto.precoAnterior != null && (
-                    <Text style={styles.precoAnterior}>{formatBRL(alerta.produto.precoAnterior)}</Text>
+                    <View style={styles.precoQuantidadeRow}>
+                      <View style={styles.precoRow}>
+                        {alerta.produto.precoAnterior != null && (
+                          <Text style={styles.precoAnterior}>{formatBRL(alerta.produto.precoAnterior)}</Text>
+                        )}
+                        <Text style={styles.precoAtual}>{formatBRL(alerta.produto.precoAtual)}</Text>
+                      </View>
+                      <View style={styles.quantidadeVendidaRow}>
+                        <Text style={styles.clientesTitle}>
+                          {alerta.quantidadeVendidaAcao} vendido{alerta.quantidadeVendidaAcao === 1 ? '' : 's'} na ação
+                        </Text>
+                        <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+                      </View>
+                    </View>
+                  </Pressable>
+
+                  {aberto && alerta.clientes.length > 0 && (
+                    <View style={styles.clientesSection}>
+                      <Text style={styles.clientesTitle}>Já compraram antes ({alerta.clientes.length})</Text>
+                      {alerta.clientes.map((cliente) => (
+                        <LinhaClienteComHistorico
+                          key={cliente.codigoCliente}
+                          codigoCliente={cliente.codigoCliente}
+                          nome={cliente.nomeCliente}
+                          telefone={cliente.telefone}
+                          detalhe={`Última vez em ${formatDateBR(cliente.ultimaCompraProduto)}`}
+                          mensagemWhatsapp={mensagemPromocao(alerta, cliente.nomeCliente, cliente.ultimaCompraProduto)}
+                          onContato={(tipo) => registrarContatoAlerta('promocao', cliente.codigoCliente, tipo, alerta.produto.codigo)}
+                        />
+                      ))}
+                    </View>
                   )}
-                  <Text style={styles.precoAtual}>{formatBRL(alerta.produto.precoAtual)}</Text>
-                </View>
-
-                {alerta.clientes.length > 0 && (
-                  <View style={styles.clientesSection}>
-                    <Text style={styles.clientesTitle}>Já compraram antes ({alerta.clientes.length})</Text>
-                    {alerta.clientes.map((cliente) => (
-                      <LinhaClienteComHistorico
-                        key={cliente.codigoCliente}
-                        codigoCliente={cliente.codigoCliente}
-                        nome={cliente.nomeCliente}
-                        telefone={cliente.telefone}
-                        detalhe={`Última vez em ${formatDateBR(cliente.ultimaCompraProduto)}`}
-                        mensagemWhatsapp={mensagemPromocao(alerta, cliente.nomeCliente, cliente.ultimaCompraProduto)}
-                        onContato={(tipo) => registrarContatoAlerta('promocao', cliente.codigoCliente, tipo, alerta.produto.codigo)}
-                      />
-                    ))}
-                  </View>
-                )}
-              </Card>
-            ))
+                </Card>
+              );
+            })
           )}
         </>
       )}
@@ -1303,7 +1323,15 @@ const styles = StyleSheet.create({
   produtoNome: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, flexShrink: 1, marginRight: 8 },
   descontoBadge: { backgroundColor: colors.red, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   descontoBadgeText: { color: colors.white, fontWeight: '700', fontSize: 12 },
-  precoRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6, marginBottom: 4 },
+  precoQuantidadeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  precoRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  quantidadeVendidaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   precoAnterior: { fontSize: 13, color: colors.textMuted, textDecorationLine: 'line-through' },
   precoAtual: { fontSize: 18, fontWeight: '700', color: colors.success },
   clientesSection: {

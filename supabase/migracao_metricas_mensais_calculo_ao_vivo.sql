@@ -67,6 +67,19 @@
 -- qualificado. Por isso os apelidos internos usam nomes diferentes
 -- (receita/rotulo/montante) e só viram codigo_vendedor/chave/valor na
 -- saída final, por posição.
+--
+-- ---------- Exclui vendas canceladas e devolvidas (26/08/2026) ----------
+-- Todas as CTEs que juntam `vendas` agora filtram `v.tipo_cancelamento
+-- is null` — antes não filtravam nada, então venda cancelada/excluída
+-- contava normal em toda métrica de venda do Relatório mensal. O
+-- filtro cobre os dois valores que a Trier documenta pro campo ('E' =
+-- estorno/exclusão, 'D' = devolução total) sem precisar saber qual é
+-- qual — só passa a fazer diferença de verdade depois que
+-- migracao_exclui_estorno_desempenho.sql volta a ser populado (fluxos
+-- "Cancelamento de venda" e "Devolução" em
+-- coletor/sgf-incremental.n8n.json + coletor/backfill_cancelamentos.js
+-- e coletor/backfill_devolucoes.js rodados pro histórico já
+-- sincronizado) — ver coletor/README.md pro achado que motivou isso.
 drop function if exists calcular_metricas_mes(date);
 
 create or replace function calcular_metricas_mes(mes_ref date, data_fim date default null)
@@ -98,6 +111,7 @@ begin
     join venda_itens vi on vi.codigo_produto = cvap.codigo_produto
     join vendas v on v.id = vi.venda_id and v.data_emissao between camp.data_inicio and camp.data_fim
     where v.codigo_vendedor is not null
+      and v.tipo_cancelamento is null
       and v.data_emissao >= mes_ref and v.data_emissao < fim_exclusivo
   ),
   ia_venda_complementar as (
@@ -105,7 +119,8 @@ begin
     from venda_item_complementar vic
     join venda_itens vi on vi.id = vic.venda_item_id
     join vendas v on v.id = vi.venda_id
-    where v.data_emissao >= mes_ref and v.data_emissao < fim_exclusivo
+    where v.tipo_cancelamento is null
+      and v.data_emissao >= mes_ref and v.data_emissao < fim_exclusivo
   ),
   ia_venda_campanha as (
     select distinct vi.id as venda_item_id
@@ -115,6 +130,7 @@ begin
     join vendas v on v.id = vi.venda_id
       and v.data_emissao between coalesce(cp.data_inicio, c.data_inicio) and coalesce(cp.data_fim, c.data_fim)
     where v.codigo_vendedor is not null
+      and v.tipo_cancelamento is null
       and v.data_emissao >= mes_ref and v.data_emissao < fim_exclusivo
   ),
   ia_produto_promocao as (
@@ -124,6 +140,7 @@ begin
     join vendas v on v.id = vi.venda_id
     where p.em_promocao = true
       and v.codigo_vendedor is not null
+      and v.tipo_cancelamento is null
       and v.data_emissao >= mes_ref and v.data_emissao < fim_exclusivo
   ),
 
@@ -191,6 +208,7 @@ begin
     from vendas v
     join venda_itens vi on vi.venda_id = v.id
     where v.codigo_cliente is not null and v.codigo_vendedor is not null
+      and v.tipo_cancelamento is null
     group by v.id, v.codigo_cliente, v.codigo_vendedor, v.data_emissao
   ),
   receita_por_cliente as (
@@ -253,7 +271,8 @@ begin
     from carteira_clientes cc
     join vendas v on v.codigo_cliente = cc.codigo_cliente
     join venda_itens vi on vi.venda_id = v.id
-    where v.data_emissao >= mes_ref and v.data_emissao < fim_exclusivo
+    where v.tipo_cancelamento is null
+      and v.data_emissao >= mes_ref and v.data_emissao < fim_exclusivo
     group by cc.codigo_vendedor
   ),
 

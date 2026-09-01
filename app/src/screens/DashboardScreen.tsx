@@ -51,7 +51,6 @@ export function DashboardScreen() {
   const [statusSync, setStatusSync] = useState<StatusSincronizacao[]>([]);
   const [resumoClientes, setResumoClientes] = useState<ResumoClientesInatividade>({ total: 0, inativos: 0 });
   const [identificacaoComprador, setIdentificacaoComprador] = useState<IdentificacaoCompradorVendedor[]>([]);
-  const [periodoMeta, setPeriodoMeta] = useState<PeriodoMeta>('mes');
   const [periodoDesempenho, setPeriodoDesempenho] = useState<ModoDesempenho>('dia');
   // Período customizado (calendário) do card "Desempenho" — 11/08/2026.
   const [periodoCustom, setPeriodoCustom] = useState<{ inicio: string; fim: string } | null>(null);
@@ -341,15 +340,16 @@ export function DashboardScreen() {
           margemBrutaValor: totalFaturamentoMes - totalCustoMes,
         };
 
-  // Ranking (corrida de vendas) por margem bruta em R$. Segue o período
-  // do card "Metas" (periodoMeta), não o de "Desempenho" — o Ranking
-  // fica logo abaixo de Metas na tela, então precisa reagir ao seletor
-  // que está visualmente ao lado dele; antes seguia periodoDesempenho
-  // (seletor de um card diferente, mais acima), o que fazia o Ranking
-  // não mudar quando o usuário trocava Dia/Semana/Mês em Metas (achado
-  // 03/08/2026 com prints mostrando Metas em "Mês" e Ranking parado em
-  // dados diários).
-  //
+  // Metas e Ranking (corrida de vendas) seguem o MESMO seletor
+  // principal do card "Desempenho" (periodoDesempenho) — antes Metas
+  // tinha seletor próprio (periodoMeta), o que exigia trocar dois
+  // controles separados pra ver a mesma janela de tempo em telas
+  // diferentes do dashboard (pedido explícito 26/08/2026: um seletor
+  // só, tudo ajusta junto). "Período" customizado (calendário) não tem
+  // um bucket de semana/mês fixo equivalente pra Metas — cai pra "mês"
+  // nesse caso, a aproximação mais razoável disponível.
+  const periodoParaMetas: PeriodoMeta = periodoDesempenho === 'periodo' ? 'mes' : periodoDesempenho;
+
   // Pro dia, usa metricas (faturamentoLiquido - totalCusto, critério
   // documentado em MetricasVendedorDiario). Pra semana/mês, usa a MESMA
   // fonte que a lista de Metas (meta.semanas[].valorRealizado /
@@ -367,10 +367,10 @@ export function DashboardScreen() {
   const rankingAtual = metas
     .map((meta) => {
       let valor = 0;
-      if (periodoMeta === 'dia') {
+      if (periodoParaMetas === 'dia') {
         const m = metricasPorVendedorHoje.get(meta.codigoVendedor);
         valor = m ? m.faturamentoLiquido - m.totalCusto : 0;
-      } else if (periodoMeta === 'semana') {
+      } else if (periodoParaMetas === 'semana') {
         valor = meta.semanas.find((s) => s.semana === semanaAtual)?.valorRealizado ?? 0;
       } else {
         valor = meta.valorRealizadoMensal;
@@ -453,7 +453,6 @@ export function DashboardScreen() {
 
       <Card>
         <Text style={styles.sectionTitle}>🎯 Metas</Text>
-        <PeriodoMetaSelector value={periodoMeta} onChange={setPeriodoMeta} />
         {metas.length === 0 ? (
           <Text style={styles.empty}>Nenhuma meta cadastrada pra este mês ainda.</Text>
         ) : (
@@ -463,7 +462,7 @@ export function DashboardScreen() {
             .slice()
             .map((meta) => ({
               meta,
-              valores: valoresDaMeta(meta, periodoMeta, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual),
+              valores: valoresDaMeta(meta, periodoParaMetas, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual),
             }))
             .sort((a, b) => b.valores.valorRealizado / (b.valores.valorMeta || 1) - a.valores.valorRealizado / (a.valores.valorMeta || 1))
             .map(({ meta, valores }) => (
@@ -480,8 +479,8 @@ export function DashboardScreen() {
       <Card>
         <Text style={styles.sectionTitle}>🏆 Ranking</Text>
         <Text style={styles.rankingPeriodo}>
-          {periodoMeta === 'dia' ? 'Hoje' : periodoMeta === 'semana' ? 'Esta semana' : 'Este mês'}
-          {' · segue o período escolhido em "Metas" acima'}
+          {periodoParaMetas === 'dia' ? 'Hoje' : periodoParaMetas === 'semana' ? 'Esta semana' : 'Este mês'}
+          {' · segue o período escolhido em "Desempenho" acima'}
         </Text>
         <CorridaDeVendas ranking={rankingAtual} meuCodigoVendedor={profile?.codigoVendedor} />
       </Card>

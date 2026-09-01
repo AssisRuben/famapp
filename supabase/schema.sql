@@ -433,6 +433,28 @@ create table campanha_produtos (
   unique (campanha_id, codigo_produto)
 );
 
+-- Desempenho de vendas por campanha (26/08/2026) — alimenta a lista em
+-- CampanhasScreen, que antes só mostrava quantidade de PRODUTOS
+-- cadastrados na campanha (estático), não quantidade VENDIDA nem
+-- valor (dado real de performance). Mesmo critério de join usado em
+-- calcular_metricas_mes (ia_venda_campanha/agr_venda_campanha) —
+-- casa por codigo_produto dentro da janela de validade EFETIVA do
+-- item (coalesce com a validade da campanha) — e exclui venda
+-- cancelada/devolvida, mesma convenção do resto do app.
+create view vw_campanhas_desempenho as
+select
+  cp.campanha_id,
+  sum(vi.quantidade_produtos) as quantidade_vendida,
+  sum(vi.valor_total_liquido) as valor_vendido
+from campanha_produtos cp
+join campanhas c on c.id = cp.campanha_id
+join venda_itens vi on vi.codigo_produto = cp.codigo_produto
+join vendas v on v.id = vi.venda_id
+  and v.data_emissao between coalesce(cp.data_inicio, c.data_inicio) and coalesce(cp.data_fim, c.data_fim)
+where v.codigo_vendedor is not null
+  and v.tipo_cancelamento is null
+group by cp.campanha_id;
+
 -- ============================================================
 -- CAMPANHAS DE VENDA ADICIONAL (03/08/2026) — incentivo pontual pra
 -- vendedor empurrar produto(s) específico(s) num período (ex.: "venda
@@ -1666,6 +1688,22 @@ order by v.data_emissao desc;
 -- preenchido e diferente disso = controle_especial).
 -- exige_receita/tipo_receita entram no fim (não junto de preco_atual)
 -- pra manter create-or-replace válido — ver migracao_frente2.sql.
+-- [26/08/2026, corrigido no mesmo dia] Tentativa inicial escopou o
+-- join de DESCOBERTA de cliente (quem já comprou antes) pelo período
+-- da ação — errado: produto cuja última venda foi ANTES da promoção
+-- começar sumia da lista inteira (achado: card foi de "todos os
+-- produtos em campanha" pra só 16, com produto de verdade faltando).
+-- "já comprou antes" tem que continuar sendo o histórico INTEIRO (é
+-- o propósito do card — reencontrar cliente antigo agora que o
+-- produto tá mais barato), sem isso não sobra ninguém pra contatar
+-- num produto que nunca vendeu desde que a promoção começou.
+--
+-- quantidade_vendida_periodo é uma métrica À PARTE, por PRODUTO (não
+-- por cliente) — quantidade vendida só DENTRO do período da ação,
+-- pra mostrar no card sem afetar quem aparece na lista de clientes.
+-- Mesma lógica de período por fonte de antes: campanha usa
+-- data_inicio de verdade; `produtos` (curadoria manual, sem coluna de
+-- data) usa `updated_at` como aproximação.
 create or replace view vw_produtos_promocao_clientes as
 with produtos_em_promocao as (
   select
@@ -1675,7 +1713,8 @@ with produtos_em_promocao as (
     p.preco_anterior,
     p.percentual_desconto,
     p.exige_receita,
-    p.tipo_receita
+    p.tipo_receita,
+    p.updated_at::date as periodo_inicio
   from produtos p
   where p.em_promocao = true
 
@@ -1697,11 +1736,21 @@ with produtos_em_promocao as (
       when trim(pc.tipo_lista) = 'T' then 'antimicrobiano'
       when nullif(trim(pc.tipo_lista), '') is not null then 'controle_especial'
       else null
-    end as tipo_receita
+    end as tipo_receita,
+    coalesce(cp.data_inicio, camp.data_inicio) as periodo_inicio
   from campanha_produtos cp
   join campanhas camp on camp.id = cp.campanha_id
   join produto_catalogo pc on pc.codigo = cp.codigo_produto
   where current_date between camp.data_inicio and camp.data_fim
+),
+vendido_no_periodo as (
+  select pp.codigo_produto, sum(vi.quantidade_produtos) as quantidade_vendida_periodo
+  from produtos_em_promocao pp
+  join venda_itens vi on vi.codigo_produto = pp.codigo_produto
+  join vendas v on v.id = vi.venda_id
+    and v.data_emissao >= pp.periodo_inicio
+    and v.tipo_cancelamento is null
+  group by pp.codigo_produto
 )
 select
   pp.codigo_produto,
@@ -1715,13 +1764,18 @@ select
   max(v.data_emissao) as ultima_compra_produto,
   sum(vi.quantidade_produtos) as quantidade_total,
   pp.exige_receita,
-  pp.tipo_receita
+  pp.tipo_receita,
+  -- por último de propósito: create or replace view só deixa
+  -- ACRESCENTAR coluna no fim, não inserir no meio (ver
+  -- migracao_frente2.sql pro mesmo motivo com exige_receita/tipo_receita).
+  coalesce(vp.quantidade_vendida_periodo, 0) as quantidade_vendida_periodo
 from produtos_em_promocao pp
 join venda_itens vi on vi.codigo_produto = pp.codigo_produto
-join vendas v on v.id = vi.venda_id
+join vendas v on v.id = vi.venda_id and v.tipo_cancelamento is null
 join clientes c on c.codigo = v.codigo_cliente
+left join vendido_no_periodo vp on vp.codigo_produto = pp.codigo_produto
 group by pp.codigo_produto, pp.nome_produto, pp.preco_atual, pp.preco_anterior, pp.percentual_desconto,
-  c.codigo, c.nome, c.fone, c.celular, pp.exige_receita, pp.tipo_receita;
+  c.codigo, c.nome, c.fone, c.celular, pp.exige_receita, pp.tipo_receita, vp.quantidade_vendida_periodo;
 
 -- Progresso de metas (mensal e semanal) — tela "Metas" (gestor) e o
 -- bloco de metas no Dashboard (todos). O "realizado" é calculado na
@@ -1733,9 +1787,18 @@ group by pp.codigo_produto, pp.nome_produto, pp.preco_atual, pp.preco_anterior, 
 -- [01/08/2026] "realizado" é MARGEM BRUTA em R$, não faturamento
 -- líquido — a meta cadastrada pela farmácia é de margem, não de
 -- venda (confirmado pelo usuário; antes comparava valor_meta contra
--- faturamento, o que não fazia sentido). Mesmo fator de correção de
--- custo (* 0.92) usado em vw_metricas_vendedor_diario/mensal — ver
--- comentário lá.
+-- faturamento, o que não fazia sentido).
+--
+-- [26/08/2026] Custo trocado de `coalesce(vlr_custo_produto,
+-- valor_total_custo, vlr_custo_aquisicao) * 0.92` pra
+-- `quantidade_produtos * produto_catalogo.custo_medio` — essa view
+-- tinha ficado pra trás da correção aplicada em
+-- vw_metricas_vendedor_diario/mensal/semanal em 12/08 (custo_medio
+-- bate exato com "Custo Aquisição" da Trier; o fator -8% era só
+-- aproximação em cima do campo errado). Achado comparando o valor de
+-- meta no app com o cálculo direto: batia com a fórmula ANTIGA, não a
+-- corrigida — Metas/Ranking/Comissão ficaram meses calculando margem
+-- (e, por consequência, comissão) com a fórmula desatualizada.
 create view vw_metas_progresso as
 select
   m.id as meta_id,
@@ -1750,9 +1813,10 @@ from metas m
 join vendedores vd on vd.codigo = m.codigo_vendedor
 left join lateral (
   select
-    sum(vi.valor_total_liquido) - sum(coalesce(vi.vlr_custo_produto, vi.valor_total_custo, vi.vlr_custo_aquisicao)) * 0.92 as valor
+    sum(vi.valor_total_liquido) - sum(vi.quantidade_produtos * coalesce(pc.custo_medio, 0)) as valor
   from vendas v
   join venda_itens vi on vi.venda_id = v.id
+  left join produto_catalogo pc on pc.codigo = vi.codigo_produto
   where v.codigo_vendedor = m.codigo_vendedor
     and v.tipo_cancelamento is null
     and extract(year from v.data_emissao) = m.ano

@@ -1,14 +1,18 @@
--- [12/08/2026, revertido no mesmo dia] O mecanismo que popularia
--- tipo_cancelamento (endpoint /venda/cancelamento/obter-alterados-v1,
--- fluxo "Cancelamento de venda" no coletor) foi removido depois de
--- confirmar que tipoCancelamento='E' marca qualquer estorno de
--- pagamento (ex.: Farmácia Popular), não só venda genuinamente
--- cancelada — em produção, 7 de 7 notas marcadas eram vendas normais
--- e finalizadas. Ver coletor/README.md pro histórico completo.
--- O filtro abaixo continua inofensivo (tipo_cancelamento nunca mais é
--- populado, então a condição é sempre verdadeira), só não faz mais
--- nada de útil — venda genuinamente cancelada já nem sincroniza via
--- /venda/obter-alterados-v1, então o Painel já ficava correto sem isso.
+-- [12/08/2026, revertido no mesmo dia; 26/08/2026 reativado de vez] O
+-- mecanismo que popula tipo_cancelamento (endpoint
+-- /venda/cancelamento/obter-alterados-v1, fluxo "Cancelamento de
+-- venda" no coletor) foi removido em 12/08 depois de achar que
+-- tipoCancelamento='E' marcava vendas normais — nota 750651 aparecia
+-- "Finalizada Caixa" num relatório da Trier, sem nada de cancelamento.
+-- Reativado em 26/08 depois do suporte da Trier confirmar, com print
+-- do relatório "Vendas Excluídas", que a própria 750651 foi excluída
+-- de verdade: a verificação de 12/08 checou o relatório errado — uma
+-- nota fica "Finalizada Caixa" num relatório e aparece excluída em
+-- outro, o status não é atualizado retroativamente. Confirmado também
+-- que venda excluída SINCRONIZA normalmente via
+-- /venda/obter-alterados-v1, sem nenhum sinal de exclusão — só o
+-- endpoint separado tem esse dado. Ver coletor/README.md pro histórico
+-- completo. O filtro abaixo volta a ser necessário de verdade.
 --
 -- [12/08/2026] Vendas estornadas/canceladas contando como venda normal
 -- no card Desempenho do Painel (Dia/Semana/Mês/Período) e no Ranking.

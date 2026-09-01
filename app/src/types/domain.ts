@@ -284,6 +284,11 @@ export interface ClienteCompradorPromocao {
 export interface ProdutoPromocaoAlerta {
   produto: Produto;
   clientes: ClienteCompradorPromocao[];
+  // Quantidade vendida SÓ dentro do período da ação (por produto, não
+  // por cliente) — diferente de clientes[].quantidade, que é o
+  // histórico inteiro de cada cliente (usado pra decidir quem mostrar
+  // na lista de "já comprou antes", não pra essa métrica).
+  quantidadeVendidaAcao: number;
 }
 
 export interface VendaReceitaPendente {
@@ -607,6 +612,11 @@ export interface Campanha {
   dataFim: string;
   criadaEm: string;
   produtos: CampanhaProduto[];
+  // Desempenho real de venda no período da campanha (26/08/2026) —
+  // diferente de produtos.length (quantidade de produtos CADASTRADOS),
+  // isso é quantidade VENDIDA de fato. 0 quando ninguém vendeu ainda.
+  quantidadeVendida: number;
+  valorVendido: number;
 }
 
 export interface SalvarCampanhaInput {
