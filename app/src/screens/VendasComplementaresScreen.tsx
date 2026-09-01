@@ -20,6 +20,7 @@ import { Card } from '../components/Card';
 import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
+import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
 import { alertar, confirmar } from '../lib/alert';
 import {
   agruparResultadoComplementarPorDia,
@@ -876,7 +877,7 @@ function TelaRankingGestor() {
   const [valorMinimo, setValorMinimo] = useState('');
   const [quantidadeMinima, setQuantidadeMinima] = useState('');
   const [metaClientesOfertadosDia, setMetaClientesOfertadosDia] = useState('10');
-  const [premios, setPremios] = useState(['200', '100', '50']);
+  const [premios, setPremios] = useState([200, 100, 50].map(moedaParaTexto));
   const [salvando, setSalvando] = useState(false);
 
   const carregarLista = useCallback(async () => {
@@ -901,7 +902,7 @@ function TelaRankingGestor() {
     setValorMinimo('');
     setQuantidadeMinima('');
     setMetaClientesOfertadosDia('10');
-    setPremios(['200', '100', '50']);
+    setPremios([200, 100, 50].map(moedaParaTexto));
   };
 
   const abrirNova = () => {
@@ -914,11 +915,14 @@ function TelaRankingGestor() {
     setEditandoId(campanha.id);
     setDataInicio(campanha.dataInicio);
     setDataFim(campanha.dataFim);
-    setValorMinimo(campanha.valorMinimo != null ? String(campanha.valorMinimo) : '');
+    setValorMinimo(campanha.valorMinimo != null ? moedaParaTexto(campanha.valorMinimo) : '');
     setQuantidadeMinima(campanha.quantidadeMinima != null ? String(campanha.quantidadeMinima) : '');
     setMetaClientesOfertadosDia(campanha.metaClientesOfertadosDia != null ? String(campanha.metaClientesOfertadosDia) : '');
     const porPosicao = new Map((campanha.premiacaoRanking ?? []).map((p) => [p.posicao, p.valor]));
-    setPremios([1, 2, 3].map((posicao) => String(porPosicao.get(posicao) ?? '')));
+    setPremios([1, 2, 3].map((posicao) => {
+      const valor = porPosicao.get(posicao);
+      return valor != null ? moedaParaTexto(valor) : '';
+    }));
     setModo('nova');
   };
 
@@ -1026,7 +1030,9 @@ function TelaRankingGestor() {
                 style={[styles.input, styles.inputSemana]}
                 keyboardType="numeric"
                 value={premios[index]}
-                onChangeText={(texto) => setPremios((atual) => atual.map((v, i) => (i === index ? texto : v)))}
+                onChangeText={(texto) =>
+                  setPremios((atual) => atual.map((v, i) => (i === index ? aplicarMascaraMoeda(texto) : v)))
+                }
                 placeholder="R$"
               />
             </View>
@@ -1036,7 +1042,7 @@ function TelaRankingGestor() {
             style={styles.input}
             keyboardType="numeric"
             value={valorMinimo}
-            onChangeText={setValorMinimo}
+            onChangeText={(texto) => setValorMinimo(aplicarMascaraMoeda(texto))}
             placeholder="250,00"
           />
           <Text style={styles.hint}>Quem vender menos que isso em complementares não entra no ranking.</Text>

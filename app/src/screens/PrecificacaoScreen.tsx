@@ -28,6 +28,7 @@ import { gerarCsvPrecificacao } from '../lib/precificacaoCsv';
 import { gerarTxtTrier } from '../lib/trierTxt';
 import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
 import { alertar, confirmar } from '../lib/alert';
+import { aplicarMascaraMoeda } from '../lib/moeda';
 import {
   labelGrupoCompleto,
   MACRO_GRUPO_LABEL,
@@ -215,7 +216,7 @@ export function PrecificacaoScreen() {
   };
 
   const ajustarNovoPreco = (codigoProduto: number, texto: string) => {
-    setNovoPreco((atual) => ({ ...atual, [codigoProduto]: texto }));
+    setNovoPreco((atual) => ({ ...atual, [codigoProduto]: aplicarMascaraMoeda(texto) }));
   };
 
   const exportarTxtReajuste = () => {

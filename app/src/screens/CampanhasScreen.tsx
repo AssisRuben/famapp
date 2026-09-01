@@ -14,11 +14,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
+import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroGrupo';
 import { MODELO_CAMPANHA_LABEL, nomeSugeridoPorModelo, ORDEM_MODELOS_CAMPANHA } from '../lib/modeloCampanha';
+import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
 import {
   Campanha,
   CampanhaProduto,
@@ -62,6 +64,7 @@ export function CampanhasScreen() {
   const [nome, setNome] = useState('');
   const [dataInicio, setDataInicio] = useState(todayISO());
   const [dataFim, setDataFim] = useState(somarDias(todayISO(), 7));
+  const [calendarioAberto, setCalendarioAberto] = useState(false);
   const [margemMinima, setMargemMinima] = useState('20');
   const [descontoAlvo, setDescontoAlvo] = useState('15');
   const [quantidadeMaxima, setQuantidadeMaxima] = useState('10');
@@ -170,13 +173,14 @@ export function CampanhasScreen() {
   };
 
   const ajustarPreco = (codigoProduto: number, texto: string) => {
-    setTextosPreco((atual) => ({ ...atual, [codigoProduto]: texto }));
-    // Só atualiza o valor numérico quando dá pra parsear (ex.: "12,"
-    // sozinho, no meio da digitação de "12,50", ainda não é um número
-    // válido pra salvar — mas o texto acima já foi atualizado, então a
-    // vírgula continua aparecendo no campo enquanto o usuário digita).
-    const precoPromocional = Number(texto.replace(',', '.'));
-    if (Number.isNaN(precoPromocional)) return;
+    // Máscara de centavos (lib/moeda.ts): dígito digitado sempre vira
+    // centavo, sem precisar digitar vírgula — string sempre bem-formada,
+    // então o valor numérico já pode ser atualizado junto, sem o
+    // desalinhamento de digitação que exigia o estado de texto bruto
+    // separado antes disso (achado 26/08/2026).
+    const textoMascarado = aplicarMascaraMoeda(texto);
+    setTextosPreco((atual) => ({ ...atual, [codigoProduto]: textoMascarado }));
+    const precoPromocional = Number(textoMascarado.replace(',', '.')) || 0;
     setItens((atual) =>
       atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, precoPromocional } : i))
     );
@@ -284,16 +288,13 @@ export function CampanhasScreen() {
         <Card>
           <Text style={styles.cardTitulo}>Cabeçalho</Text>
           <TextInput style={styles.input} placeholder="Nome da campanha" value={nome} onChangeText={setNome} />
-          <View style={styles.linhaDatas}>
-            <View style={styles.campoData}>
-              <Text style={styles.rotulo}>Início</Text>
-              <TextInput style={styles.input} value={dataInicio} onChangeText={setDataInicio} placeholder="AAAA-MM-DD" />
-            </View>
-            <View style={styles.campoData}>
-              <Text style={styles.rotulo}>Fim</Text>
-              <TextInput style={styles.input} value={dataFim} onChangeText={setDataFim} placeholder="AAAA-MM-DD" />
-            </View>
-          </View>
+          <Text style={[styles.rotulo, styles.espacado]}>Período</Text>
+          <Pressable style={styles.botaoPeriodo} onPress={() => setCalendarioAberto(true)}>
+            <Ionicons name="calendar-outline" size={18} color={colors.navy} />
+            <Text style={styles.botaoPeriodoTexto}>
+              {dataInicio === dataFim ? formatDateBR(dataInicio) : `${formatDateBR(dataInicio)} até ${formatDateBR(dataFim)}`}
+            </Text>
+          </Pressable>
         </Card>
 
         {!editandoId && (
@@ -443,7 +444,7 @@ export function CampanhasScreen() {
                   <TextInput
                     style={styles.inputPreco}
                     keyboardType="numeric"
-                    value={textosPreco[item.codigoProduto] ?? String(item.precoPromocional)}
+                    value={textosPreco[item.codigoProduto] ?? moedaParaTexto(item.precoPromocional)}
                     onChangeText={(texto) => ajustarPreco(item.codigoProduto, texto)}
                   />
                 </View>
@@ -459,6 +460,16 @@ export function CampanhasScreen() {
             </Pressable>
           </>
         )}
+
+        <CalendarioPeriodo
+          visible={calendarioAberto}
+          onClose={() => setCalendarioAberto(false)}
+          permitirDatasFuturas
+          onConfirmar={(inicio, fim) => {
+            setDataInicio(inicio);
+            setDataFim(fim);
+          }}
+        />
       </ScrollView>
       </KeyboardAvoidingView>
     );
@@ -598,8 +609,18 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   resultadoBuscaTexto: { flex: 1, fontSize: 13, color: colors.textPrimary, marginRight: 8 },
-  linhaDatas: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  campoData: { flex: 1 },
+  botaoPeriodo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  botaoPeriodoTexto: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
   botaoGerar: { backgroundColor: colors.navy, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 14 },
   sectionTitulo: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 4, marginBottom: 8 },
   itemLinha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 },

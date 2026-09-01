@@ -20,6 +20,7 @@ import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { calcularMetaIndividualVendaAdicional, calcularRankingVendaAdicional, medalhaPosicao } from '../lib/vendaAdicional';
+import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
 import {
   CampanhaVendaAdicional,
   CriterioQuantidadeVendaAdicional,
@@ -160,10 +161,10 @@ export function VendaAdicionalScreen() {
   const [produtosSelecionados, setProdutosSelecionados] = useState<{ codigoProduto: number; nomeProduto: string }[]>([]);
   const [tipoPremiacao, setTipoPremiacao] = useState<TipoPremiacaoVendaAdicional>('ranking');
   const [criterioQuantidade, setCriterioQuantidade] = useState<CriterioQuantidadeVendaAdicional>('acumulado_periodo');
-  const [premiosRanking, setPremiosRanking] = useState(['200', '100', '50']);
+  const [premiosRanking, setPremiosRanking] = useState([200, 100, 50].map(moedaParaTexto));
   const [minimoParaConcorrer, setMinimoParaConcorrer] = useState('');
   const [metaQuantidade, setMetaQuantidade] = useState('5');
-  const [premiacaoMetaValor, setPremiacaoMetaValor] = useState('50');
+  const [premiacaoMetaValor, setPremiacaoMetaValor] = useState(moedaParaTexto(50));
   const [salvando, setSalvando] = useState(false);
 
   const carregarLista = useCallback(async () => {
@@ -197,11 +198,14 @@ export function VendaAdicionalScreen() {
     setCriterioQuantidade(campanha.criterioQuantidade);
     if (campanha.tipoPremiacao === 'ranking') {
       const porPosicao = new Map((campanha.premiacaoRanking ?? []).map((p) => [p.posicao, p.valor]));
-      setPremiosRanking([1, 2, 3].map((posicao) => String(porPosicao.get(posicao) ?? '')));
+      setPremiosRanking([1, 2, 3].map((posicao) => {
+        const valor = porPosicao.get(posicao);
+        return valor != null ? moedaParaTexto(valor) : '';
+      }));
       setMinimoParaConcorrer(campanha.minimoParaConcorrer != null ? String(campanha.minimoParaConcorrer) : '');
     } else {
       setMetaQuantidade(String(campanha.metaQuantidade ?? ''));
-      setPremiacaoMetaValor(String(campanha.premiacaoMetaValor ?? ''));
+      setPremiacaoMetaValor(moedaParaTexto(campanha.premiacaoMetaValor ?? 0));
     }
     setModo('nova');
     if (catalogo.length === 0 && profile) {
@@ -457,7 +461,7 @@ export function VendaAdicionalScreen() {
                     keyboardType="numeric"
                     value={premiosRanking[index]}
                     onChangeText={(texto) =>
-                      setPremiosRanking((atual) => atual.map((v, i) => (i === index ? texto : v)))
+                      setPremiosRanking((atual) => atual.map((v, i) => (i === index ? aplicarMascaraMoeda(texto) : v)))
                     }
                     placeholder="R$"
                   />
@@ -483,7 +487,7 @@ export function VendaAdicionalScreen() {
                 style={styles.input}
                 keyboardType="numeric"
                 value={premiacaoMetaValor}
-                onChangeText={setPremiacaoMetaValor}
+                onChangeText={(texto) => setPremiacaoMetaValor(aplicarMascaraMoeda(texto))}
                 placeholder="R$"
               />
             </>

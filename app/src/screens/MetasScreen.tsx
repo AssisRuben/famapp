@@ -17,6 +17,7 @@ import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { colors } from '../theme/colors';
 import { formatBRL } from '../lib/format';
+import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
 import { badgeFaixaComissao, mesAnoLabel, PESOS_SEMANA } from '../lib/metas';
 import { alertar } from '../lib/alert';
 import { ComissaoMensal, MetaVendedor, VendedorAtivo } from '../types/domain';
@@ -84,7 +85,7 @@ export function MetasScreen() {
       Object.fromEntries(
         vendedores.map((v) => {
           const meta = metasLote.find((m) => m.codigoVendedor === v.codigo);
-          return [v.codigo, meta ? String(meta.valorMetaMensal) : ''];
+          return [v.codigo, meta ? moedaParaTexto(meta.valorMetaMensal) : ''];
         })
       )
     );
@@ -237,7 +238,7 @@ export function MetasScreen() {
                   style={[styles.input, styles.inputLote]}
                   keyboardType="numeric"
                   value={valoresLote[v.codigo] ?? ''}
-                  onChangeText={(texto) => setValoresLote((atual) => ({ ...atual, [v.codigo]: texto }))}
+                  onChangeText={(texto) => setValoresLote((atual) => ({ ...atual, [v.codigo]: aplicarMascaraMoeda(texto) }))}
                   placeholder="R$"
                 />
               </View>
