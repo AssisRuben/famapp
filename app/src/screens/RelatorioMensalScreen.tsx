@@ -19,7 +19,7 @@ import {
   metricaVenda,
   valorMetrica,
 } from '../lib/relatorioMensal';
-import { MetricaMensal, VendedorAtivo } from '../types/domain';
+import { ComissaoMensal, MetricaMensal, VendedorAtivo } from '../types/domain';
 
 // Erro do Supabase/PostgREST (ex.: PostgrestError de uma chamada RPC)
 // não é instanceof Error — é um objeto plano com .message. Mesmo
@@ -132,6 +132,7 @@ function CardVendedor({
   vendedor,
   metricas,
   metricasAnterior,
+  comissao,
   destaque,
   aberto,
   onToggle,
@@ -139,6 +140,7 @@ function CardVendedor({
   vendedor: VendedorAtivo;
   metricas: MetricaMensal[];
   metricasAnterior: MetricaMensal[];
+  comissao: ComissaoMensal | undefined;
   destaque: boolean;
   aberto: boolean;
   onToggle: () => void;
@@ -158,6 +160,9 @@ function CardVendedor({
             <Text style={styles.vendedorMargemValor}>{formatBRL(margemTotal)} de margem</Text>
             <DeltaBadge delta={deltaPercentual(margemTotal, margemTotalAnterior)} />
           </View>
+          {comissao && (
+            <Text style={styles.vendedorComissaoValor}>💰 {formatBRL(comissao.comissaoValor)} de comissão</Text>
+          )}
         </View>
         <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textMuted} />
       </Pressable>
@@ -194,6 +199,7 @@ export function RelatorioMensalScreen() {
   const [vendedores, setVendedores] = useState<VendedorAtivo[]>([]);
   const [metricas, setMetricas] = useState<MetricaMensal[]>([]);
   const [metricasAnterior, setMetricasAnterior] = useState<MetricaMensal[]>([]);
+  const [comissoes, setComissoes] = useState<ComissaoMensal[]>([]);
   const [loading, setLoading] = useState(true);
   const [vendedorAberto, setVendedorAberto] = useState<number | null>(null);
 
@@ -212,12 +218,14 @@ export function RelatorioMensalScreen() {
         ? mesReferenciaComDia(anteriorAnoMes.ano, anteriorAnoMes.mes, new Date().getDate())
         : undefined;
 
-      const [atual, anterior] = await Promise.all([
+      const [atual, anterior, comissoesDoMes] = await Promise.all([
         repository.getMetricasMensais(profile, mesReferenciaISO(ano, mes)),
         repository.getMetricasMensais(profile, mesReferenciaISO(anteriorAnoMes.ano, anteriorAnoMes.mes), ateDataAnterior),
+        repository.getComissoesMensal(profile, ano, mes),
       ]);
       setMetricas(atual);
       setMetricasAnterior(anterior);
+      setComissoes(comissoesDoMes);
     } catch (erro) {
       alertar('Erro ao carregar relatório', mensagemErro(erro));
     } finally {
@@ -327,6 +335,7 @@ export function RelatorioMensalScreen() {
                 vendedor={v}
                 metricas={metricas}
                 metricasAnterior={metricasAnterior}
+                comissao={comissoes.find((c) => c.codigoVendedor === v.codigo)}
                 destaque={v.codigo === destaqueDoMes}
                 aberto={vendedorAberto === v.codigo}
                 onToggle={() => setVendedorAberto((atual) => (atual === v.codigo ? null : v.codigo))}
@@ -374,5 +383,6 @@ const styles = StyleSheet.create({
   vendedorInfo: { flex: 1 },
   vendedorNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   vendedorMargemValor: { fontSize: 13, color: colors.textSecondary },
+  vendedorComissaoValor: { fontSize: 12, color: colors.success, fontWeight: '700', marginTop: 2 },
   vendedorDetalhe: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
 });
