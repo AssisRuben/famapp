@@ -1692,6 +1692,7 @@ class SupabaseRepository implements DataRepository {
 
     return linhas.map((r) => ({
       itemId: String(r.venda_item_id),
+      vendaId: String(r.venda_id),
       dataVenda: r.data_emissao,
       valor: Number(r.valor ?? 0),
       codigoVendedor: r.codigo_vendedor,

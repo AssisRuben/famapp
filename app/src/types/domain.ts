@@ -805,6 +805,7 @@ export interface SalvarCampanhaComplementarInput {
 // vendedor), feito no app, mesmo padrão de VendaVendaAdicional.
 export interface VendaComplementarMarcada {
   itemId: string;
+  vendaId: string;
   dataVenda: string;
   valor: number;
   codigoVendedor: number;

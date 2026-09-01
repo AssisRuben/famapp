@@ -16,7 +16,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { colors } from '../theme/colors';
-import { formatBRL, formatDateBR, todayISO } from '../lib/format';
+import { formatBRL, formatDateBR, parseDecimalBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroGrupo';
 import { MODELO_CAMPANHA_LABEL, nomeSugeridoPorModelo, ORDEM_MODELOS_CAMPANHA } from '../lib/modeloCampanha';
@@ -180,7 +180,10 @@ export function CampanhasScreen() {
     // separado antes disso (achado 26/08/2026).
     const textoMascarado = aplicarMascaraMoeda(texto);
     setTextosPreco((atual) => ({ ...atual, [codigoProduto]: textoMascarado }));
-    const precoPromocional = Number(textoMascarado.replace(',', '.')) || 0;
+    // Number(texto.replace(',', '.')) quebra a partir de R$1.000 (o
+    // ponto de milhar vira um segundo ponto decimal, Number() dá NaN) —
+    // mesmo achado do lote de Metas (26/08/2026), ver lib/moeda.ts.
+    const precoPromocional = parseDecimalBR(textoMascarado);
     setItens((atual) =>
       atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, precoPromocional } : i))
     );

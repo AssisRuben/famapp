@@ -16,7 +16,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { MetaProgressBar } from '../components/MetaProgressBar';
 import { colors } from '../theme/colors';
-import { formatBRL } from '../lib/format';
+import { formatBRL, parseDecimalBR } from '../lib/format';
 import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
 import { badgeFaixaComissao, mesAnoLabel, PESOS_SEMANA } from '../lib/metas';
 import { alertar } from '../lib/alert';
@@ -135,7 +135,7 @@ export function MetasScreen() {
       return;
     }
 
-    const invalido = entradas.find(([, texto]) => Number.isNaN(Number(texto.replace(',', '.'))));
+    const invalido = entradas.find(([, texto]) => parseDecimalBR(texto) <= 0);
     if (invalido) {
       alertar('Valor inválido', 'Algum campo preenchido não é um número válido.');
       return;
@@ -144,7 +144,7 @@ export function MetasScreen() {
     setSalvandoLote(true);
     try {
       for (const [codigo, texto] of entradas) {
-        const mensal = Number(texto.replace(',', '.'));
+        const mensal = parseDecimalBR(texto);
         const semanas = PESOS_SEMANA.map((peso) => Math.round(mensal * peso * 100) / 100) as [
           number,
           number,
@@ -249,9 +249,7 @@ export function MetasScreen() {
             <View style={styles.loteTotalRow}>
               <Text style={styles.loteTotalLabel}>Total</Text>
               <Text style={styles.loteTotalValor}>
-                {formatBRL(
-                  Object.values(valoresLote).reduce((soma, texto) => soma + (Number(texto.replace(',', '.')) || 0), 0)
-                )}
+                {formatBRL(Object.values(valoresLote).reduce((soma, texto) => soma + parseDecimalBR(texto), 0))}
               </Text>
             </View>
           </>
@@ -276,7 +274,7 @@ const styles = StyleSheet.create({
   // "Lançar meta mensal" tem um campo por vendedor, terminando com o
   // botão Salvar — sem espaço extra pra rolar, o teclado cobre os
   // últimos campos e o botão quando a lista de vendedores é grande.
-  conteudo: { padding: 16, paddingBottom: 100 },
+  conteudo: { padding: 16, paddingBottom: 320 },
   title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: 12 },
   mesSeletor: {
     flexDirection: 'row',

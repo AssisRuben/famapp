@@ -632,7 +632,13 @@ select
   vd.nome as nome_vendedor,
   v.data_emissao,
   vi.valor_total_liquido as valor,
-  vi.codigo_produto
+  vi.codigo_produto,
+  -- por último de propósito (create or replace view só deixa
+  -- ACRESCENTAR coluna no fim) — venda_id agrupa itens da MESMA nota,
+  -- pra distinguir "quantidade de itens marcados" de "quantidade de
+  -- atendimentos" (uma nota pode ter 2+ itens marcados como
+  -- complementar, um vendedor pode ter mais itens que atendimentos).
+  v.id as venda_id
 from venda_item_complementar vic
 join venda_itens vi on vi.id = vic.venda_item_id
 join vendas v on v.id = vi.venda_id

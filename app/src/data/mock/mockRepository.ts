@@ -1567,6 +1567,7 @@ class MockRepository implements DataRepository {
         const produto = catalogoProdutosSeed.find((p) => p.codigo === v.codigoProduto);
         return {
           itemId: v.id,
+          vendaId: v.id,
           dataVenda,
           valor: (produto?.precoVenda ?? 0) * v.quantidade,
           codigoVendedor: v.codigoVendedor,

@@ -157,6 +157,9 @@ export function totalComplementarPorVendedor(
 
 export interface DiaVendedorComplementar {
   data: string;
+  // nº de vendas/notas distintas naquele dia — pode ser menor que
+  // quantidadeItens quando uma mesma nota tem 2+ itens marcados.
+  atendimentos: number;
   quantidadeItens: number;
   valorVenda: number;
   // "Dipirona 500mg (2x), Vitamina C" — já formatado, um item por
@@ -174,10 +177,16 @@ export function agruparVendasPorDiaDoVendedor(
   vendas: VendaComplementarMarcada[],
   codigoVendedor: number
 ): DiaVendedorComplementar[] {
-  const porDia = new Map<string, { quantidadeItens: number; valorVenda: number; produtos: Map<string, number> }>();
+  const porDia = new Map<
+    string,
+    { atendimentos: Set<string>; quantidadeItens: number; valorVenda: number; produtos: Map<string, number> }
+  >();
   for (const v of vendas) {
     if (v.codigoVendedor !== codigoVendedor) continue;
-    const atual = porDia.get(v.dataVenda) ?? { quantidadeItens: 0, valorVenda: 0, produtos: new Map<string, number>() };
+    const atual =
+      porDia.get(v.dataVenda) ??
+      { atendimentos: new Set<string>(), quantidadeItens: 0, valorVenda: 0, produtos: new Map<string, number>() };
+    atual.atendimentos.add(v.vendaId);
     atual.quantidadeItens += 1;
     atual.valorVenda += v.valor;
     atual.produtos.set(v.nomeProduto, (atual.produtos.get(v.nomeProduto) ?? 0) + 1);
@@ -187,6 +196,7 @@ export function agruparVendasPorDiaDoVendedor(
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([data, info]) => ({
       data,
+      atendimentos: info.atendimentos.size,
       quantidadeItens: info.quantidadeItens,
       valorVenda: info.valorVenda,
       produtos: Array.from(info.produtos.entries())
