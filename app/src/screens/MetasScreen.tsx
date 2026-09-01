@@ -227,20 +227,33 @@ export function MetasScreen() {
         {loadingLote ? (
           <ActivityIndicator style={{ marginTop: 12 }} />
         ) : (
-          vendedores.map((v) => (
-            <View key={v.codigo} style={styles.loteRow}>
-              <Text style={styles.loteNome} numberOfLines={1}>
-                {v.nome}
+          <>
+            {vendedores.map((v) => (
+              <View key={v.codigo} style={styles.loteRow}>
+                <Text style={styles.loteNome} numberOfLines={1}>
+                  {v.nome}
+                </Text>
+                <TextInput
+                  style={[styles.input, styles.inputLote]}
+                  keyboardType="numeric"
+                  value={valoresLote[v.codigo] ?? ''}
+                  onChangeText={(texto) => setValoresLote((atual) => ({ ...atual, [v.codigo]: texto }))}
+                  placeholder="R$"
+                />
+              </View>
+            ))}
+            {/* Só conferência visual da soma digitada — não é enviado nem
+                salvo em lugar nenhum, cada linha continua indo pro banco
+                separada por vendedor. */}
+            <View style={styles.loteTotalRow}>
+              <Text style={styles.loteTotalLabel}>Total</Text>
+              <Text style={styles.loteTotalValor}>
+                {formatBRL(
+                  Object.values(valoresLote).reduce((soma, texto) => soma + (Number(texto.replace(',', '.')) || 0), 0)
+                )}
               </Text>
-              <TextInput
-                style={[styles.input, styles.inputLote]}
-                keyboardType="numeric"
-                value={valoresLote[v.codigo] ?? ''}
-                onChangeText={(texto) => setValoresLote((atual) => ({ ...atual, [v.codigo]: texto }))}
-                placeholder="R$"
-              />
             </View>
-          ))
+          </>
         )}
 
         <Pressable style={styles.salvarButton} onPress={salvarLote} disabled={salvandoLote || loadingLote}>
@@ -299,4 +312,15 @@ const styles = StyleSheet.create({
   loteRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 10 },
   loteNome: { flex: 1, fontSize: 13, color: colors.textPrimary },
   inputLote: { width: 130 },
+  loteTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  loteTotalLabel: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
+  loteTotalValor: { fontSize: 15, fontWeight: '700', color: colors.navy },
 });
