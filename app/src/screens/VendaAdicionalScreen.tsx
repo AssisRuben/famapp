@@ -11,11 +11,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
+import { SeletorHorario } from '../components/SeletorHorario';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
@@ -35,20 +35,6 @@ function somarDias(iso: string, dias: number): string {
   const data = new Date(`${iso}T00:00:00`);
   data.setDate(data.getDate() + dias);
   return data.toISOString().slice(0, 10);
-}
-
-// DateTimePicker (mode="time") trabalha com Date — horarioLembrete no
-// resto da tela é só "HH:mm" (formato salvo). Data-base é irrelevante,
-// só a hora/minuto importam.
-function horarioParaDate(horario: string): Date {
-  const [h, m] = horario.split(':').map(Number);
-  const data = new Date();
-  data.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
-  return data;
-}
-
-function dateParaHorario(data: Date): string {
-  return `${String(data.getHours()).padStart(2, '0')}:${String(data.getMinutes()).padStart(2, '0')}`;
 }
 
 // Andamento de uma campanha já cadastrada — busca as vendas só quando
@@ -512,17 +498,12 @@ export function VendaAdicionalScreen() {
           }}
         />
 
-        {relogioAberto && (
-          <DateTimePicker
-            value={horarioParaDate(horarioLembrete)}
-            mode="time"
-            is24Hour
-            onChange={(_evento, dataSelecionada) => {
-              setRelogioAberto(false);
-              if (dataSelecionada) setHorarioLembrete(dateParaHorario(dataSelecionada));
-            }}
-          />
-        )}
+        <SeletorHorario
+          visible={relogioAberto}
+          onClose={() => setRelogioAberto(false)}
+          valorInicial={horarioLembrete}
+          onConfirmar={setHorarioLembrete}
+        />
       </ScrollView>
       </KeyboardAvoidingView>
     );
