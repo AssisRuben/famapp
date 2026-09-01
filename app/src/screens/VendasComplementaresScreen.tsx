@@ -759,6 +759,8 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
   const { profile } = useAuth();
   const [aberto, setAberto] = useState(false);
   const [vendas, setVendas] = useState<VendaComplementarMarcada[]>([]);
+  const [ofertas, setOfertas] = useState<OfertaComplementarDia[]>([]);
+  const [vendedores, setVendedores] = useState<VendedorAtivo[]>([]);
   const [carregando, setCarregando] = useState(false);
   // Qual dia (de qual vendedor) está expandido mostrando os produtos —
   // chave `${codigoVendedor}:${data}`, um painel só compartilhado entre
@@ -774,11 +776,27 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
     if (vendas.length > 0 || !profile) return;
     setCarregando(true);
     try {
-      setVendas(await repository.getVendasComplementaresCampanha(profile, campanha.id));
+      const [vendasResp, ofertasResp, vendedoresResp] = await Promise.all([
+        repository.getVendasComplementaresCampanha(profile, campanha.id),
+        repository.getOfertaComplementarPeriodo(profile, campanha.dataInicio, campanha.dataFim),
+        repository.getVendedoresAtivos(profile),
+      ]);
+      setVendas(vendasResp);
+      setOfertas(ofertasResp);
+      setVendedores(vendedoresResp);
     } finally {
       setCarregando(false);
     }
   };
+
+  // Ofertados somados no período inteiro por vendedor — não tem no
+  // ranking em si (calcularRankingComplementar só conhece venda
+  // marcada), pedido explícito 24/08/2026 pra aparecer junto de
+  // itens/valor, sem quebrar por dia.
+  const ofertadosPorVendedor = useMemo(() => {
+    const totais = totalComplementarPorVendedor(vendas, ofertas, vendedores);
+    return new Map(totais.map((t) => [t.codigoVendedor, t.clientesOfertados]));
+  }, [vendas, ofertas, vendedores]);
 
   return (
     <View>
@@ -795,6 +813,7 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
           ) : (
             calcularRankingComplementar(vendas, campanha).map((item) => {
               const diasDoVendedor = agruparVendasPorDiaDoVendedor(vendas, item.codigoVendedor);
+              const ofertados = ofertadosPorVendedor.get(item.codigoVendedor) ?? null;
               return (
                 <View key={item.codigoVendedor} style={styles.andamentoBloco}>
                   <View style={styles.andamentoLinha}>
@@ -803,7 +822,8 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                       {item.nomeVendedor}
                     </Text>
                     <Text style={styles.andamentoValor}>
-                      {formatBRL(item.valorTotal)} · {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'}
+                      {ofertados != null ? `${ofertados} ofertados · ` : ''}
+                      {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'} · {formatBRL(item.valorTotal)}
                       {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
                     </Text>
                   </View>
