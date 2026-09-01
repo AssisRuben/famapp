@@ -11,9 +11,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
+import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
@@ -32,6 +34,20 @@ function somarDias(iso: string, dias: number): string {
   const data = new Date(`${iso}T00:00:00`);
   data.setDate(data.getDate() + dias);
   return data.toISOString().slice(0, 10);
+}
+
+// DateTimePicker (mode="time") trabalha com Date — horarioLembrete no
+// resto da tela é só "HH:mm" (formato salvo). Data-base é irrelevante,
+// só a hora/minuto importam.
+function horarioParaDate(horario: string): Date {
+  const [h, m] = horario.split(':').map(Number);
+  const data = new Date();
+  data.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
+  return data;
+}
+
+function dateParaHorario(data: Date): string {
+  return `${String(data.getHours()).padStart(2, '0')}:${String(data.getMinutes()).padStart(2, '0')}`;
 }
 
 // Andamento de uma campanha já cadastrada — busca as vendas só quando
@@ -138,6 +154,8 @@ export function VendaAdicionalScreen() {
   const [dataInicio, setDataInicio] = useState(todayISO());
   const [dataFim, setDataFim] = useState(somarDias(todayISO(), 7));
   const [horarioLembrete, setHorarioLembrete] = useState('');
+  const [calendarioAberto, setCalendarioAberto] = useState(false);
+  const [relogioAberto, setRelogioAberto] = useState(false);
   const [buscaProduto, setBuscaProduto] = useState('');
   const [produtosSelecionados, setProdutosSelecionados] = useState<{ codigoProduto: number; nomeProduto: string }[]>([]);
   const [tipoPremiacao, setTipoPremiacao] = useState<TipoPremiacaoVendaAdicional>('ranking');
@@ -315,7 +333,7 @@ export function VendaAdicionalScreen() {
   if (modo === 'nova') {
     return (
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView style={styles.container}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.espacoInferiorExtra} keyboardShouldPersistTaps="handled">
         <Pressable style={styles.voltar} onPress={() => setModo('lista')} hitSlop={8}>
           <Ionicons name="arrow-back" size={18} color={colors.navy} />
           <Text style={styles.voltarTexto}>Venda adicional</Text>
@@ -326,25 +344,20 @@ export function VendaAdicionalScreen() {
         <Card>
           <Text style={styles.cardTitulo}>Cabeçalho</Text>
           <TextInput style={styles.input} placeholder="Nome da campanha" value={nome} onChangeText={setNome} />
-          <View style={styles.linhaDatas}>
-            <View style={styles.campoData}>
-              <Text style={styles.rotulo}>Início</Text>
-              <TextInput style={styles.input} value={dataInicio} onChangeText={setDataInicio} placeholder="AAAA-MM-DD" />
-            </View>
-            <View style={styles.campoData}>
-              <Text style={styles.rotulo}>Fim</Text>
-              <TextInput style={styles.input} value={dataFim} onChangeText={setDataFim} placeholder="AAAA-MM-DD" />
-            </View>
-          </View>
+
+          <Text style={[styles.rotulo, styles.espacado]}>Período</Text>
+          <Pressable style={styles.botaoPeriodo} onPress={() => setCalendarioAberto(true)}>
+            <Ionicons name="calendar-outline" size={18} color={colors.navy} />
+            <Text style={styles.botaoPeriodoTexto}>
+              {dataInicio === dataFim ? formatDateBR(dataInicio) : `${formatDateBR(dataInicio)} até ${formatDateBR(dataFim)}`}
+            </Text>
+          </Pressable>
+
           <Text style={[styles.rotulo, styles.espacado]}>Horário do lembrete (opcional)</Text>
-          <TextInput
-            style={styles.input}
-            value={horarioLembrete}
-            onChangeText={setHorarioLembrete}
-            placeholder="HH:mm — ex.: 09:00"
-            keyboardType="numbers-and-punctuation"
-            maxLength={5}
-          />
+          <Pressable style={styles.botaoPeriodo} onPress={() => setRelogioAberto(true)}>
+            <Ionicons name="time-outline" size={18} color={colors.navy} />
+            <Text style={styles.botaoPeriodoTexto}>{horarioLembrete || 'Nenhum horário escolhido'}</Text>
+          </Pressable>
           <Text style={styles.hint}>Reservado pra um lembrete futuro no celular do vendedor — ainda não envia nada.</Text>
         </Card>
 
@@ -484,6 +497,28 @@ export function VendaAdicionalScreen() {
             <Text style={styles.botaoTexto}>{editandoId ? 'Salvar alterações' : 'Salvar campanha'}</Text>
           )}
         </Pressable>
+
+        <CalendarioPeriodo
+          visible={calendarioAberto}
+          onClose={() => setCalendarioAberto(false)}
+          permitirDatasFuturas
+          onConfirmar={(inicio, fim) => {
+            setDataInicio(inicio);
+            setDataFim(fim);
+          }}
+        />
+
+        {relogioAberto && (
+          <DateTimePicker
+            value={horarioParaDate(horarioLembrete)}
+            mode="time"
+            is24Hour
+            onChange={(_evento, dataSelecionada) => {
+              setRelogioAberto(false);
+              if (dataSelecionada) setHorarioLembrete(dateParaHorario(dataSelecionada));
+            }}
+          />
+        )}
       </ScrollView>
       </KeyboardAvoidingView>
     );
@@ -577,8 +612,21 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: 4,
   },
-  linhaDatas: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  campoData: { flex: 1 },
+  botaoPeriodo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  botaoPeriodoTexto: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
+  // "1º/2º/3º lugar" (Premiação) pode ficar perto do fim da tela sem
+  // espaço de rolagem sobrando — sem isso o teclado cobria o campo.
+  espacoInferiorExtra: { paddingBottom: 100 },
   resultadoBusca: {
     flexDirection: 'row',
     alignItems: 'center',

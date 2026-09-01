@@ -50,7 +50,8 @@
           "color": "#003068"
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {
