@@ -176,7 +176,7 @@ function SeletorDia({
   // ~7 dias visíveis por vez (respiro nas laterais da tela, 16 de
   // padding de cada lado) — cresce em tablet, encolhe em tela estreita,
   // sem passar dos limites pra não ficar minúsculo nem gigante.
-  const larguraChip = Math.round(Math.min(52, Math.max(40, (width - 32 - 8 * 6) / 7)));
+  const larguraChip = Math.round(Math.min(68, Math.max(56, (width - 32 - 8 * 6) / 7)));
 
   return (
     <ScrollView
@@ -805,7 +805,7 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
     <View>
       <Pressable style={styles.andamentoToggle} onPress={alternar}>
         <Text style={styles.andamentoToggleTexto}>Ver ranking</Text>
-        <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={16} color={colors.navy} />
+        <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={26} color={colors.navy} />
       </Pressable>
       {aberto && (
         <View style={styles.andamentoPainel}>
@@ -838,7 +838,7 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                       </Text>
                       <Ionicons
                         name={vendedorEstaAberto ? 'chevron-up' : 'chevron-down'}
-                        size={14}
+                        size={24}
                         color={colors.textMuted}
                       />
                     </View>
@@ -863,7 +863,7 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                             </View>
                             <Ionicons
                               name={diaEstaAberto ? 'chevron-up' : 'chevron-down'}
-                              size={14}
+                              size={20}
                               color={colors.textMuted}
                             />
                           </Pressable>
@@ -1241,18 +1241,18 @@ const styles = StyleSheet.create({
   seletorDiaWrap: { marginBottom: 12, flexGrow: 0 },
   seletorDiaConteudo: { gap: 8, paddingRight: 8 },
   diaBotao: {
-    height: 64,
-    borderRadius: 16,
+    height: 80,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
+    gap: 3,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
   },
   diaBotaoAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
-  diaTextoDia: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
-  diaTextoMes: { fontSize: 11, fontWeight: '600', color: colors.textSecondary, textTransform: 'uppercase' },
+  diaTextoDia: { fontSize: 21, fontWeight: '700', color: colors.textPrimary },
+  diaTextoMes: { fontSize: 13, fontWeight: '600', color: colors.textSecondary, textTransform: 'uppercase' },
   diaTextoAtivo: { color: colors.white },
   diaPontoHoje: { position: 'absolute', bottom: 6, width: 4, height: 4, borderRadius: 2, backgroundColor: colors.navy },
   diaPontoHojeAtivo: { backgroundColor: colors.white },
@@ -1336,14 +1336,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 10,
-    paddingTop: 8,
+    paddingTop: 12,
+    paddingBottom: 4,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-  andamentoToggleTexto: { fontSize: 12, fontWeight: '600', color: colors.navy },
+  andamentoToggleTexto: { fontSize: 14, fontWeight: '600', color: colors.navy },
   andamentoPainel: { marginTop: 6 },
   andamentoBloco: { paddingVertical: 4 },
-  andamentoLinha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  andamentoLinha: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
   andamentoNome: { flex: 1, fontSize: 12, color: colors.textPrimary },
   andamentoValor: { fontSize: 12, color: colors.textSecondary },
   andamentoValorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -1354,7 +1361,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 3,
+    paddingVertical: 8,
     paddingLeft: 10,
   },
   diaVendedorInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
