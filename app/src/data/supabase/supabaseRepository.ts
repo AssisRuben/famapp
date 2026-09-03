@@ -58,6 +58,8 @@ import {
   StatusSincronizacao,
   SugestaoCampanhaParams,
   SugestaoCompra,
+  SugestaoKitsParams,
+  SugestaoParAfinidade,
   TipoReceita,
   VendaAntimicrobianoRecente,
   VendaComplementarMarcada,
@@ -69,6 +71,7 @@ import {
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
 import { sugerirCandidatos } from '../../lib/campanhas';
+import { LinhaRpcAfinidade, mapearSugestoesAfinidade, resolverCodigosSeed } from '../../lib/afinidadeKits';
 import { rotuloSemana } from '../../lib/metas';
 import { todayISO } from '../../lib/format';
 
@@ -1228,11 +1231,35 @@ class SupabaseRepository implements DataRepository {
     return sugerirCandidatos(catalogo, vendaPorProduto, params, codigosEmCampanhaAtiva);
   }
 
+  async sugerirParesAfinidade(_profile: Profile, params: SugestaoKitsParams): Promise<SugestaoParAfinidade[]> {
+    const catalogoLinhas = await this.buscarPaginado((inicio, fim) =>
+      this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
+    );
+    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
+    const codigosSeed = resolverCodigosSeed(catalogo, params.macroGrupo);
+    if (codigosSeed.length === 0) return [];
+
+    const { data, error } = await supabase.rpc('fn_sugerir_pares_afinidade', {
+      p_codigos_seed: codigosSeed,
+      p_dias: params.diasJanela ?? 120,
+      p_min_co_ocorrencias: params.minCoOcorrencias ?? 8,
+      p_lift_minimo: params.liftMinimo ?? 1.2,
+    });
+    if (error) throw error;
+
+    const linhas = (data ?? []) as LinhaRpcAfinidade[];
+    // catalogo já tem o produto_catalogo inteiro carregado acima (pra
+    // resolver os códigos-semente) — reaproveita em vez de buscar de
+    // novo só os códigos parceiros.
+    const catalogoPorCodigo = new Map(catalogo.map((p) => [p.codigo, p]));
+    return mapearSugestoesAfinidade(linhas, catalogoPorCodigo);
+  }
+
   private async carregarCampanhas(filtroId?: number): Promise<Campanha[]> {
     let query = supabase
       .from('campanhas')
       .select(
-        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item)'
+        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item), campanha_kits(id, nome, tipo_precificacao, percentual_desconto_item, preco_fixo, quantidade_cartazes, data_inicio, data_fim, campanha_kit_produtos(codigo_produto, quantidade))'
       )
       .order('created_at', { ascending: false });
     if (filtroId !== undefined) query = query.eq('id', filtroId);
@@ -1262,11 +1289,20 @@ class SupabaseRepository implements DataRepository {
     let catalogoPorCodigo = new Map<number, any>();
     if (filtroId !== undefined) {
       const codigos = [
-        ...new Set(linhas.flatMap((c: any) => (c.campanha_produtos ?? []).map((cp: any) => cp.codigo_produto))),
+        ...new Set([
+          ...linhas.flatMap((c: any) => (c.campanha_produtos ?? []).map((cp: any) => cp.codigo_produto)),
+          // kit multi-produto (02/09/2026) também precisa de
+          // preco_venda/custo_medio ATUAIS (não dá pra derivar como em
+          // campanha_produtos, já que percentual_desconto de kit é do
+          // COMBO, não de um produto só).
+          ...linhas.flatMap((c: any) =>
+            (c.campanha_kits ?? []).flatMap((k: any) => (k.campanha_kit_produtos ?? []).map((kp: any) => kp.codigo_produto))
+          ),
+        ]),
       ];
       if (codigos.length > 0) {
         const { data: produtos, error: erroProdutos } = await this.queryProdutoCatalogo(
-          'codigo, codigo_barras, nome'
+          'codigo, codigo_barras, nome, preco_venda, custo_medio'
         ).in('codigo', codigos);
         if (erroProdutos) throw erroProdutos;
         catalogoPorCodigo = new Map((produtos ?? []).map((p: any) => [p.codigo, p]));
@@ -1312,6 +1348,26 @@ class SupabaseRepository implements DataRepository {
               : null,
         };
       }),
+      kits: (c.campanha_kits ?? []).map((k: any) => ({
+        id: String(k.id),
+        nome: k.nome,
+        tipoPrecificacao: k.tipo_precificacao,
+        percentualDescontoItem: k.percentual_desconto_item != null ? Number(k.percentual_desconto_item) : null,
+        precoFixo: k.preco_fixo != null ? Number(k.preco_fixo) : null,
+        quantidadeCartazes: k.quantidade_cartazes,
+        dataInicio: k.data_inicio ?? c.data_inicio,
+        dataFim: k.data_fim ?? c.data_fim,
+        produtos: (k.campanha_kit_produtos ?? []).map((kp: any) => {
+          const produto = catalogoPorCodigo.get(kp.codigo_produto);
+          return {
+            codigoProduto: kp.codigo_produto,
+            nomeProduto: produto?.nome ?? (filtroId !== undefined ? `Produto ${kp.codigo_produto}` : ''),
+            quantidade: kp.quantidade,
+            precoRegular: produto?.preco_venda != null ? Number(produto.preco_venda) : 0,
+            custoMedio: produto?.custo_medio != null ? Number(produto.custo_medio) : 0,
+          };
+        }),
+      })),
     }));
   }
 
@@ -1342,6 +1398,12 @@ class SupabaseRepository implements DataRepository {
       // seguro do que diffar item a item (a tela já manda a lista inteira).
       const { error: deleteError } = await supabase.from('campanha_produtos').delete().eq('campanha_id', campanhaId);
       if (deleteError) throw deleteError;
+
+      // mesmo padrão pros kits multi-produto — on delete cascade em
+      // campanha_kit_produtos.kit_id cuida de limpar os itens junto,
+      // não precisa deletar essa tabela separado.
+      const { error: deleteKitsError } = await supabase.from('campanha_kits').delete().eq('campanha_id', campanhaId);
+      if (deleteKitsError) throw deleteKitsError;
     } else {
       const { data, error } = await supabase
         .from('campanhas')
@@ -1371,6 +1433,40 @@ class SupabaseRepository implements DataRepository {
         }))
       );
       if (error) throw error;
+    }
+
+    if (input.kits.length > 0) {
+      const { data: kitsInseridos, error: erroKits } = await supabase
+        .from('campanha_kits')
+        .insert(
+          input.kits.map((k) => ({
+            campanha_id: campanhaId,
+            nome: k.nome,
+            tipo_precificacao: k.tipoPrecificacao,
+            percentual_desconto_item: k.tipoPrecificacao === 'percentual' ? k.percentualDescontoItem : null,
+            preco_fixo: k.tipoPrecificacao === 'preco_fixo' ? k.precoFixo : null,
+            quantidade_cartazes: k.quantidadeCartazes,
+            data_inicio: k.dataInicio === input.dataInicio ? null : k.dataInicio,
+            data_fim: k.dataFim === input.dataFim ? null : k.dataFim,
+          }))
+        )
+        .select('id');
+      if (erroKits) throw erroKits;
+
+      // Ids voltam na mesma ordem que foram inseridos — usa isso pra
+      // ligar cada kit salvo aos seus produtos sem precisar de mais um
+      // round-trip pra descobrir o id de cada um.
+      const itensKitProdutos = (kitsInseridos ?? []).flatMap((kitSalvo: any, indice: number) =>
+        input.kits[indice].produtos.map((p) => ({
+          kit_id: kitSalvo.id,
+          codigo_produto: p.codigoProduto,
+          quantidade: p.quantidade,
+        }))
+      );
+      if (itensKitProdutos.length > 0) {
+        const { error: erroKitProdutos } = await supabase.from('campanha_kit_produtos').insert(itensKitProdutos);
+        if (erroKitProdutos) throw erroKitProdutos;
+      }
     }
 
     const [salva] = await this.carregarCampanhas(campanhaId);

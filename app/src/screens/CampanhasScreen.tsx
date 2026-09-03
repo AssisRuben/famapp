@@ -33,6 +33,10 @@ import {
 type Modo = 'lista' | 'nova';
 const TODOS_OS_GRUPOS = '__todos__';
 const PERSONALIZADO = '__personalizado__';
+
+function round2(valor: number): number {
+  return Math.round(valor * 100) / 100;
+}
 type SelecaoModelo = ModeloCampanha | typeof PERSONALIZADO;
 
 const OPCOES_MODO_SUGESTAO: { chave: ModoSugestaoCampanha; label: string; descricao: string }[] = [
@@ -85,6 +89,11 @@ export function CampanhasScreen() {
   // na hora, tornando impossível digitar decimal (achado 26/08/2026).
   const [textosPreco, setTextosPreco] = useState<Record<number, string>>({});
   const [editandoId, setEditandoId] = useState<string | null>(null);
+  // Essa tela não edita kit multi-produto (isso é feito em Cartazetes/
+  // Sugestão de kits) — mas precisa preservar os kits que a campanha
+  // JÁ tinha ao salvar uma edição de produtos, senão salvarCampanha
+  // (que substitui kits por completo) apagaria eles silenciosamente.
+  const [kitsExistentes, setKitsExistentes] = useState<Campanha['kits']>([]);
   const [modoSugestao, setModoSugestao] = useState<ModoSugestaoCampanha>('popularidade');
   const [macroGrupoFiltro, setMacroGrupoFiltro] = useState<MacroGrupo | typeof TODOS_OS_GRUPOS>(TODOS_OS_GRUPOS);
   const [modeloSelecionado, setModeloSelecionado] = useState<SelecaoModelo>(PERSONALIZADO);
@@ -185,7 +194,16 @@ export function CampanhasScreen() {
     // mesmo achado do lote de Metas (26/08/2026), ver lib/moeda.ts.
     const precoPromocional = parseDecimalBR(textoMascarado);
     setItens((atual) =>
-      atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, precoPromocional } : i))
+      atual.map((i) => {
+        if (i.codigoProduto !== codigoProduto) return i;
+        // % desconto precisa refletir o preço de verdade digitado, não
+        // ficar preso no valor sugerido/alvo original — achado 02/09/2026:
+        // depois de editar o preço na mão, o card continuava mostrando o
+        // desconto alvo (ex.: 15%) igual pra todo produto.
+        const percentualDesconto =
+          i.precoRegular > 0 ? round2(((i.precoRegular - precoPromocional) / i.precoRegular) * 100) : 0;
+        return { ...i, precoPromocional, percentualDesconto };
+      })
     );
   };
 
@@ -195,6 +213,7 @@ export function CampanhasScreen() {
     setDataInicio(todayISO());
     setDataFim(somarDias(todayISO(), 7));
     setItens([]);
+    setKitsExistentes([]);
     setTextosPreco({});
     setModoSugestao('popularidade');
     setMacroGrupoFiltro(TODOS_OS_GRUPOS);
@@ -220,6 +239,7 @@ export function CampanhasScreen() {
     // (não resolve nome/código de barras, só usados na edição), então
     // busca a campanha completa em seguida e substitui.
     setItens(campanha.produtos);
+    setKitsExistentes(campanha.kits);
     setTextosPreco({});
     setModo('nova');
     if (catalogo.length === 0 && profile) {
@@ -228,7 +248,10 @@ export function CampanhasScreen() {
     if (!profile) return;
     try {
       const completa = await repository.getCampanha(profile, campanha.id);
-      if (completa) setItens(completa.produtos);
+      if (completa) {
+        setItens(completa.produtos);
+        setKitsExistentes(completa.kits);
+      }
     } catch {
       // mantém o que já tinha (nomes podem vir vazios da lista leve)
     }
@@ -243,14 +266,23 @@ export function CampanhasScreen() {
       alertar('Datas inválidas', 'A data de fim precisa ser igual ou depois da data de início.');
       return;
     }
-    if (itens.length === 0) {
+    // Campanha só-de-kit (criada via Sugestão de kits, produtos: [])
+    // é válida — só bloqueia se não sobrou NEM produto NEM kit nenhum.
+    if (itens.length === 0 && kitsExistentes.length === 0) {
       alertar('Sem produtos', 'Gere a sugestão e mantenha pelo menos 1 produto antes de salvar.');
       return;
     }
 
     setSalvando(true);
     try {
-      await repository.salvarCampanha({ id: editandoId ?? undefined, nome: nome.trim(), dataInicio, dataFim, produtos: itens });
+      await repository.salvarCampanha({
+        id: editandoId ?? undefined,
+        nome: nome.trim(),
+        dataInicio,
+        dataFim,
+        produtos: itens,
+        kits: kitsExistentes,
+      });
       setModo('lista');
       resetFormulario();
       await carregarLista();

@@ -605,6 +605,64 @@ export interface CampanhaProduto {
   kit: KitPromocao | null;
 }
 
+// Kit multi-produto por afinidade de compra (02/09/2026) — DIFERENTE
+// de KitPromocao acima (que é "leve mais unidades do MESMO produto").
+// Aqui o kit junta produtos DIFERENTES que os clientes já compram
+// juntos na prática (ex.: fralda + lenço umedecido), sugerido a partir
+// de venda real (ver lib/afinidadeKits.ts). Sem desempenho de venda
+// tracked ainda (vw_campanhas_desempenho só soma por codigo_produto
+// único — um kit multi-produto não tem um único código pra juntar).
+export type TipoPrecificacaoKit = 'percentual' | 'preco_fixo';
+
+export interface KitMultiProdutoItem {
+  codigoProduto: number;
+  nomeProduto: string;
+  quantidade: number;
+  precoRegular: number;
+  custoMedio: number;
+}
+
+export interface KitMultiProduto {
+  id: string;
+  nome: string | null;
+  tipoPrecificacao: TipoPrecificacaoKit;
+  // Exatamente um dos dois é não-nulo, conforme tipoPrecificacao.
+  percentualDescontoItem: number | null;
+  precoFixo: number | null;
+  quantidadeCartazes: number;
+  dataInicio: string;
+  dataFim: string;
+  produtos: KitMultiProdutoItem[];
+}
+
+// Par de produtos sugerido por co-ocorrência de venda (market basket
+// analysis via fn_sugerir_pares_afinidade) — ainda não é um kit
+// salvo, é a matéria-prima que a tela de sugestão mostra pro gestor
+// escolher/editar antes de virar KitMultiProduto de verdade.
+export interface SugestaoParAfinidade {
+  codigoProdutoSeed: number;
+  nomeProdutoSeed: string;
+  precoRegularSeed: number;
+  custoMedioSeed: number;
+  codigoProdutoParceiro: number;
+  nomeProdutoParceiro: string;
+  precoRegularParceiro: number;
+  custoMedioParceiro: number;
+  coOcorrencias: number;
+  vendasSeed: number;
+  vendasParceiro: number;
+  lift: number;
+}
+
+export interface SugestaoKitsParams {
+  // Obrigatório (diferente de SugestaoCampanhaParams.macroGrupo) —
+  // sem categoria, o código-semente viraria o catálogo inteiro.
+  macroGrupo: string;
+  diasJanela?: number;
+  minCoOcorrencias?: number;
+  liftMinimo?: number;
+}
+
 export interface Campanha {
   id: string;
   nome: string;
@@ -612,6 +670,7 @@ export interface Campanha {
   dataFim: string;
   criadaEm: string;
   produtos: CampanhaProduto[];
+  kits: KitMultiProduto[];
   // Desempenho real de venda no período da campanha (26/08/2026) —
   // diferente de produtos.length (quantidade de produtos CADASTRADOS),
   // isso é quantidade VENDIDA de fato. 0 quando ninguém vendeu ainda.
@@ -625,6 +684,7 @@ export interface SalvarCampanhaInput {
   dataInicio: string;
   dataFim: string;
   produtos: CampanhaProduto[];
+  kits: KitMultiProduto[];
 }
 
 // Um cartaz por grupo (mesmo nome-base + preço + validade) — o
