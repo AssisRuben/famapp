@@ -14,10 +14,31 @@ import { resolverCodigosSeed } from '../lib/afinidadeKits';
 import {
   calcularKitPercentualSustentavel,
   calcularKitPrecoFixoSustentavel,
+  descricaoKit,
   descricaoKitMultiProduto,
   margemResultanteKitMultiProduto,
+  margemResultanteKitProdutoUnico,
+  PRESETS_KIT,
 } from '../lib/kits';
-import { KitMultiProduto, ProdutoCatalogo, SugestaoParAfinidade, TipoPrecificacaoKit } from '../types/domain';
+import {
+  CampanhaProduto,
+  KitMultiProduto,
+  KitPromocao,
+  ProdutoCatalogo,
+  SugestaoParAfinidade,
+  TipoPrecificacaoKit,
+} from '../types/domain';
+
+type ModoKit = 'diferentes' | 'mesmo_item';
+
+interface ItemMesmoProduto {
+  codigoProduto: number;
+  codigoBarras: string;
+  nomeProduto: string;
+  precoRegular: number;
+  custoMedio: number;
+  kit: KitPromocao;
+}
 
 function round2(valor: number): number {
   return Math.round(valor * 100) / 100;
@@ -178,6 +199,7 @@ function CardParSugerido({
 
 export function SugestaoKitsScreen() {
   const { profile } = useAuth();
+  const [modo, setModo] = useState<ModoKit>('diferentes');
   const [macroGrupo, setMacroGrupo] = useState<MacroGrupo | null>(null);
   const [margemMinima, setMargemMinima] = useState('20');
   const [descontoAlvo, setDescontoAlvo] = useState('20');
@@ -192,11 +214,122 @@ export function SugestaoKitsScreen() {
   // documentado em CampanhasScreen.textosPreco/CartazetesScreen.kitBuffers).
   const [valorBuffer, setValorBuffer] = useState<Record<string, string>>({});
 
+  // Modo "Mesmo item" — kit de produto único (leve N, pague menos),
+  // pedido explícito 02/09/2026: até aqui só dava pra criar esse tipo
+  // de kit depois, na tela Cartazetes, convertendo um item já existente
+  // de uma campanha comum. Monta um por vez (busca produto, configura,
+  // adiciona à lista) — mesma fórmula/painel já usado em CartazetesScreen.
+  const [buscaProdutoMesmo, setBuscaProdutoMesmo] = useState('');
+  const [produtoEscolhido, setProdutoEscolhido] = useState<ProdutoCatalogo | null>(null);
+  const KIT_PADRAO: KitPromocao = { quantidadeMinima: 2, tipoPrecificacao: 'percentual', percentualDescontoItem: 0, precoFixo: null };
+  const [kitConfig, setKitConfig] = useState<KitPromocao>(KIT_PADRAO);
+  const [kitQuantidadeBuffer, setKitQuantidadeBuffer] = useState<string | undefined>(undefined);
+  const [kitValorBuffer, setKitValorBuffer] = useState<string | undefined>(undefined);
+  const [itensMesmoProduto, setItensMesmoProduto] = useState<ItemMesmoProduto[]>([]);
+
   const [nome, setNome] = useState('');
   const [dataInicio, setDataInicio] = useState(todayISO());
   const [dataFim, setDataFim] = useState(somarDias(todayISO(), 7));
   const [calendarioAberto, setCalendarioAberto] = useState(false);
   const [salvando, setSalvando] = useState(false);
+
+  const escolherModo = async (novoModo: ModoKit) => {
+    setModo(novoModo);
+    if (novoModo === 'mesmo_item' && catalogo.length === 0 && profile) {
+      setCatalogo(await repository.getCatalogoProdutos(profile));
+    }
+  };
+
+  const resultadosBuscaProdutoMesmo =
+    buscaProdutoMesmo.trim().length < 2
+      ? []
+      : catalogo
+          .filter((p) => {
+            const termo = buscaProdutoMesmo.trim().toLowerCase();
+            return p.nome.toLowerCase().includes(termo) || String(p.codigo).includes(termo);
+          })
+          .slice(0, 8);
+
+  const escolherProdutoMesmo = (produto: ProdutoCatalogo) => {
+    setProdutoEscolhido(produto);
+    setBuscaProdutoMesmo('');
+    const margemMinimaPct = parseDecimalBR(margemMinima) || 0;
+    const descontoAlvoPct = parseDecimalBR(descontoAlvo) || 0;
+    const { percentualDesconto } = calcularKitPercentualSustentavel(
+      [{ precoVenda: produto.precoVenda, custoMedio: produto.custoMedio, quantidade: 2 }],
+      descontoAlvoPct,
+      margemMinimaPct
+    );
+    setKitConfig({ quantidadeMinima: 2, tipoPrecificacao: 'percentual', percentualDescontoItem: percentualDesconto, precoFixo: null });
+    setKitQuantidadeBuffer(undefined);
+    setKitValorBuffer(undefined);
+  };
+
+  const confirmarKitQuantidadeMesmo = () => {
+    if (kitQuantidadeBuffer !== undefined) {
+      const quantidade = Math.max(2, Math.round(parseDecimalBR(kitQuantidadeBuffer)) || 2);
+      setKitConfig((atual) => ({ ...atual, quantidadeMinima: quantidade }));
+    }
+    setKitQuantidadeBuffer(undefined);
+  };
+
+  const confirmarKitValorMesmo = () => {
+    if (kitValorBuffer !== undefined) {
+      const digitado = parseDecimalBR(kitValorBuffer);
+      setKitConfig((atual) =>
+        atual.tipoPrecificacao === 'preco_fixo'
+          ? { ...atual, precoFixo: Math.max(0.01, round2(digitado)) }
+          : { ...atual, percentualDescontoItem: Math.min(100, Math.max(0, round2(digitado))) }
+      );
+    }
+    setKitValorBuffer(undefined);
+  };
+
+  // Mesmo espírito de alternarTipoPrecificacaoKitProduto (CartazetesScreen)
+  // — converte o valor pro novo formato em vez de zerar.
+  const alternarTipoPrecificacaoMesmo = (tipo: TipoPrecificacaoKit) => {
+    if (!produtoEscolhido) return;
+    setKitConfig((atual) => {
+      if (tipo === atual.tipoPrecificacao) return atual;
+      const totalRegular = produtoEscolhido.precoVenda * atual.quantidadeMinima;
+      if (tipo === 'preco_fixo') {
+        const percentual = atual.percentualDescontoItem ?? 0;
+        return { ...atual, tipoPrecificacao: tipo, precoFixo: round2(totalRegular * (1 - percentual / 100)), percentualDescontoItem: null };
+      }
+      const precoFixo = atual.precoFixo ?? totalRegular;
+      const percentual = totalRegular > 0 ? Math.max(0, round2(((totalRegular - precoFixo) / totalRegular) * 100)) : 0;
+      return { ...atual, tipoPrecificacao: tipo, percentualDescontoItem: percentual, precoFixo: null };
+    });
+  };
+
+  const valorExibidoKitMesmo = (campo: 'quantidade' | 'valor'): string => {
+    if (campo === 'quantidade') return kitQuantidadeBuffer ?? String(kitConfig.quantidadeMinima);
+    if (kitValorBuffer !== undefined) return kitValorBuffer;
+    return kitConfig.tipoPrecificacao === 'preco_fixo'
+      ? formatDecimalBR(kitConfig.precoFixo ?? 0)
+      : formatDecimalBR(kitConfig.percentualDescontoItem ?? 0);
+  };
+
+  const adicionarKitMesmoProduto = () => {
+    if (!produtoEscolhido) return;
+    setItensMesmoProduto((atual) => [
+      ...atual,
+      {
+        codigoProduto: produtoEscolhido.codigo,
+        codigoBarras: produtoEscolhido.codigoBarras,
+        nomeProduto: produtoEscolhido.nome,
+        precoRegular: produtoEscolhido.precoVenda,
+        custoMedio: produtoEscolhido.custoMedio,
+        kit: kitConfig,
+      },
+    ]);
+    setProdutoEscolhido(null);
+    setKitConfig(KIT_PADRAO);
+  };
+
+  const removerKitMesmoProduto = (codigoProduto: number) => {
+    setItensMesmoProduto((atual) => atual.filter((i) => i.codigoProduto !== codigoProduto));
+  };
 
   const gerarSugestoes = async () => {
     if (!profile || !macroGrupo) return;
@@ -310,11 +443,36 @@ export function SugestaoKitsScreen() {
     setSalvando(true);
     try {
       const kits: KitMultiProduto[] = selecionados.map((item) => itemParaKit(item, dataInicio, dataFim));
+      // Kit de produto único vira CampanhaProduto com tipoPromocao 'kit'
+      // (mesmo formato que CartazetesScreen já grava) — precoPromocional/
+      // percentualDesconto aqui são só um resumo pra exibição, quem manda
+      // no cartaz de verdade é o objeto `kit`.
+      const produtosMesmoItem: CampanhaProduto[] = itensMesmoProduto.map((item) => {
+        const { precoMedioUnidade } = margemResultanteKitProdutoUnico(item.kit, item.precoRegular, item.custoMedio);
+        const percentualDesconto =
+          item.precoRegular > 0 ? round2(((item.precoRegular - precoMedioUnidade) / item.precoRegular) * 100) : 0;
+        return {
+          codigoProduto: item.codigoProduto,
+          codigoBarras: item.codigoBarras,
+          nomeProduto: item.nomeProduto,
+          precoRegular: item.precoRegular,
+          custoMedio: item.custoMedio,
+          precoPromocional: precoMedioUnidade,
+          percentualDesconto,
+          quantidadeCartazes: 1,
+          dataInicio,
+          dataFim,
+          tipoPromocao: 'kit',
+          kit: item.kit,
+        };
+      });
+      const totalKits = kits.length + produtosMesmoItem.length;
 
-      await repository.salvarCampanha({ nome: nome.trim(), dataInicio, dataFim, produtos: [], kits });
-      alertar('Campanha criada', `"${nome.trim()}" criada com ${kits.length} kit(s) — ajuste preço e imprima em Cartazetes.`);
+      await repository.salvarCampanha({ nome: nome.trim(), dataInicio, dataFim, produtos: produtosMesmoItem, kits });
+      alertar('Campanha criada', `"${nome.trim()}" criada com ${totalKits} kit(s) — ajuste preço e imprima em Cartazetes.`);
       setNome('');
       setItens([]);
+      setItensMesmoProduto([]);
       setGerada(false);
       setMacroGrupo(null);
     } catch (erro) {
@@ -324,10 +482,12 @@ export function SugestaoKitsScreen() {
     }
   };
 
+  const totalSelecionado = selecionados.length + itensMesmoProduto.length;
+
   // Botão "Fechar campanha" pede confirmação antes de gravar — pedido
   // explícito ("quando fechar, confirme"), já que pode juntar kits de
-  // várias categorias acumuladas e vale um último "tem certeza" antes
-  // de criar de vez.
+  // várias categorias acumuladas (dos dois modos) e vale um último
+  // "tem certeza" antes de criar de vez.
   const confirmarEFechar = () => {
     if (!nome.trim()) {
       alertar('Nome obrigatório', 'Dê um nome pra campanha antes de fechar.');
@@ -337,13 +497,13 @@ export function SugestaoKitsScreen() {
       alertar('Datas inválidas', 'A data de fim precisa ser igual ou depois da data de início.');
       return;
     }
-    if (selecionados.length === 0) {
-      alertar('Nenhum kit selecionado', 'Marque pelo menos um par sugerido antes de fechar.');
+    if (totalSelecionado === 0) {
+      alertar('Nenhum kit selecionado', 'Marque pelo menos um kit antes de fechar.');
       return;
     }
     confirmar(
       'Fechar campanha',
-      `Confirma criar "${nome.trim()}" com ${selecionados.length} kit(s)? Depois é só ajustar preço/imprimir em Cartazetes.`,
+      `Confirma criar "${nome.trim()}" com ${totalSelecionado} kit(s)? Depois é só ajustar preço/imprimir em Cartazetes.`,
       salvar,
       { textoConfirmar: 'Fechar campanha' }
     );
@@ -353,10 +513,159 @@ export function SugestaoKitsScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.conteudo}>
       <Text style={styles.title}>🧺 Kits sugeridos</Text>
       <Text style={styles.subtitle}>
-        Produtos DIFERENTES que os clientes já compram juntos, calculado a partir da venda real — escolha uma
-        categoria pra começar.
+        {modo === 'diferentes'
+          ? 'Produtos DIFERENTES que os clientes já compram juntos, calculado a partir da venda real — escolha uma categoria pra começar.'
+          : 'Kit do MESMO produto (ex.: leve 3, pague 2) — escolha o produto e configure a quantidade/desconto.'}
       </Text>
 
+      <View style={styles.segmentedWrap}>
+        <Pressable
+          style={[styles.segmentButton, modo === 'diferentes' && styles.segmentButtonAtivo]}
+          onPress={() => escolherModo('diferentes')}
+        >
+          <Text style={[styles.segmentText, modo === 'diferentes' && styles.segmentTextAtivo]}>Itens diferentes</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.segmentButton, modo === 'mesmo_item' && styles.segmentButtonAtivo]}
+          onPress={() => escolherModo('mesmo_item')}
+        >
+          <Text style={[styles.segmentText, modo === 'mesmo_item' && styles.segmentTextAtivo]}>Mesmo item</Text>
+        </Pressable>
+      </View>
+
+      {modo === 'mesmo_item' && (
+        <>
+          <Card>
+            <Text style={styles.cardTitulo}>Produto</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Buscar produto pelo nome ou código"
+              value={buscaProdutoMesmo}
+              onChangeText={setBuscaProdutoMesmo}
+            />
+            {resultadosBuscaProdutoMesmo.map((p) => (
+              <Pressable key={p.codigo} style={styles.resultadoBusca} onPress={() => escolherProdutoMesmo(p)}>
+                <Text style={styles.resultadoBuscaTexto} numberOfLines={1}>
+                  {p.nome} · cód. {p.codigo}
+                </Text>
+                <Ionicons name="add-circle" size={20} color={colors.navy} />
+              </Pressable>
+            ))}
+
+            {produtoEscolhido && (
+              <View style={styles.painelExpandido}>
+                <Text style={styles.campoLabel}>Produto escolhido</Text>
+                <Text style={styles.campoSomenteLeitura}>
+                  {produtoEscolhido.nome} · cód. {produtoEscolhido.codigo} · {formatBRL(produtoEscolhido.precoVenda)}
+                </Text>
+
+                <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Atalhos</Text>
+                <View style={styles.grupoGrid}>
+                  {PRESETS_KIT.map((preset) => {
+                    const ativo =
+                      kitConfig.quantidadeMinima === preset.kit.quantidadeMinima &&
+                      kitConfig.tipoPrecificacao === preset.kit.tipoPrecificacao &&
+                      kitConfig.percentualDescontoItem === preset.kit.percentualDescontoItem;
+                    return (
+                      <Pressable
+                        key={preset.label}
+                        style={[styles.chip, ativo && styles.chipAtivo]}
+                        onPress={() => setKitConfig(preset.kit)}
+                      >
+                        <Text style={[styles.chipTexto, ativo && styles.chipTextoAtivo]}>{preset.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={styles.campoLabel}>Quantidade mínima</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={valorExibidoKitMesmo('quantidade')}
+                  onChangeText={setKitQuantidadeBuffer}
+                  onBlur={confirmarKitQuantidadeMesmo}
+                />
+
+                <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Tipo de preço</Text>
+                <View style={styles.grupoGrid}>
+                  <Pressable
+                    style={[styles.chip, kitConfig.tipoPrecificacao === 'percentual' && styles.chipAtivo]}
+                    onPress={() => alternarTipoPrecificacaoMesmo('percentual')}
+                  >
+                    <Text style={[styles.chipTexto, kitConfig.tipoPrecificacao === 'percentual' && styles.chipTextoAtivo]}>
+                      % no {kitConfig.quantidadeMinima}º item
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.chip, kitConfig.tipoPrecificacao === 'preco_fixo' && styles.chipAtivo]}
+                    onPress={() => alternarTipoPrecificacaoMesmo('preco_fixo')}
+                  >
+                    <Text style={[styles.chipTexto, kitConfig.tipoPrecificacao === 'preco_fixo' && styles.chipTextoAtivo]}>
+                      Preço fixo pra {kitConfig.quantidadeMinima}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <Text style={styles.campoLabel}>
+                  {kitConfig.tipoPrecificacao === 'preco_fixo'
+                    ? `Preço fixo (R$) pras ${kitConfig.quantidadeMinima} unidades`
+                    : 'Desconto (%) no último item'}
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="decimal-pad"
+                  value={valorExibidoKitMesmo('valor')}
+                  onChangeText={setKitValorBuffer}
+                  onBlur={confirmarKitValorMesmo}
+                />
+
+                {(() => {
+                  const { totalCusto, totalPago } = margemResultanteKitProdutoUnico(
+                    kitConfig,
+                    produtoEscolhido.precoVenda,
+                    produtoEscolhido.custoMedio
+                  );
+                  return (
+                    <>
+                      <Text style={styles.previaTexto}>{descricaoKit(kitConfig)}</Text>
+                      <ComparativoCustoVenda custo={totalCusto} venda={totalPago} legenda={`por ${kitConfig.quantidadeMinima} unidades`} />
+                    </>
+                  );
+                })()}
+
+                <Pressable style={styles.botaoGerar} onPress={adicionarKitMesmoProduto}>
+                  <Text style={styles.botaoGerarTexto}>Adicionar à lista</Text>
+                </Pressable>
+              </View>
+            )}
+          </Card>
+
+          {itensMesmoProduto.length > 0 && (
+            <>
+              <Text style={styles.sectionTitulo}>Kits de item único ({itensMesmoProduto.length})</Text>
+              {itensMesmoProduto.map((item) => (
+                <Card key={item.codigoProduto}>
+                  <View style={styles.itemHeaderRow}>
+                    <View style={styles.itemHeaderTexto}>
+                      <Text style={styles.itemNome} numberOfLines={2}>
+                        {item.nomeProduto} ({item.codigoProduto})
+                      </Text>
+                      <Text style={styles.itemSubinfo}>{descricaoKit(item.kit)}</Text>
+                    </View>
+                    <Pressable onPress={() => removerKitMesmoProduto(item.codigoProduto)} hitSlop={8}>
+                      <Ionicons name="trash-outline" size={20} color={colors.red} />
+                    </Pressable>
+                  </View>
+                </Card>
+              ))}
+            </>
+          )}
+        </>
+      )}
+
+      {modo === 'diferentes' && (
+      <>
       <Card>
         <Text style={styles.cardTitulo}>Categoria</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -446,12 +755,15 @@ export function SugestaoKitsScreen() {
           )}
         </>
       )}
+      </>
+      )}
 
-      {selecionados.length > 0 && (
+      {totalSelecionado > 0 && (
         <Card>
-          <Text style={styles.cardTitulo}>Fechar campanha com {selecionados.length} kit(s)</Text>
+          <Text style={styles.cardTitulo}>Fechar campanha com {totalSelecionado} kit(s)</Text>
           <Text style={styles.subinfoFechar}>
-            Pode escolher outra categoria acima e gerar mais sugestões — o que já está selecionado fica guardado até você fechar.
+            Pode trocar de modo/categoria acima e adicionar mais kits — o que já está selecionado (nos dois modos) fica
+            guardado até você fechar.
           </Text>
           <TextInput style={styles.input} placeholder="Nome da campanha" value={nome} onChangeText={setNome} />
           <Text style={[styles.rotulo, styles.espacado]}>Período</Text>
@@ -565,4 +877,29 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   botaoPeriodoTexto: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
+  segmentedWrap: {
+    flexDirection: 'row',
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  segmentButton: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
+  segmentButtonAtivo: { backgroundColor: colors.navy },
+  segmentText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  segmentTextAtivo: { color: colors.white },
+  resultadoBusca: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  resultadoBuscaTexto: { flex: 1, fontSize: 13, color: colors.textPrimary, marginRight: 8 },
+  campoSomenteLeitura: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
+  grupoLabelEspacado: { marginTop: 14 },
 });
