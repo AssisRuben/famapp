@@ -182,7 +182,16 @@ export function CampanhasScreen() {
     setTextosPreco((atual) => ({ ...atual, [codigoProduto]: textoMascarado }));
     const precoPromocional = Number(textoMascarado.replace(',', '.')) || 0;
     setItens((atual) =>
-      atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, precoPromocional } : i))
+      atual.map((i) => {
+        if (i.codigoProduto !== codigoProduto) return i;
+        // Recalcula junto com o preço — sem isso, editar só o preço
+        // aqui salvava percentualDesconto desatualizado (da geração
+        // automática), e o cartaz mostrava "% OFF" e "DE" errados
+        // depois (achado 01/09/2026, mesma fórmula usada em
+        // CartazetesScreen pra manter De/Por/Desconto em sincronia).
+        const percentualDesconto = i.precoRegular > 0 ? Math.round(((i.precoRegular - precoPromocional) / i.precoRegular) * 10000) / 100 : 0;
+        return { ...i, precoPromocional, percentualDesconto };
+      })
     );
   };
 

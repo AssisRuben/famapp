@@ -61,19 +61,31 @@ export function CartazetesScreen() {
     carregar();
   }, [carregar]);
 
-  const selecionar = (campanha: Campanha) => {
-    setCampanhaSelecionada(campanha);
-    setItens(
-      campanha.produtos.map((p) => ({
-        ...p,
-        // campanhas salvas antes da validade por item existir não têm
-        // dataInicio/dataFim no produto — cai pra validade da campanha.
-        dataInicio: p.dataInicio || campanha.dataInicio,
-        dataFim: p.dataFim || campanha.dataFim,
-      }))
-    );
-    setExpandido(null);
-    setBuffers({});
+  const selecionar = async (campanha: Campanha) => {
+    if (!profile) return;
+    // getCampanhas (lista) vem sem nome/código de barras resolvidos, de
+    // propósito, pra não buscar o catálogo inteiro só pra listar — usar
+    // esse dado direto aqui deixava o cartaz sem nome do produto
+    // (achado 01/09/2026). getCampanha busca só os códigos dessa
+    // campanha e resolve certo.
+    setLoading(true);
+    try {
+      const resolvida = (await repository.getCampanha(profile, campanha.id)) ?? campanha;
+      setCampanhaSelecionada(resolvida);
+      setItens(
+        resolvida.produtos.map((p) => ({
+          ...p,
+          // campanhas salvas antes da validade por item existir não têm
+          // dataInicio/dataFim no produto — cai pra validade da campanha.
+          dataInicio: p.dataInicio || resolvida.dataInicio,
+          dataFim: p.dataFim || resolvida.dataFim,
+        }))
+      );
+      setExpandido(null);
+      setBuffers({});
+    } finally {
+      setLoading(false);
+    }
   };
 
   const alternarExpandido = (codigoProduto: number) => {
