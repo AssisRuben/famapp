@@ -17,7 +17,7 @@ import { Card } from '../components/Card';
 import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { SeletorHorario } from '../components/SeletorHorario';
 import { colors } from '../theme/colors';
-import { formatBRL, formatDateBR, todayISO } from '../lib/format';
+import { formatBRL, formatDateBR, parseDecimalBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { calcularMetaIndividualVendaAdicional, calcularRankingVendaAdicional, medalhaPosicao } from '../lib/vendaAdicional';
 import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
@@ -254,7 +254,7 @@ export function VendaAdicionalScreen() {
 
     if (tipoPremiacao === 'ranking') {
       premiacaoRanking = premiosRanking
-        .map((valor, index) => ({ posicao: index + 1, valor: Number(valor.replace(',', '.')) || 0 }))
+        .map((valor, index) => ({ posicao: index + 1, valor: parseDecimalBR(valor) }))
         .filter((p) => p.valor > 0);
       if (premiacaoRanking.length === 0) {
         alertar('Premiação vazia', 'Preencha pelo menos o prêmio do 1º lugar.');
@@ -270,7 +270,7 @@ export function VendaAdicionalScreen() {
       }
     } else {
       metaQuantidadeInput = Number(metaQuantidade) || 0;
-      premiacaoMetaValorInput = Number(premiacaoMetaValor.replace(',', '.')) || 0;
+      premiacaoMetaValorInput = parseDecimalBR(premiacaoMetaValor);
       if (metaQuantidadeInput <= 0 || premiacaoMetaValorInput <= 0) {
         alertar('Meta inválida', 'Preencha a quantidade meta e o valor do prêmio.');
         return;

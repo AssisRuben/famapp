@@ -1,6 +1,6 @@
-import { GrupoCartazete } from '../types/domain';
+import { GrupoCartazete, KitMultiProduto } from '../types/domain';
 import { formatBRL } from './format';
-import { descricaoKit } from './kits';
+import { descricaoKit, descricaoKitMultiProduto } from './kits';
 import { MASCOTE_CONVIVA_BASE64 } from '../assets/mascoteConvivaBase64';
 
 const MESES = [
@@ -54,12 +54,23 @@ function cartazHtml(grupo: GrupoCartazete): string {
   // por levar mais de um, então mostrar "%OFF" isolado confundiria.
   const primeiroProduto = grupo.produtos[0];
   const kit = primeiroProduto?.tipoPromocao === 'kit' ? primeiroProduto.kit : null;
+  // Preço fixo (02/09/2026) não tem "preço por unidade" pra mostrar
+  // como CADA — é um valor fechado pras N unidades do kit, então usa
+  // POR igual ao layout normal (unitário), só que com o preço do
+  // pacote inteiro, não de uma unidade.
+  const kitPrecoLinhaHtml =
+    kit?.tipoPrecificacao === 'preco_fixo' && kit.precoFixo != null
+      ? `<div class="preco-linha">
+           <span class="preco-por-label">POR</span>
+           <span class="preco">${escapeHtml(formatBRL(kit.precoFixo))}</span>
+         </div>`
+      : `<div class="preco-linha">
+           <span class="preco-por-label">CADA</span>
+           <span class="preco">${escapeHtml(formatBRL(precoDe))}</span>
+         </div>`;
   const faixaPrecoHtml = kit
     ? `<div class="kit-titulo">${escapeHtml(descricaoKit(kit).toUpperCase())}</div>
-       <div class="preco-linha">
-         <span class="preco-por-label">CADA</span>
-         <span class="preco">${escapeHtml(formatBRL(precoDe))}</span>
-       </div>`
+       ${kitPrecoLinhaHtml}`
     : `${descontoBadgeHtml}
        ${precoDeHtml}
        <div class="preco-linha">
@@ -74,6 +85,63 @@ function cartazHtml(grupo: GrupoCartazete): string {
       <div class="corpo">
         <div class="nome-produto">${escapeHtml(grupo.nomeBase)}${codigoHtml}</div>
         ${variantesHtml}
+      </div>
+      <div class="faixa-preco">
+        ${faixaPrecoHtml}
+      </div>
+      <div class="rodape-info">
+        <div class="rodape-textos">
+          <div class="validade">OFERTA VÁLIDA DE ${validade}.</div>
+          <div class="disclaimer">SUJEITA A DISPONIBILIDADE DE ESTOQUE.</div>
+        </div>
+        <img class="mascote" src="${MASCOTE_CONVIVA_BASE64}" alt="" />
+      </div>
+      <div class="marca">
+        <div class="marca-nome">Farmácia Conviva Parquelândia</div>
+        <div class="marca-tagline">Perto de você, ao lado da sua saúde.</div>
+      </div>
+    </div>`;
+}
+
+// Cartaz de kit multi-produto (afinidade de compra, 02/09/2026) —
+// DIFERENTE de cartazHtml() acima: não tem um "nomeBase"/variantes (o
+// kit já enumera os membros) nem um preço "por unidade" (o combo
+// mistura produtos diferentes num preço/desconto só). Reaproveita o
+// mesmo shell visual e as mesmas classes CSS (definidas mais abaixo em
+// gerarHtmlCartazes), só troca o conteúdo do corpo/faixa-preço.
+function kitMultiProdutoHtml(kit: KitMultiProduto): string {
+  const validade = formatarValidade(kit.dataInicio, kit.dataFim);
+  const nomeTitulo = kit.produtos.map((p) => p.nomeProduto).join(' + ');
+
+  const totalRegular = kit.produtos.reduce((acc, p) => acc + p.precoRegular * p.quantidade, 0);
+  const precoFinal =
+    kit.tipoPrecificacao === 'preco_fixo'
+      ? kit.precoFixo ?? totalRegular
+      : totalRegular * (1 - (kit.percentualDescontoItem ?? 0) / 100);
+  const percentualExibido = totalRegular > 0 ? Math.round(((totalRegular - precoFinal) / totalRegular) * 100) : 0;
+  const temDesconto = percentualExibido > 0;
+
+  // Sem desconto-badge aqui de propósito — ele é posicionado absoluto
+  // no canto (pensado pro layout DE/POR de produto único) e sobrepõe a
+  // primeira linha do kit-titulo, que pode ocupar 2-3 linhas com nome
+  // de dois produtos. O percentual já está no texto do título, igual o
+  // kit de produto único (cartazHtml acima) já decidia não duplicar.
+  const faixaPrecoHtml = `<div class="kit-titulo">${escapeHtml(descricaoKitMultiProduto(kit).toUpperCase())}</div>
+       ${
+         temDesconto
+           ? `<div class="preco-de">DE <span class="preco-de-valor">${escapeHtml(formatBRL(totalRegular))}</span></div>`
+           : ''
+       }
+       <div class="preco-linha">
+         <span class="preco-por-label">POR</span>
+         <span class="preco">${escapeHtml(formatBRL(precoFinal))}</span>
+       </div>`;
+
+  return `
+    <div class="cartaz">
+      <div class="faixa-oferta"><span class="oferta-texto">OFERTA</span></div>
+      <div class="corpo">
+        <div class="nome-produto">${escapeHtml(nomeTitulo)}</div>
       </div>
       <div class="faixa-preco">
         ${faixaPrecoHtml}
@@ -126,10 +194,15 @@ export type CartazesPorPagina = 3 | 6 | 9 | 12;
 // uma grade, escalando o cartaz proporcionalmente (transform: scale)
 // pra caber — mais cartazes por página = cartaz menor, útil quando tem
 // muito produto pra imprimir.
-export function gerarHtmlCartazes(grupos: GrupoCartazete[], cartazesPorPagina: CartazesPorPagina = 3): string {
-  const cartazesHtml = grupos.flatMap((grupo) =>
-    Array.from({ length: Math.max(grupo.quantidadeCartazes, 1) }, () => cartazHtml(grupo))
-  );
+export function gerarHtmlCartazes(
+  grupos: GrupoCartazete[],
+  kits: KitMultiProduto[] = [],
+  cartazesPorPagina: CartazesPorPagina = 3
+): string {
+  const cartazesHtml = [
+    ...grupos.flatMap((grupo) => Array.from({ length: Math.max(grupo.quantidadeCartazes, 1) }, () => cartazHtml(grupo))),
+    ...kits.flatMap((kit) => Array.from({ length: Math.max(kit.quantidadeCartazes, 1) }, () => kitMultiProdutoHtml(kit))),
+  ];
 
   const corpoHtml = gerarPaginasMultiplas(cartazesHtml, cartazesPorPagina);
 

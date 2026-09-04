@@ -21,7 +21,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { colors } from '../theme/colors';
-import { formatBRL, todayISO } from '../lib/format';
+import { formatBRL, parseDecimalBR, todayISO } from '../lib/format';
 import { LIMIAR_DIAS_PARADO } from '../lib/precificacao';
 import { calcularMargemPct } from '../lib/campanhas';
 import { gerarCsvPrecificacao } from '../lib/precificacaoCsv';
@@ -73,8 +73,12 @@ function casaBusca(nome: string, termo: string): boolean {
 // só quem teve o preço de fato alterado aqui na tela.
 function precoAlterado(precoAtual: number, digitado: string | undefined): number | null {
   if (digitado === undefined || digitado.trim() === '') return null;
-  const numero = Number(digitado.replace(',', '.'));
-  if (!Number.isFinite(numero) || numero <= 0) return null;
+  // parseDecimalBR, não Number(texto.replace(',', '.')) — esse último
+  // quebra a partir de R$1.000 (o ponto de milhar da máscara vira um
+  // segundo ponto decimal, Number() dá NaN) — achado 26/08/2026, mesmo
+  // bug em Metas/Campanhas/Venda Adicional.
+  const numero = parseDecimalBR(digitado);
+  if (numero <= 0) return null;
   return numero.toFixed(2) === precoAtual.toFixed(2) ? null : numero;
 }
 
@@ -83,8 +87,8 @@ function precoAlterado(precoAtual: number, digitado: string | undefined): number
 // tempo real enquanto digita, não pra decidir quem entra no .txt).
 function parsePrecoDigitado(digitado: string | undefined): number | null {
   if (digitado === undefined || digitado.trim() === '') return null;
-  const numero = Number(digitado.replace(',', '.'));
-  return Number.isFinite(numero) && numero > 0 ? numero : null;
+  const numero = parseDecimalBR(digitado);
+  return numero > 0 ? numero : null;
 }
 
 function TagBadge({ tag }: { tag: TagPrecificacao }) {
@@ -235,6 +239,7 @@ export function PrecificacaoScreen() {
             codigoBarras: item.produto.codigoBarras,
             nomeProduto: item.produto.nome,
             precoRegular: item.produto.precoVenda,
+            custoMedio: item.produto.custoMedio,
             precoPromocional: novoValor,
             percentualDesconto: 0,
             quantidadeCartazes: 0,

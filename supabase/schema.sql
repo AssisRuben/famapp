@@ -430,7 +430,16 @@ create table campanha_produtos (
   kit_quantidade_minima integer check (kit_quantidade_minima is null or kit_quantidade_minima >= 2),
   kit_percentual_desconto_item numeric(5,2)
     check (kit_percentual_desconto_item is null or kit_percentual_desconto_item between 0 and 100),
-  unique (campanha_id, codigo_produto)
+  -- Segundo formato de kit (02/09/2026): preço fechado pras
+  -- kit_quantidade_minima unidades (ex.: "3 por R$29,99"), em vez de
+  -- percentual no último item. Exatamente um dos dois quando é kit —
+  -- ver constraint campanha_produtos_kit_precificacao_coerente.
+  kit_preco_fixo numeric(12,2) check (kit_preco_fixo is null or kit_preco_fixo > 0),
+  unique (campanha_id, codigo_produto),
+  constraint campanha_produtos_kit_precificacao_coerente check (
+    tipo_promocao <> 'kit'
+    or ((kit_percentual_desconto_item is not null) <> (kit_preco_fixo is not null))
+  )
 );
 
 -- Desempenho de vendas por campanha (26/08/2026) — alimenta a lista em
@@ -632,7 +641,13 @@ select
   vd.nome as nome_vendedor,
   v.data_emissao,
   vi.valor_total_liquido as valor,
-  vi.codigo_produto
+  vi.codigo_produto,
+  -- por último de propósito (create or replace view só deixa
+  -- ACRESCENTAR coluna no fim) — venda_id agrupa itens da MESMA nota,
+  -- pra distinguir "quantidade de itens marcados" de "quantidade de
+  -- atendimentos" (uma nota pode ter 2+ itens marcados como
+  -- complementar, um vendedor pode ter mais itens que atendimentos).
+  v.id as venda_id
 from venda_item_complementar vic
 join venda_itens vi on vi.id = vic.venda_item_id
 join vendas v on v.id = vi.venda_id

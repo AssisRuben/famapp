@@ -18,6 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { LoadingFarmacia } from '../components/LoadingFarmacia';
+import { ComparativoCustoVenda } from '../components/ComparativoCustoVenda';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, formatDateCurtoBR, formatDecimalBR, parseDateBR, parseDecimalBR } from '../lib/format';
 import { agruparParaCartazetes } from '../lib/cartazetes';
@@ -26,8 +27,15 @@ import { gerarTxtTrier } from '../lib/trierTxt';
 import { imprimirHtmlNoWeb } from '../lib/printWeb';
 import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
 import { alertar } from '../lib/alert';
-import { descricaoKit, PRESETS_KIT } from '../lib/kits';
-import { Campanha, CampanhaProduto, TipoPromocaoProduto } from '../types/domain';
+import { descricaoKit, descricaoKitMultiProduto, margemResultanteKitMultiProduto, margemResultanteKitProdutoUnico, PRESETS_KIT } from '../lib/kits';
+import {
+  Campanha,
+  CampanhaProduto,
+  KitMultiProduto,
+  KitPromocao,
+  TipoPrecificacaoKit,
+  TipoPromocaoProduto,
+} from '../types/domain';
 
 function round2(valor: number): number {
   return Math.round(valor * 100) / 100;
@@ -36,8 +44,15 @@ function round2(valor: number): number {
 // Campos do painel expandido que aceitam texto formatado (vírgula
 // decimal, data BR) diferente do valor numérico/ISO guardado no item —
 // digitação livre num buffer à parte, valor canônico só é recalculado
-// ao sair do campo (onBlur).
-type CampoEditavel = 'de' | 'por' | 'desconto' | 'validadeInicio' | 'validadeFim';
+// ao sair do campo (onBlur). kitQuantidade/kitValor (02/09/2026) são
+// do kit de produto único (diferente de CampoEditavelKit mais abaixo,
+// que é do kit MULTI-produto, chave por id de kit em vez de
+// codigoProduto).
+type CampoEditavel = 'de' | 'por' | 'desconto' | 'validadeInicio' | 'validadeFim' | 'kitQuantidade' | 'kitValor';
+
+// Mesmo espírito de CampoEditavel, mas pros campos de kit multi-produto
+// (chave é o id do kit, não codigoProduto).
+type CampoEditavelKit = 'valor' | 'validadeInicio' | 'validadeFim';
 
 export function CartazetesScreen() {
   const { profile } = useAuth();
@@ -45,8 +60,11 @@ export function CartazetesScreen() {
   const [loading, setLoading] = useState(true);
   const [campanhaSelecionada, setCampanhaSelecionada] = useState<Campanha | null>(null);
   const [itens, setItens] = useState<CampanhaProduto[]>([]);
+  const [kits, setKits] = useState<KitMultiProduto[]>([]);
   const [expandido, setExpandido] = useState<number | null>(null);
+  const [expandidoKit, setExpandidoKit] = useState<string | null>(null);
   const [buffers, setBuffers] = useState<Record<string, Partial<Record<CampoEditavel, string>>>>({});
+  const [kitBuffers, setKitBuffers] = useState<Record<string, Partial<Record<CampoEditavelKit, string>>>>({});
   const [processando, setProcessando] = useState<'pdf' | 'txt' | 'campanha' | null>(null);
   const [cartazesPorPagina, setCartazesPorPagina] = useState<CartazesPorPagina>(3);
 
@@ -81,8 +99,11 @@ export function CartazetesScreen() {
           dataFim: p.dataFim || resolvida.dataFim,
         }))
       );
+      setKits(resolvida.kits);
       setExpandido(null);
+      setExpandidoKit(null);
       setBuffers({});
+      setKitBuffers({});
     } finally {
       setLoading(false);
     }
@@ -90,6 +111,98 @@ export function CartazetesScreen() {
 
   const alternarExpandido = (codigoProduto: number) => {
     setExpandido((atual) => (atual === codigoProduto ? null : codigoProduto));
+  };
+
+  const alternarExpandidoKit = (kitId: string) => {
+    setExpandidoKit((atual) => (atual === kitId ? null : kitId));
+  };
+
+  const ajustarQuantidadeKit = (kitId: string, texto: string) => {
+    const quantidade = Math.max(1, Number(texto.replace(/\D/g, '')) || 1);
+    setKits((atual) => atual.map((k) => (k.id === kitId ? { ...k, quantidadeCartazes: quantidade } : k)));
+  };
+
+  // Trocar o tipo de precificação zera o outro campo — evita ficar um
+  // valor "fantasma" gravado que não é o tipo ativo (mesmo espírito de
+  // alternarTipoPromocao, mas aqui não precisa ficar vazio esperando
+  // escolha: já sugere um valor OK de cara a partir do que tinha).
+  const alternarTipoPrecificacaoKit = (kitId: string, tipo: TipoPrecificacaoKit) => {
+    setKits((atual) =>
+      atual.map((k) => {
+        if (k.id !== kitId) return k;
+        if (tipo === k.tipoPrecificacao) return k;
+        const totalRegular = k.produtos.reduce((acc, p) => acc + p.precoRegular * p.quantidade, 0);
+        if (tipo === 'preco_fixo') {
+          const percentual = k.percentualDescontoItem ?? 0;
+          return { ...k, tipoPrecificacao: tipo, precoFixo: round2(totalRegular * (1 - percentual / 100)), percentualDescontoItem: null };
+        }
+        const precoFixo = k.precoFixo ?? totalRegular;
+        const percentual = totalRegular > 0 ? Math.max(0, round2(((totalRegular - precoFixo) / totalRegular) * 100)) : 0;
+        return { ...k, tipoPrecificacao: tipo, percentualDescontoItem: percentual, precoFixo: null };
+      })
+    );
+  };
+
+  const valorExibidoKit = (kit: KitMultiProduto, campo: CampoEditavelKit): string => {
+    const digitado = kitBuffers[kit.id]?.[campo];
+    if (digitado !== undefined) return digitado;
+    switch (campo) {
+      case 'valor':
+        return kit.tipoPrecificacao === 'preco_fixo'
+          ? formatDecimalBR(kit.precoFixo ?? 0)
+          : formatDecimalBR(kit.percentualDescontoItem ?? 0);
+      case 'validadeInicio':
+        return formatDateCurtoBR(kit.dataInicio);
+      case 'validadeFim':
+        return formatDateCurtoBR(kit.dataFim);
+      default:
+        return '';
+    }
+  };
+
+  const digitarKit = (kitId: string, campo: CampoEditavelKit, texto: string) => {
+    setKitBuffers((atual) => ({ ...atual, [kitId]: { ...atual[kitId], [campo]: texto } }));
+  };
+
+  const limparBufferKit = (kitId: string, campo: CampoEditavelKit) => {
+    setKitBuffers((atual) => {
+      if (!atual[kitId]?.[campo]) return atual;
+      const { [campo]: _removido, ...resto } = atual[kitId]!;
+      return { ...atual, [kitId]: resto };
+    });
+  };
+
+  // Clamp nos limites que o banco exige (checks em
+  // migracao_kits_afinidade.sql: percentual 0-100, preço fixo > 0) —
+  // sem isso um valor fora da faixa só falhava no INSERT com erro de
+  // constraint cru, direto pro alerta genérico de "Erro ao salvar".
+  const confirmarValorKit = (kitId: string) => {
+    const texto = kitBuffers[kitId]?.valor;
+    if (texto !== undefined) {
+      const digitado = parseDecimalBR(texto);
+      setKits((atual) =>
+        atual.map((k) =>
+          k.id === kitId
+            ? k.tipoPrecificacao === 'preco_fixo'
+              ? { ...k, precoFixo: Math.max(0.01, round2(digitado)) }
+              : { ...k, percentualDescontoItem: Math.min(100, Math.max(0, round2(digitado))) }
+            : k
+        )
+      );
+    }
+    limparBufferKit(kitId, 'valor');
+  };
+
+  const confirmarValidadeKit = (kitId: string, campo: 'dataInicio' | 'dataFim') => {
+    const campoBuffer: CampoEditavelKit = campo === 'dataInicio' ? 'validadeInicio' : 'validadeFim';
+    const texto = kitBuffers[kitId]?.[campoBuffer];
+    if (texto !== undefined) {
+      const iso = parseDateBR(texto);
+      if (iso) {
+        setKits((atual) => atual.map((k) => (k.id === kitId ? { ...k, [campo]: iso } : k)));
+      }
+    }
+    limparBufferKit(kitId, campoBuffer);
   };
 
   const ajustarQuantidade = (codigoProduto: number, texto: string) => {
@@ -111,6 +224,64 @@ export function CartazetesScreen() {
     setItens((atual) => atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, kit } : i)));
   };
 
+  const KIT_PADRAO: KitPromocao = { quantidadeMinima: 2, tipoPrecificacao: 'percentual', percentualDescontoItem: 0, precoFixo: null };
+
+  // Edição manual (02/09/2026, além dos 3 atalhos de PRESETS_KIT) —
+  // quantidade mínima e o valor (percentual ou preço fixo, conforme o
+  // tipo escolhido) do kit de produto único. Cria um kit com valores
+  // padrão se ainda não tinha nenhum (ex.: gestor abriu "Kit" e foi
+  // direto editar um campo sem tocar num atalho antes).
+  const confirmarKitQuantidade = (codigoProduto: number) => {
+    const texto = buffers[String(codigoProduto)]?.kitQuantidade;
+    if (texto !== undefined) {
+      const quantidade = Math.max(2, Math.round(parseDecimalBR(texto)) || 2);
+      setItens((atual) =>
+        atual.map((i) => (i.codigoProduto === codigoProduto ? { ...i, kit: { ...(i.kit ?? KIT_PADRAO), quantidadeMinima: quantidade } } : i))
+      );
+    }
+    limparBuffer(codigoProduto, 'kitQuantidade');
+  };
+
+  const confirmarKitValor = (codigoProduto: number) => {
+    const texto = buffers[String(codigoProduto)]?.kitValor;
+    if (texto !== undefined) {
+      const digitado = parseDecimalBR(texto);
+      setItens((atual) =>
+        atual.map((i) => {
+          if (i.codigoProduto !== codigoProduto) return i;
+          const kitAtual = i.kit ?? KIT_PADRAO;
+          if (kitAtual.tipoPrecificacao === 'preco_fixo') {
+            return { ...i, kit: { ...kitAtual, precoFixo: Math.max(0.01, round2(digitado)) } };
+          }
+          return { ...i, kit: { ...kitAtual, percentualDescontoItem: Math.min(100, Math.max(0, round2(digitado))) } };
+        })
+      );
+    }
+    limparBuffer(codigoProduto, 'kitValor');
+  };
+
+  // Mesmo espírito de alternarTipoPrecificacaoKit (kit multi-produto)
+  // — converte o valor pro novo formato em vez de zerar, e limpa o
+  // buffer do campo de valor pra não vazar texto do formato anterior.
+  const alternarTipoPrecificacaoKitProduto = (codigoProduto: number, tipo: TipoPrecificacaoKit) => {
+    setItens((atual) =>
+      atual.map((i) => {
+        if (i.codigoProduto !== codigoProduto) return i;
+        const kitAtual = i.kit ?? KIT_PADRAO;
+        if (tipo === kitAtual.tipoPrecificacao) return i;
+        const totalRegular = i.precoRegular * kitAtual.quantidadeMinima;
+        if (tipo === 'preco_fixo') {
+          const percentual = kitAtual.percentualDescontoItem ?? 0;
+          return { ...i, kit: { ...kitAtual, tipoPrecificacao: tipo, precoFixo: round2(totalRegular * (1 - percentual / 100)), percentualDescontoItem: null } };
+        }
+        const precoFixo = kitAtual.precoFixo ?? totalRegular;
+        const percentual = totalRegular > 0 ? Math.max(0, round2(((totalRegular - precoFixo) / totalRegular) * 100)) : 0;
+        return { ...i, kit: { ...kitAtual, tipoPrecificacao: tipo, percentualDescontoItem: percentual, precoFixo: null } };
+      })
+    );
+    limparBuffer(codigoProduto, 'kitValor');
+  };
+
   // Campos formatados (preço em vírgula, data BR) digitam livre num
   // buffer à parte — o valor no item só é recalculado ao sair do campo,
   // pra não brigar com o usuário no meio da digitação.
@@ -128,6 +299,12 @@ export function CartazetesScreen() {
         return formatDateCurtoBR(item.dataInicio);
       case 'validadeFim':
         return formatDateCurtoBR(item.dataFim);
+      case 'kitQuantidade':
+        return String(item.kit?.quantidadeMinima ?? 2);
+      case 'kitValor':
+        return item.kit?.tipoPrecificacao === 'preco_fixo'
+          ? formatDecimalBR(item.kit?.precoFixo ?? 0)
+          : formatDecimalBR(item.kit?.percentualDescontoItem ?? 0);
       default:
         return '';
     }
@@ -207,7 +384,8 @@ export function CartazetesScreen() {
   };
 
   const grupos = useMemo(() => agruparParaCartazetes(itens), [itens]);
-  const totalCartazes = grupos.reduce((acc, g) => acc + g.quantidadeCartazes, 0);
+  const totalCartazes =
+    grupos.reduce((acc, g) => acc + g.quantidadeCartazes, 0) + kits.reduce((acc, k) => acc + k.quantidadeCartazes, 0);
 
   // De/Por/Desconto/Validade editados aqui só valiam pra impressão
   // daquele momento — este botão persiste de volta na campanha salva
@@ -222,6 +400,7 @@ export function CartazetesScreen() {
         dataInicio: campanhaSelecionada.dataInicio,
         dataFim: campanhaSelecionada.dataFim,
         produtos: itens,
+        kits,
       });
       setCampanhaSelecionada(salva);
       setCampanhas((atual) => atual.map((c) => (c.id === salva.id ? salva : c)));
@@ -234,10 +413,10 @@ export function CartazetesScreen() {
   };
 
   const imprimir = async () => {
-    if (!campanhaSelecionada || grupos.length === 0) return;
+    if (!campanhaSelecionada || (grupos.length === 0 && kits.length === 0)) return;
     setProcessando('pdf');
     try {
-      const html = gerarHtmlCartazes(grupos, cartazesPorPagina);
+      const html = gerarHtmlCartazes(grupos, kits, cartazesPorPagina);
       if (Platform.OS === 'web') {
         imprimirHtmlNoWeb(html);
       } else {
@@ -399,11 +578,12 @@ export function CartazetesScreen() {
 
                 {item.tipoPromocao === 'kit' ? (
                   <>
-                    <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Regra do kit</Text>
+                    <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Atalhos</Text>
                     <View style={styles.grupoGrid}>
                       {PRESETS_KIT.map((preset) => {
                         const ativo =
                           item.kit?.quantidadeMinima === preset.kit.quantidadeMinima &&
+                          item.kit?.tipoPrecificacao === preset.kit.tipoPrecificacao &&
                           item.kit?.percentualDescontoItem === preset.kit.percentualDescontoItem;
                         return (
                           <Pressable
@@ -416,7 +596,63 @@ export function CartazetesScreen() {
                         );
                       })}
                     </View>
-                    {!item.kit && <Text style={styles.avisoKit}>Escolha uma regra acima antes de imprimir.</Text>}
+
+                    <Text style={styles.campoLabel}>Quantidade mínima</Text>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      value={valorExibido(item, 'kitQuantidade')}
+                      onChangeText={(texto) => digitar(item.codigoProduto, 'kitQuantidade', texto)}
+                      onBlur={() => confirmarKitQuantidade(item.codigoProduto)}
+                    />
+
+                    <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Tipo de preço</Text>
+                    <View style={styles.grupoGrid}>
+                      <Pressable
+                        style={[styles.chip, (item.kit?.tipoPrecificacao ?? 'percentual') === 'percentual' && styles.chipAtivo]}
+                        onPress={() => alternarTipoPrecificacaoKitProduto(item.codigoProduto, 'percentual')}
+                      >
+                        <Text style={[styles.chipTexto, (item.kit?.tipoPrecificacao ?? 'percentual') === 'percentual' && styles.chipTextoAtivo]}>
+                          % no {item.kit?.quantidadeMinima ?? 2}º item
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.chip, item.kit?.tipoPrecificacao === 'preco_fixo' && styles.chipAtivo]}
+                        onPress={() => alternarTipoPrecificacaoKitProduto(item.codigoProduto, 'preco_fixo')}
+                      >
+                        <Text style={[styles.chipTexto, item.kit?.tipoPrecificacao === 'preco_fixo' && styles.chipTextoAtivo]}>
+                          Preço fixo pra {item.kit?.quantidadeMinima ?? 2}
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <Text style={styles.campoLabel}>
+                      {item.kit?.tipoPrecificacao === 'preco_fixo'
+                        ? `Preço fixo (R$) pras ${item.kit?.quantidadeMinima ?? 2} unidades`
+                        : 'Desconto (%) no último item'}
+                    </Text>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="decimal-pad"
+                      value={valorExibido(item, 'kitValor')}
+                      onChangeText={(texto) => digitar(item.codigoProduto, 'kitValor', texto)}
+                      onBlur={() => confirmarKitValor(item.codigoProduto)}
+                    />
+
+                    {item.kit ? (
+                      (() => {
+                        const kit = item.kit!;
+                        const { totalCusto, totalPago } = margemResultanteKitProdutoUnico(kit, item.precoRegular, item.custoMedio);
+                        return (
+                          <>
+                            <Text style={styles.previaTexto}>{descricaoKit(kit)}</Text>
+                            <ComparativoCustoVenda custo={totalCusto} venda={totalPago} legenda={`por ${kit.quantidadeMinima} unidades`} />
+                          </>
+                        );
+                      })()
+                    ) : (
+                      <Text style={styles.avisoKit}>Escolha um atalho acima ou preencha os campos antes de imprimir.</Text>
+                    )}
                   </>
                 ) : (
                   <>
@@ -482,9 +718,111 @@ export function CartazetesScreen() {
         );
       })}
 
+      {kits.length > 0 && (
+        <>
+          <Text style={[styles.sectionTitulo, styles.grupoLabelEspacado]}>Kits</Text>
+          {kits.map((kit) => {
+            const abertoKit = expandidoKit === kit.id;
+            return (
+              <Card key={kit.id}>
+                <Pressable style={styles.itemHeaderRow} onPress={() => alternarExpandidoKit(kit.id)}>
+                  <View style={styles.itemHeaderTexto}>
+                    <Text style={styles.itemNome} numberOfLines={2}>
+                      {kit.produtos.map((p) => p.nomeProduto).join(' + ')}
+                    </Text>
+                    <Text style={styles.itemSubinfo}>{descricaoKitMultiProduto(kit)}</Text>
+                  </View>
+                </Pressable>
+
+                <View style={styles.linhaQuantidade}>
+                  <Text style={styles.itemLabel}>Cartazes</Text>
+                  <TextInput
+                    style={styles.inputQuantidade}
+                    keyboardType="numeric"
+                    value={String(kit.quantidadeCartazes)}
+                    onChangeText={(texto) => ajustarQuantidadeKit(kit.id, texto)}
+                  />
+                </View>
+
+                {abertoKit && (
+                  <View style={styles.painelExpandido}>
+                    <Text style={styles.campoLabel}>Produtos do kit</Text>
+                    <Text style={styles.campoSomenteLeitura}>
+                      {kit.produtos.map((p) => `${p.nomeProduto}${p.quantidade > 1 ? ` (${p.quantidade}x)` : ''}`).join(', ')}
+                    </Text>
+
+                    <Text style={styles.campoLabel}>Tipo de preço</Text>
+                    <View style={styles.grupoGrid}>
+                      <Pressable
+                        style={[styles.chip, kit.tipoPrecificacao === 'percentual' && styles.chipAtivo]}
+                        onPress={() => alternarTipoPrecificacaoKit(kit.id, 'percentual')}
+                      >
+                        <Text style={[styles.chipTexto, kit.tipoPrecificacao === 'percentual' && styles.chipTextoAtivo]}>
+                          % de desconto no combo
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.chip, kit.tipoPrecificacao === 'preco_fixo' && styles.chipAtivo]}
+                        onPress={() => alternarTipoPrecificacaoKit(kit.id, 'preco_fixo')}
+                      >
+                        <Text style={[styles.chipTexto, kit.tipoPrecificacao === 'preco_fixo' && styles.chipTextoAtivo]}>
+                          Preço fixo do combo
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <Text style={styles.campoLabel}>{kit.tipoPrecificacao === 'preco_fixo' ? 'Preço fixo (R$)' : 'Desconto (%)'}</Text>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="decimal-pad"
+                      value={valorExibidoKit(kit, 'valor')}
+                      onChangeText={(texto) => digitarKit(kit.id, 'valor', texto)}
+                      onBlur={() => confirmarValorKit(kit.id)}
+                    />
+
+                    <Text style={styles.margemTexto}>
+                      {kit.produtos.map((p) => `${p.nomeProduto} ${formatBRL(p.custoMedio)}`).join(' + ')}
+                    </Text>
+                    {(() => {
+                      const { totalCusto, precoFinal } = margemResultanteKitMultiProduto(kit);
+                      return <ComparativoCustoVenda custo={totalCusto} venda={precoFinal} legenda="por kit" />;
+                    })()}
+
+                    <View style={styles.linhaDoisCampos}>
+                      <View style={styles.campoMetade}>
+                        <Text style={styles.campoLabel}>Validade início</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={valorExibidoKit(kit, 'validadeInicio')}
+                          onChangeText={(texto) => digitarKit(kit.id, 'validadeInicio', texto)}
+                          onBlur={() => confirmarValidadeKit(kit.id, 'dataInicio')}
+                          placeholder="DD/MM/AA"
+                        />
+                      </View>
+                      <View style={styles.campoMetade}>
+                        <Text style={styles.campoLabel}>Validade fim</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={valorExibidoKit(kit, 'validadeFim')}
+                          onChangeText={(texto) => digitarKit(kit.id, 'validadeFim', texto)}
+                          onBlur={() => confirmarValidadeKit(kit.id, 'dataFim')}
+                          placeholder="DD/MM/AA"
+                        />
+                      </View>
+                    </View>
+                  </View>
+                )}
+              </Card>
+            );
+          })}
+        </>
+      )}
+
       <Card>
         <Text style={styles.cardTitulo}>Pronto para imprimir!</Text>
-        <Text style={styles.resumoLinha}>{itens.length} produtos · {grupos.length} sessões · {totalCartazes} cartazes</Text>
+        <Text style={styles.resumoLinha}>
+          {itens.length} produtos · {grupos.length} sessões{kits.length > 0 ? ` · ${kits.length} kit(s)` : ''} · {totalCartazes} cartazes
+        </Text>
 
         {grupos.map((grupo) => (
           <View key={grupo.chave} style={styles.grupoLinha}>
@@ -596,6 +934,8 @@ const styles = StyleSheet.create({
   grupoLabelEspacado: { marginTop: 14 },
   grupoHint: { fontSize: 11, color: colors.textMuted, marginBottom: 8, lineHeight: 15 },
   avisoKit: { fontSize: 11, color: colors.red, marginTop: 6, lineHeight: 15 },
+  previaTexto: { fontSize: 12, color: colors.navy, fontWeight: '600', marginTop: 10 },
+  margemTexto: { fontSize: 11, color: colors.textMuted, marginTop: 4, lineHeight: 15 },
   grupoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     backgroundColor: colors.white,

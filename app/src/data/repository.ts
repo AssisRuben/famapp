@@ -51,6 +51,8 @@ import {
   IdentificacaoCompradorVendedor,
   SugestaoCampanhaParams,
   SugestaoCompra,
+  SugestaoKitsParams,
+  SugestaoParAfinidade,
   TipoReceita,
   VendaAntimicrobianoRecente,
   VendaComplementarMarcada,
@@ -232,6 +234,11 @@ export interface DataRepository {
   getStatusWhatsApp(profile: Profile): Promise<Record<number, boolean>>;
   getCatalogoProdutos(profile: Profile): Promise<ProdutoCatalogo[]>;
   sugerirProdutosCampanha(profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]>;
+  // Kit multi-produto por afinidade de compra (02/09/2026) — pares de
+  // produtos DIFERENTES que co-ocorrem muito na mesma venda, dentro da
+  // categoria escolhida. Precisa do catálogo já carregado pra resolver
+  // os códigos-semente (ver lib/afinidadeKits.ts:resolverCodigosSeed).
+  sugerirParesAfinidade(profile: Profile, params: SugestaoKitsParams): Promise<SugestaoParAfinidade[]>;
   getCampanhas(profile: Profile): Promise<Campanha[]>;
   // Fetch dedicado de UMA campanha (edição) — resolve nome/código de
   // barras de verdade, diferente de getCampanhas (lista, mais leve).

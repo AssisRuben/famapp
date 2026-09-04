@@ -17,6 +17,7 @@ import { AlertasScreen } from '../screens/AlertasScreen';
 import { ReceitasScreen } from '../screens/ReceitasScreen';
 import { CampanhasScreen } from '../screens/CampanhasScreen';
 import { CartazetesScreen } from '../screens/CartazetesScreen';
+import { SugestaoKitsScreen } from '../screens/SugestaoKitsScreen';
 import { ComprasScreen } from '../screens/ComprasScreen';
 import { VendaAdicionalScreen } from '../screens/VendaAdicionalScreen';
 import { VendasComplementaresScreen } from '../screens/VendasComplementaresScreen';
@@ -98,13 +99,14 @@ function AppTabs() {
     { label: 'Pendências', emoji: '🗒️', onPress: () => irPara('Pendencias') },
     { label: 'Carteira de clientes', emoji: '💼', onPress: () => irPara('CarteiraClientes') },
     { label: 'Vendas Complementares', emoji: '🧩', onPress: () => irPara('VendasComplementares') },
+    { label: 'Relatório mensal', emoji: '📈', onPress: () => irPara('RelatorioMensal') },
     ...(ehGestor
       ? [
           { label: 'Metas', emoji: '🎯', onPress: () => irPara('Equipe') },
-          { label: 'Relatório mensal', emoji: '📈', onPress: () => irPara('RelatorioMensal') },
           { label: 'Venda adicional', emoji: '🎁', onPress: () => irPara('VendaAdicional') },
           { label: 'Campanhas', emoji: '📢', onPress: () => irPara('Campanhas') },
           { label: 'Cartazetes', emoji: '🖨️', onPress: () => irPara('Cartazetes') },
+          { label: 'Kits sugeridos', emoji: '🧺', onPress: () => irPara('KitsAfinidade') },
           { label: 'Compras', emoji: '🛒', onPress: () => irPara('Compras') },
           { label: 'Precificação', emoji: '📊', onPress: () => irPara('Precificacao') },
         ]
@@ -259,6 +261,15 @@ function AppTabs() {
           options={{
             title: 'Cartazetes',
             tabBarIcon: ({ focused }) => <TabIcon emoji="🖨️" focused={focused} />,
+            ...abaOculta(true),
+          }}
+        />
+        <Tab.Screen
+          name="KitsAfinidade"
+          component={SugestaoKitsScreen}
+          options={{
+            title: 'Kits sugeridos',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="🧺" focused={focused} />,
             ...abaOculta(true),
           }}
         />

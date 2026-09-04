@@ -55,6 +55,8 @@ import {
   StatusSincronizacao,
   SugestaoCampanhaParams,
   SugestaoCompra,
+  SugestaoKitsParams,
+  SugestaoParAfinidade,
   TipoReceita,
   VendaAntimicrobianoRecente,
   VendaComplementarMarcada,
@@ -283,7 +285,25 @@ async function getRespostasStore(): Promise<Record<string, boolean>> {
 
 async function getCampanhasStore(): Promise<Campanha[]> {
   const raw = await AsyncStorage.getItem(CAMPANHAS_KEY);
-  return raw ? (JSON.parse(raw) as Campanha[]) : [];
+  if (!raw) return [];
+  const campanhas = JSON.parse(raw) as Campanha[];
+  // Normaliza aqui, na origem — campanha salva em AsyncStorage antes
+  // do campo `kits` existir não tem essa chave no JSON guardado (o
+  // parse cru simplesmente omite), e Campanha.kits não é opcional no
+  // tipo. Um ponto só de conserto pra todo mundo que lê daqui, em vez
+  // de espalhar `?? []` em cada tela que consome campanha. Mesma
+  // lacuna pro `kit` de produto único (02/09/2026): campanha salva
+  // antes de tipoPrecificacao/precoFixo existirem só tem
+  // {quantidadeMinima, percentualDescontoItem} no JSON.
+  return campanhas.map((c) => ({
+    ...c,
+    kits: c.kits ?? [],
+    produtos: c.produtos.map((p) =>
+      p.kit && !p.kit.tipoPrecificacao
+        ? { ...p, kit: { ...p.kit, tipoPrecificacao: 'percentual' as const, precoFixo: null } }
+        : p
+    ),
+  }));
 }
 
 async function salvarCampanhasStore(campanhas: Campanha[]): Promise<void> {
@@ -1175,6 +1195,54 @@ class MockRepository implements DataRepository {
     return delay(sugestoes);
   }
 
+  // Mock não tem venda com granularidade de venda_id (só agregado por
+  // produto em vendaRecenteSeed), então não dá pra simular afinidade
+  // de compra de verdade — nem dá pra usar macroGrupoDoProduto aqui
+  // (catalogoProdutosSeed não popula `grupo`, só `categoria`, campo
+  // que esse mock usa de verdade). Fabrica pares determinísticos: dois
+  // produtos da MESMA categoria formam um par sugerido, com
+  // coOcorrencias/lift derivados das quantidades já existentes no
+  // seed (não é uma análise real, só dá pra tela ter o que mostrar em
+  // dev). `params.macroGrupo` é ignorado de propósito.
+  async sugerirParesAfinidade(_profile: Profile, _params: SugestaoKitsParams): Promise<SugestaoParAfinidade[]> {
+    const vendaPorCodigo = new Map(vendaRecenteSeed.map((v) => [v.codigoProduto, v.quantidadeVendida30d]));
+    const porCategoria = new Map<string, ProdutoCatalogo[]>();
+    for (const produto of catalogoProdutosSeed) {
+      const lista = porCategoria.get(produto.categoria) ?? [];
+      lista.push(produto);
+      porCategoria.set(produto.categoria, lista);
+    }
+
+    const sugestoes: SugestaoParAfinidade[] = [];
+    for (const produtos of porCategoria.values()) {
+      for (let i = 0; i < produtos.length; i++) {
+        for (let j = i + 1; j < produtos.length; j++) {
+          const seed = produtos[i];
+          const parceiro = produtos[j];
+          const vendasSeed = vendaPorCodigo.get(seed.codigo) ?? 0;
+          const vendasParceiro = vendaPorCodigo.get(parceiro.codigo) ?? 0;
+          const coOcorrencias = Math.round(Math.min(vendasSeed, vendasParceiro) * 0.4);
+          if (coOcorrencias < 3) continue;
+          sugestoes.push({
+            codigoProdutoSeed: seed.codigo,
+            nomeProdutoSeed: seed.nome,
+            precoRegularSeed: seed.precoVenda,
+            custoMedioSeed: seed.custoMedio,
+            codigoProdutoParceiro: parceiro.codigo,
+            nomeProdutoParceiro: parceiro.nome,
+            precoRegularParceiro: parceiro.precoVenda,
+            custoMedioParceiro: parceiro.custoMedio,
+            coOcorrencias,
+            vendasSeed,
+            vendasParceiro,
+            lift: 1.5,
+          });
+        }
+      }
+    }
+    return delay(sugestoes.sort((a, b) => b.coOcorrencias - a.coOcorrencias));
+  }
+
   async getCampanhas(_profile: Profile): Promise<Campanha[]> {
     const campanhas = await getCampanhasStore();
     return delay([...campanhas].sort((a, b) => b.criadaEm.localeCompare(a.criadaEm)));
@@ -1196,6 +1264,7 @@ class MockRepository implements DataRepository {
       existente.dataInicio = input.dataInicio;
       existente.dataFim = input.dataFim;
       existente.produtos = input.produtos;
+      existente.kits = input.kits;
       salva = existente;
     } else {
       salva = {
@@ -1209,6 +1278,7 @@ class MockRepository implements DataRepository {
         quantidadeVendida: 0,
         valorVendido: 0,
         produtos: input.produtos,
+        kits: input.kits,
       };
       campanhas.push(salva);
     }
@@ -1567,6 +1637,7 @@ class MockRepository implements DataRepository {
         const produto = catalogoProdutosSeed.find((p) => p.codigo === v.codigoProduto);
         return {
           itemId: v.id,
+          vendaId: v.id,
           dataVenda,
           valor: (produto?.precoVenda ?? 0) * v.quantidade,
           codigoVendedor: v.codigoVendedor,

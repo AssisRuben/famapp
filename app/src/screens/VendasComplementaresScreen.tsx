@@ -19,7 +19,7 @@ import { repository } from '../data';
 import { Card } from '../components/Card';
 import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { colors } from '../theme/colors';
-import { formatBRL, formatDateBR, todayISO } from '../lib/format';
+import { formatBRL, formatDateBR, parseDecimalBR, todayISO } from '../lib/format';
 import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
 import { alertar, confirmar } from '../lib/alert';
 import {
@@ -176,7 +176,7 @@ function SeletorDia({
   // ~7 dias visíveis por vez (respiro nas laterais da tela, 16 de
   // padding de cada lado) — cresce em tablet, encolhe em tela estreita,
   // sem passar dos limites pra não ficar minúsculo nem gigante.
-  const larguraChip = Math.round(Math.min(52, Math.max(40, (width - 32 - 8 * 6) / 7)));
+  const larguraChip = Math.round(Math.min(68, Math.max(56, (width - 32 - 8 * 6) / 7)));
 
   return (
     <ScrollView
@@ -583,13 +583,13 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
   );
 }
 
-// Aba do vendedor: seletor de dia + viewer dos próprios itens. Só o
-// dia de hoje é editável (pedido explícito do usuário) — dias
-// passados dentro do período ficam em modo consulta.
+// Aba do vendedor: seletor de dia + viewer dos próprios itens.
+// Qualquer dia dentro do período do ranking é editável (liberado
+// 01/09/2026 — antes só dava pra marcar o dia de hoje).
 function TelaVendedor({ codigoVendedor }: { codigoVendedor: number }) {
   const { inicio, fim, temCampanha, campanha } = usePeriodoVigente();
   const [diaSelecionado, setDiaSelecionado] = useDiaNoPeriodo(inicio, fim);
-  const editavel = diaSelecionado === todayISO();
+  const editavel = true;
   // Muda a cada "Salvar" bem-sucedido — vira key do card, forçando ele
   // a buscar de novo e refletir na hora o que acabou de ser marcado.
   const [versaoResumo, setVersaoResumo] = useState(0);
@@ -608,9 +608,6 @@ function TelaVendedor({ codigoVendedor }: { codigoVendedor: number }) {
             {campanha && <CardResumoCampanha key={versaoResumo} campanha={campanha} />}
             {!temCampanha && (
               <Text style={styles.hintSomenteLeitura}>Nenhum período de ranking cadastrado ainda — mostrando a semana atual.</Text>
-            )}
-            {!editavel && (
-              <Text style={styles.hintSomenteLeitura}>Só é possível marcar/desmarcar o dia de hoje — isso aqui é só consulta.</Text>
             )}
           </>
         }
@@ -767,6 +764,11 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
   // chave `${codigoVendedor}:${data}`, um painel só compartilhado entre
   // todos os vendedores dessa campanha.
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
+  // Qual vendedor está com a lista de dias aberta — por padrão o
+  // resultado por dia fica escondido, só aparece ao clicar no nome
+  // (pedido 01/09/2026: por dia era ruído demais, só o total interessa
+  // de cara).
+  const [vendedorAberto, setVendedorAberto] = useState<number | null>(null);
 
   const alternar = async () => {
     if (aberto) {
@@ -803,7 +805,7 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
     <View>
       <Pressable style={styles.andamentoToggle} onPress={alternar}>
         <Text style={styles.andamentoToggleTexto}>Ver ranking</Text>
-        <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={16} color={colors.navy} />
+        <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={26} color={colors.navy} />
       </Pressable>
       {aberto && (
         <View style={styles.andamentoPainel}>
@@ -815,45 +817,60 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
             calcularRankingComplementar(vendas, campanha).map((item) => {
               const diasDoVendedor = agruparVendasPorDiaDoVendedor(vendas, item.codigoVendedor);
               const ofertados = ofertadosPorVendedor.get(item.codigoVendedor) ?? null;
+              const vendedorEstaAberto = vendedorAberto === item.codigoVendedor;
               return (
                 <View key={item.codigoVendedor} style={styles.andamentoBloco}>
-                  <View style={styles.andamentoLinha}>
+                  <Pressable
+                    style={styles.andamentoLinha}
+                    onPress={() =>
+                      setVendedorAberto((atual) => (atual === item.codigoVendedor ? null : item.codigoVendedor))
+                    }
+                  >
                     <Text style={styles.andamentoNome} numberOfLines={1}>
                       {item.premio != null ? medalhaPosicaoComplementar(item.posicao) : `${item.posicao}º`}{' '}
                       {item.nomeVendedor}
                     </Text>
-                    <Text style={styles.andamentoValor}>
-                      {ofertados != null ? `${ofertados} ofertados · ` : ''}
-                      {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'} · {formatBRL(item.valorTotal)}
-                      {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
-                    </Text>
-                  </View>
-                  {diasDoVendedor.map((dia) => {
-                    const chave = `${item.codigoVendedor}:${dia.data}`;
-                    const diaEstaAberto = diaAberto === chave;
-                    return (
-                      <View key={dia.data} style={styles.diaVendedorBloco}>
-                        <Pressable
-                          style={styles.diaVendedorLinha}
-                          onPress={() => setDiaAberto((atual) => (atual === chave ? null : chave))}
-                        >
-                          <View style={styles.diaVendedorInfo}>
-                            <Text style={styles.resultadoDiaData}>{formatDateBR(dia.data)}</Text>
-                            <Text style={styles.andamentoValor}>
-                              {dia.quantidadeItens} {dia.quantidadeItens === 1 ? 'venda' : 'vendas'} ·{' '}
-                              {formatBRL(dia.valorVenda)}
-                            </Text>
-                          </View>
-                          <Ionicons
-                            name={diaEstaAberto ? 'chevron-up' : 'chevron-down'}
-                            size={14}
-                            color={colors.textMuted}
-                          />
-                        </Pressable>
-                        {diaEstaAberto && <Text style={styles.andamentoProdutos}>{dia.produtos}</Text>}
-                      </View>
-                    );
-                  })}
+                    <View style={styles.andamentoValorRow}>
+                      <Text style={styles.andamentoValor}>
+                        {ofertados != null ? `${ofertados} ofertados · ` : ''}
+                        {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'} · {formatBRL(item.valorTotal)}
+                        {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
+                      </Text>
+                      <Ionicons
+                        name={vendedorEstaAberto ? 'chevron-up' : 'chevron-down'}
+                        size={24}
+                        color={colors.textMuted}
+                      />
+                    </View>
+                  </Pressable>
+                  {vendedorEstaAberto &&
+                    diasDoVendedor.map((dia) => {
+                      const chave = `${item.codigoVendedor}:${dia.data}`;
+                      const diaEstaAberto = diaAberto === chave;
+                      return (
+                        <View key={dia.data} style={styles.diaVendedorBloco}>
+                          <Pressable
+                            style={styles.diaVendedorLinha}
+                            onPress={() => setDiaAberto((atual) => (atual === chave ? null : chave))}
+                          >
+                            <View style={styles.diaVendedorInfo}>
+                              <Text style={styles.resultadoDiaData}>{formatDateBR(dia.data)}</Text>
+                              <Text style={styles.andamentoValor}>
+                                {dia.atendimentos} {dia.atendimentos === 1 ? 'atendimento' : 'atendimentos'} ·{' '}
+                                {dia.quantidadeItens} {dia.quantidadeItens === 1 ? 'item' : 'itens'} ·{' '}
+                                {formatBRL(dia.valorVenda)}
+                              </Text>
+                            </View>
+                            <Ionicons
+                              name={diaEstaAberto ? 'chevron-up' : 'chevron-down'}
+                              size={20}
+                              color={colors.textMuted}
+                            />
+                          </Pressable>
+                          {diaEstaAberto && <Text style={styles.andamentoProdutos}>{dia.produtos}</Text>}
+                        </View>
+                      );
+                    })}
                 </View>
               );
             })
@@ -928,7 +945,7 @@ function TelaRankingGestor() {
 
   const salvar = async () => {
     const premiacaoRanking = premios
-      .map((valor, index) => ({ posicao: index + 1, valor: Number(valor.replace(',', '.')) || 0 }))
+      .map((valor, index) => ({ posicao: index + 1, valor: parseDecimalBR(valor) }))
       .filter((p) => p.valor > 0);
     if (premiacaoRanking.length === 0) {
       alertar('Premiação vazia', 'Preencha pelo menos o prêmio do 1º lugar.');
@@ -937,7 +954,7 @@ function TelaRankingGestor() {
     const valorMinimoTexto = valorMinimo.trim();
     let valorMinimoInput: number | null = null;
     if (valorMinimoTexto) {
-      valorMinimoInput = Number(valorMinimoTexto.replace(',', '.')) || 0;
+      valorMinimoInput = parseDecimalBR(valorMinimoTexto);
       if (valorMinimoInput <= 0) {
         alertar('Mínimo inválido', 'O valor mínimo precisa ser maior que 0 (ou deixe em branco pra não ter piso).');
         return;
@@ -1224,18 +1241,18 @@ const styles = StyleSheet.create({
   seletorDiaWrap: { marginBottom: 12, flexGrow: 0 },
   seletorDiaConteudo: { gap: 8, paddingRight: 8 },
   diaBotao: {
-    height: 64,
-    borderRadius: 16,
+    height: 80,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
+    gap: 3,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
   },
   diaBotaoAtivo: { backgroundColor: colors.navy, borderColor: colors.navy },
-  diaTextoDia: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
-  diaTextoMes: { fontSize: 11, fontWeight: '600', color: colors.textSecondary, textTransform: 'uppercase' },
+  diaTextoDia: { fontSize: 21, fontWeight: '700', color: colors.textPrimary },
+  diaTextoMes: { fontSize: 13, fontWeight: '600', color: colors.textSecondary, textTransform: 'uppercase' },
   diaTextoAtivo: { color: colors.white },
   diaPontoHoje: { position: 'absolute', bottom: 6, width: 4, height: 4, borderRadius: 2, backgroundColor: colors.navy },
   diaPontoHojeAtivo: { backgroundColor: colors.white },
@@ -1319,16 +1336,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 10,
-    paddingTop: 8,
+    paddingTop: 12,
+    paddingBottom: 4,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-  andamentoToggleTexto: { fontSize: 12, fontWeight: '600', color: colors.navy },
+  andamentoToggleTexto: { fontSize: 14, fontWeight: '600', color: colors.navy },
   andamentoPainel: { marginTop: 6 },
   andamentoBloco: { paddingVertical: 4 },
-  andamentoLinha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  andamentoLinha: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
   andamentoNome: { flex: 1, fontSize: 12, color: colors.textPrimary },
   andamentoValor: { fontSize: 12, color: colors.textSecondary },
+  andamentoValorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   andamentoProdutos: { fontSize: 11, color: colors.textMuted, marginTop: 2, marginLeft: 10 },
   diaVendedorBloco: { marginTop: 2 },
   diaVendedorLinha: {
@@ -1336,7 +1361,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 3,
+    paddingVertical: 8,
     paddingLeft: 10,
   },
   diaVendedorInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
