@@ -577,9 +577,15 @@ export interface SugestaoCampanhaParams {
 export interface KitPromocao {
   // Quantas unidades precisa levar pra ativar o desconto (ex.: 2 ou 3).
   quantidadeMinima: number;
-  // % de desconto aplicado numa das unidades do kit (100 = grátis,
-  // vira "compre N pague N-1"; 50/25 = desconto parcial no item).
-  percentualDescontoItem: number;
+  // Dois formatos (02/09/2026, mesmo padrão de KitMultiProduto mais
+  // abaixo): 'percentual' usa percentualDescontoItem (100 = grátis,
+  // vira "compre N pague N-1"; 50/25 = desconto parcial no item);
+  // 'preco_fixo' usa precoFixo — preço fechado pras quantidadeMinima
+  // unidades (ex.: "3 por R$29,90"), que não existia antes. Exatamente
+  // um dos dois campos é não-nulo, conforme tipoPrecificacao.
+  tipoPrecificacao: TipoPrecificacaoKit;
+  percentualDescontoItem: number | null;
+  precoFixo: number | null;
 }
 
 export type TipoPromocaoProduto = 'unitario' | 'kit';
@@ -589,6 +595,11 @@ export interface CampanhaProduto {
   codigoBarras: string;
   nomeProduto: string;
   precoRegular: number;
+  // Preço de compra/custo médio do produto (02/09/2026) — resolvido do
+  // catálogo igual codigoBarras/nomeProduto (0 quando ainda não
+  // resolvido, ex.: lista leve de campanhas). Usado pra mostrar margem
+  // real no painel de kit (Cartazetes).
+  custoMedio: number;
   precoPromocional: number;
   percentualDesconto: number;
   quantidadeCartazes: number;

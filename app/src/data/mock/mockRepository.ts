@@ -291,8 +291,19 @@ async function getCampanhasStore(): Promise<Campanha[]> {
   // do campo `kits` existir não tem essa chave no JSON guardado (o
   // parse cru simplesmente omite), e Campanha.kits não é opcional no
   // tipo. Um ponto só de conserto pra todo mundo que lê daqui, em vez
-  // de espalhar `?? []` em cada tela que consome campanha.
-  return campanhas.map((c) => ({ ...c, kits: c.kits ?? [] }));
+  // de espalhar `?? []` em cada tela que consome campanha. Mesma
+  // lacuna pro `kit` de produto único (02/09/2026): campanha salva
+  // antes de tipoPrecificacao/precoFixo existirem só tem
+  // {quantidadeMinima, percentualDescontoItem} no JSON.
+  return campanhas.map((c) => ({
+    ...c,
+    kits: c.kits ?? [],
+    produtos: c.produtos.map((p) =>
+      p.kit && !p.kit.tipoPrecificacao
+        ? { ...p, kit: { ...p.kit, tipoPrecificacao: 'percentual' as const, precoFixo: null } }
+        : p
+    ),
+  }));
 }
 
 async function salvarCampanhasStore(campanhas: Campanha[]): Promise<void> {

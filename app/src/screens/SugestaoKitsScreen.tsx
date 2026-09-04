@@ -5,12 +5,18 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
+import { ComparativoCustoVenda } from '../components/ComparativoCustoVenda';
 import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, formatDecimalBR, parseDecimalBR, todayISO } from '../lib/format';
-import { alertar } from '../lib/alert';
+import { alertar, confirmar } from '../lib/alert';
 import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroGrupo';
 import { resolverCodigosSeed } from '../lib/afinidadeKits';
-import { calcularKitPercentualSustentavel, calcularKitPrecoFixoSustentavel, descricaoKitMultiProduto } from '../lib/kits';
+import {
+  calcularKitPercentualSustentavel,
+  calcularKitPrecoFixoSustentavel,
+  descricaoKitMultiProduto,
+  margemResultanteKitMultiProduto,
+} from '../lib/kits';
 import { KitMultiProduto, ProdutoCatalogo, SugestaoParAfinidade, TipoPrecificacaoKit } from '../types/domain';
 
 function round2(valor: number): number {
@@ -78,6 +84,98 @@ function itemParaKit(item: ItemSugerido, dataInicio: string, dataFim: string): K
   };
 }
 
+interface CardParSugeridoProps {
+  item: ItemSugerido;
+  dataInicio: string;
+  dataFim: string;
+  onToggle: (chave: string) => void;
+  onAlternarTipo: (chave: string, tipo: TipoPrecificacaoKit) => void;
+  valorExibido: (item: ItemSugerido) => string;
+  onDigitarValor: (chave: string, texto: string) => void;
+  onConfirmarValor: (chave: string) => void;
+}
+
+// Um card por par sugerido — usado tanto na seção "Selecionados"
+// quanto em "Pares sugeridos" (mesmo componente, só muda em qual lista
+// está). Nome do produto vem acompanhado do código (02/09/2026,
+// pedido explícito): o catálogo real tem VÁRIOS códigos com o mesmo
+// nome de produto (lotes/fornecedores diferentes na Trier) — sem o
+// código, não dá pra saber qual custo específico está sendo usado.
+function CardParSugerido({
+  item,
+  dataInicio,
+  dataFim,
+  onToggle,
+  onAlternarTipo,
+  valorExibido,
+  onDigitarValor,
+  onConfirmarValor,
+}: CardParSugeridoProps) {
+  const { totalCusto, precoFinal, margemPct } = margemResultanteKitMultiProduto(itemParaKit(item, dataInicio, dataFim));
+  return (
+    <Card>
+      <Pressable style={styles.itemHeaderRow} onPress={() => onToggle(item.chave)}>
+        <Ionicons
+          name={item.selecionado ? 'checkbox' : 'square-outline'}
+          size={22}
+          color={item.selecionado ? colors.navy : colors.textMuted}
+        />
+        <View style={styles.itemHeaderTexto}>
+          <Text style={styles.itemNome} numberOfLines={2}>
+            {item.nomeProdutoSeed} ({item.codigoProdutoSeed}) + {item.nomeProdutoParceiro} ({item.codigoProdutoParceiro})
+          </Text>
+          <Text style={styles.itemSubinfo}>
+            {item.coOcorrencias} venda(s) juntos · lift {item.lift.toFixed(2)} · {formatBRL(totalRegularDoPar(item))} juntos
+          </Text>
+          <Text style={[styles.margemTexto, margemPct < 0 && styles.margemTextoNegativa]}>
+            Preço de compra {formatBRL(totalCusto)} · margem {margemPct.toLocaleString('pt-BR')}%
+          </Text>
+        </View>
+      </Pressable>
+
+      {item.selecionado && (
+        <View style={styles.painelExpandido}>
+          <Text style={styles.campoLabel}>Tipo de preço</Text>
+          <View style={styles.grupoGrid}>
+            <Pressable
+              style={[styles.chip, item.tipoPrecificacao === 'percentual' && styles.chipAtivo]}
+              onPress={() => onAlternarTipo(item.chave, 'percentual')}
+            >
+              <Text style={[styles.chipTexto, item.tipoPrecificacao === 'percentual' && styles.chipTextoAtivo]}>
+                % de desconto no combo
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.chip, item.tipoPrecificacao === 'preco_fixo' && styles.chipAtivo]}
+              onPress={() => onAlternarTipo(item.chave, 'preco_fixo')}
+            >
+              <Text style={[styles.chipTexto, item.tipoPrecificacao === 'preco_fixo' && styles.chipTextoAtivo]}>
+                Preço fixo do combo
+              </Text>
+            </Pressable>
+          </View>
+
+          <Text style={styles.campoLabel}>{item.tipoPrecificacao === 'percentual' ? 'Desconto (%)' : 'Preço fixo (R$)'}</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="decimal-pad"
+            value={valorExibido(item)}
+            onChangeText={(texto) => onDigitarValor(item.chave, texto)}
+            onBlur={() => onConfirmarValor(item.chave)}
+          />
+
+          <Text style={styles.previaTexto}>{descricaoKitMultiProduto(itemParaKit(item, dataInicio, dataFim))}</Text>
+          <Text style={styles.margemTexto}>
+            {item.nomeProdutoSeed} ({item.codigoProdutoSeed}) {formatBRL(item.custoMedioSeed)} + {item.nomeProdutoParceiro} (
+            {item.codigoProdutoParceiro}) {formatBRL(item.custoMedioParceiro)}
+          </Text>
+          <ComparativoCustoVenda custo={totalCusto} venda={precoFinal} legenda="por kit" />
+        </View>
+      )}
+    </Card>
+  );
+}
+
 export function SugestaoKitsScreen() {
   const { profile } = useAuth();
   const [macroGrupo, setMacroGrupo] = useState<MacroGrupo | null>(null);
@@ -112,7 +210,9 @@ export function SugestaoKitsScreen() {
       const codigosSeed = resolverCodigosSeed(catalogoAtual, macroGrupo);
       if (codigosSeed.length === 0) {
         alertar('Nenhum produto nessa categoria', 'Escolha outra categoria — o catálogo não tem produto classificado nela.');
-        setItens([]);
+        // mantém o que já estava selecionado — só limpa as sugestões
+        // não-selecionadas dessa tentativa (não teve nenhuma mesmo).
+        setItens((atual) => atual.filter((i) => i.selecionado));
         setGerada(true);
         return;
       }
@@ -132,7 +232,16 @@ export function SugestaoKitsScreen() {
           precoFixo,
         };
       });
-      setItens(itensGerados);
+      // Gerar de novo (outra categoria, por ex.) NÃO apaga o que já
+      // tinha sido selecionado — pedido explícito, pra dar pra montar
+      // vários kits de várias categorias numa campanha só. Só descarta
+      // os NÃO selecionados da geração anterior (lixo de navegação).
+      setItens((atual) => {
+        const selecionadosAtuais = atual.filter((i) => i.selecionado);
+        const chavesJaSelecionadas = new Set(selecionadosAtuais.map((i) => i.chave));
+        const novos = itensGerados.filter((i) => !chavesJaSelecionadas.has(i.chave));
+        return [...selecionadosAtuais, ...novos];
+      });
       setGerada(true);
     } catch (erro) {
       alertar('Erro ao gerar sugestões', erro instanceof Error ? erro.message : 'Tente novamente.');
@@ -195,21 +304,9 @@ export function SugestaoKitsScreen() {
   };
 
   const selecionados = itens.filter((i) => i.selecionado);
+  const naoSelecionados = itens.filter((i) => !i.selecionado);
 
   const salvar = async () => {
-    if (!nome.trim()) {
-      alertar('Nome obrigatório', 'Dê um nome pra campanha antes de salvar.');
-      return;
-    }
-    if (dataFim < dataInicio) {
-      alertar('Datas inválidas', 'A data de fim precisa ser igual ou depois da data de início.');
-      return;
-    }
-    if (selecionados.length === 0) {
-      alertar('Nenhum kit selecionado', 'Marque pelo menos um par sugerido antes de salvar.');
-      return;
-    }
-
     setSalvando(true);
     try {
       const kits: KitMultiProduto[] = selecionados.map((item) => itemParaKit(item, dataInicio, dataFim));
@@ -225,6 +322,31 @@ export function SugestaoKitsScreen() {
     } finally {
       setSalvando(false);
     }
+  };
+
+  // Botão "Fechar campanha" pede confirmação antes de gravar — pedido
+  // explícito ("quando fechar, confirme"), já que pode juntar kits de
+  // várias categorias acumuladas e vale um último "tem certeza" antes
+  // de criar de vez.
+  const confirmarEFechar = () => {
+    if (!nome.trim()) {
+      alertar('Nome obrigatório', 'Dê um nome pra campanha antes de fechar.');
+      return;
+    }
+    if (dataFim < dataInicio) {
+      alertar('Datas inválidas', 'A data de fim precisa ser igual ou depois da data de início.');
+      return;
+    }
+    if (selecionados.length === 0) {
+      alertar('Nenhum kit selecionado', 'Marque pelo menos um par sugerido antes de fechar.');
+      return;
+    }
+    confirmar(
+      'Fechar campanha',
+      `Confirma criar "${nome.trim()}" com ${selecionados.length} kit(s)? Depois é só ajustar preço/imprimir em Cartazetes.`,
+      salvar,
+      { textoConfirmar: 'Fechar campanha' }
+    );
   };
 
   return (
@@ -277,84 +399,49 @@ export function SugestaoKitsScreen() {
         </Pressable>
       </Card>
 
+      {selecionados.length > 0 && (
+        <>
+          <Text style={styles.sectionTitulo}>Selecionados ({selecionados.length})</Text>
+          {selecionados.map((item) => (
+            <CardParSugerido
+              key={item.chave}
+              item={item}
+              dataInicio={dataInicio}
+              dataFim={dataFim}
+              onToggle={alternarSelecionado}
+              onAlternarTipo={alternarTipo}
+              valorExibido={valorExibido}
+              onDigitarValor={digitarValor}
+              onConfirmarValor={confirmarValor}
+            />
+          ))}
+        </>
+      )}
+
       {gerada && (
         <>
-          <Text style={styles.sectionTitulo}>Pares sugeridos ({itens.length})</Text>
-          {itens.length === 0 ? (
+          <Text style={styles.sectionTitulo}>Pares sugeridos ({naoSelecionados.length})</Text>
+          {naoSelecionados.length === 0 ? (
             <Card>
               <Text style={styles.empty}>
-                Nenhum par com co-ocorrência relevante nessa categoria no período analisado.
+                {itens.length === 0
+                  ? 'Nenhum par com co-ocorrência relevante nessa categoria no período analisado.'
+                  : 'Todos os pares sugeridos dessa categoria já estão selecionados acima.'}
               </Text>
             </Card>
           ) : (
-            itens.map((item) => (
-              <Card key={item.chave}>
-                <Pressable style={styles.itemHeaderRow} onPress={() => alternarSelecionado(item.chave)}>
-                  <Ionicons
-                    name={item.selecionado ? 'checkbox' : 'square-outline'}
-                    size={22}
-                    color={item.selecionado ? colors.navy : colors.textMuted}
-                  />
-                  <View style={styles.itemHeaderTexto}>
-                    <Text style={styles.itemNome} numberOfLines={2}>
-                      {item.nomeProdutoSeed} + {item.nomeProdutoParceiro}
-                    </Text>
-                    <Text style={styles.itemSubinfo}>
-                      {item.coOcorrencias} venda(s) juntos · lift {item.lift.toFixed(2)} · {formatBRL(totalRegularDoPar(item))} juntos
-                    </Text>
-                  </View>
-                </Pressable>
-
-                {item.selecionado && (
-                  <View style={styles.painelExpandido}>
-                    <Text style={styles.campoLabel}>Tipo de preço</Text>
-                    <View style={styles.grupoGrid}>
-                      <Pressable
-                        style={[styles.chip, item.tipoPrecificacao === 'percentual' && styles.chipAtivo]}
-                        onPress={() => alternarTipo(item.chave, 'percentual')}
-                      >
-                        <Text style={[styles.chipTexto, item.tipoPrecificacao === 'percentual' && styles.chipTextoAtivo]}>
-                          % de desconto no combo
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.chip, item.tipoPrecificacao === 'preco_fixo' && styles.chipAtivo]}
-                        onPress={() => alternarTipo(item.chave, 'preco_fixo')}
-                      >
-                        <Text style={[styles.chipTexto, item.tipoPrecificacao === 'preco_fixo' && styles.chipTextoAtivo]}>
-                          Preço fixo do combo
-                        </Text>
-                      </Pressable>
-                    </View>
-
-                    {item.tipoPrecificacao === 'percentual' ? (
-                      <>
-                        <Text style={styles.campoLabel}>Desconto (%)</Text>
-                        <TextInput
-                          style={styles.input}
-                          keyboardType="decimal-pad"
-                          value={valorExibido(item)}
-                          onChangeText={(texto) => digitarValor(item.chave, texto)}
-                          onBlur={() => confirmarValor(item.chave)}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.campoLabel}>Preço fixo (R$)</Text>
-                        <TextInput
-                          style={styles.input}
-                          keyboardType="decimal-pad"
-                          value={valorExibido(item)}
-                          onChangeText={(texto) => digitarValor(item.chave, texto)}
-                          onBlur={() => confirmarValor(item.chave)}
-                        />
-                      </>
-                    )}
-
-                    <Text style={styles.previaTexto}>{descricaoKitMultiProduto(itemParaKit(item, dataInicio, dataFim))}</Text>
-                  </View>
-                )}
-              </Card>
+            naoSelecionados.map((item) => (
+              <CardParSugerido
+                key={item.chave}
+                item={item}
+                dataInicio={dataInicio}
+                dataFim={dataFim}
+                onToggle={alternarSelecionado}
+                onAlternarTipo={alternarTipo}
+                valorExibido={valorExibido}
+                onDigitarValor={digitarValor}
+                onConfirmarValor={confirmarValor}
+              />
             ))
           )}
         </>
@@ -362,7 +449,10 @@ export function SugestaoKitsScreen() {
 
       {selecionados.length > 0 && (
         <Card>
-          <Text style={styles.cardTitulo}>Criar campanha com {selecionados.length} kit(s)</Text>
+          <Text style={styles.cardTitulo}>Fechar campanha com {selecionados.length} kit(s)</Text>
+          <Text style={styles.subinfoFechar}>
+            Pode escolher outra categoria acima e gerar mais sugestões — o que já está selecionado fica guardado até você fechar.
+          </Text>
           <TextInput style={styles.input} placeholder="Nome da campanha" value={nome} onChangeText={setNome} />
           <Text style={[styles.rotulo, styles.espacado]}>Período</Text>
           <Pressable style={styles.botaoPeriodo} onPress={() => setCalendarioAberto(true)}>
@@ -372,8 +462,8 @@ export function SugestaoKitsScreen() {
             </Text>
           </Pressable>
 
-          <Pressable style={styles.botaoGerar} onPress={salvar} disabled={salvando}>
-            {salvando ? <ActivityIndicator color={colors.white} /> : <Text style={styles.botaoGerarTexto}>Salvar campanha</Text>}
+          <Pressable style={styles.botaoGerar} onPress={confirmarEFechar} disabled={salvando}>
+            {salvando ? <ActivityIndicator color={colors.white} /> : <Text style={styles.botaoGerarTexto}>Fechar campanha</Text>}
           </Pressable>
         </Card>
       )}
@@ -398,6 +488,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 14, lineHeight: 18 },
   empty: { color: colors.textSecondary },
   cardTitulo: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
+  subinfoFechar: { fontSize: 12, color: colors.textSecondary, marginBottom: 10, lineHeight: 17 },
   sectionTitulo: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginTop: 16, marginBottom: 8 },
   rotulo: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
   espacado: { marginTop: 10 },
@@ -459,6 +550,8 @@ const styles = StyleSheet.create({
   chipTexto: { fontSize: 12, color: colors.textSecondary, fontWeight: '600' },
   chipTextoAtivo: { color: colors.white },
   previaTexto: { fontSize: 12, color: colors.navy, fontWeight: '600', marginTop: 10 },
+  margemTexto: { fontSize: 11, color: colors.textMuted, marginTop: 4, lineHeight: 15 },
+  margemTextoNegativa: { color: colors.red, fontWeight: '600' },
   botaoPeriodo: {
     flexDirection: 'row',
     alignItems: 'center',

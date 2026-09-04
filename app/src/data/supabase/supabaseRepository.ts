@@ -1259,7 +1259,7 @@ class SupabaseRepository implements DataRepository {
     let query = supabase
       .from('campanhas')
       .select(
-        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item), campanha_kits(id, nome, tipo_precificacao, percentual_desconto_item, preco_fixo, quantidade_cartazes, data_inicio, data_fim, campanha_kit_produtos(codigo_produto, quantidade))'
+        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item, kit_preco_fixo), campanha_kits(id, nome, tipo_precificacao, percentual_desconto_item, preco_fixo, quantidade_cartazes, data_inicio, data_fim, campanha_kit_produtos(codigo_produto, quantidade))'
       )
       .order('created_at', { ascending: false });
     if (filtroId !== undefined) query = query.eq('id', filtroId);
@@ -1329,6 +1329,7 @@ class SupabaseRepository implements DataRepository {
           codigoBarras: produto?.codigo_barras ?? '',
           nomeProduto: produto?.nome ?? (filtroId !== undefined ? `Produto ${cp.codigo_produto}` : ''),
           precoRegular,
+          custoMedio: produto?.custo_medio != null ? Number(produto.custo_medio) : 0,
           precoPromocional,
           percentualDesconto,
           quantidadeCartazes: cp.quantidade_cartazes,
@@ -1340,10 +1341,12 @@ class SupabaseRepository implements DataRepository {
           dataFim: cp.data_fim ?? c.data_fim,
           tipoPromocao: cp.tipo_promocao === 'kit' ? 'kit' : 'unitario',
           kit:
-            cp.tipo_promocao === 'kit' && cp.kit_quantidade_minima != null && cp.kit_percentual_desconto_item != null
+            cp.tipo_promocao === 'kit' && cp.kit_quantidade_minima != null
               ? {
                   quantidadeMinima: cp.kit_quantidade_minima,
-                  percentualDescontoItem: Number(cp.kit_percentual_desconto_item),
+                  tipoPrecificacao: cp.kit_preco_fixo != null ? 'preco_fixo' : 'percentual',
+                  percentualDescontoItem: cp.kit_preco_fixo != null ? null : Number(cp.kit_percentual_desconto_item ?? 0),
+                  precoFixo: cp.kit_preco_fixo != null ? Number(cp.kit_preco_fixo) : null,
                 }
               : null,
         };
@@ -1429,7 +1432,9 @@ class SupabaseRepository implements DataRepository {
           data_fim: p.dataFim === input.dataFim ? null : p.dataFim,
           tipo_promocao: p.tipoPromocao,
           kit_quantidade_minima: p.tipoPromocao === 'kit' ? p.kit?.quantidadeMinima ?? null : null,
-          kit_percentual_desconto_item: p.tipoPromocao === 'kit' ? p.kit?.percentualDescontoItem ?? null : null,
+          kit_percentual_desconto_item:
+            p.tipoPromocao === 'kit' && p.kit?.tipoPrecificacao === 'percentual' ? p.kit?.percentualDescontoItem ?? null : null,
+          kit_preco_fixo: p.tipoPromocao === 'kit' && p.kit?.tipoPrecificacao === 'preco_fixo' ? p.kit?.precoFixo ?? null : null,
         }))
       );
       if (error) throw error;

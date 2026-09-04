@@ -239,6 +239,7 @@ export function PrecificacaoScreen() {
             codigoBarras: item.produto.codigoBarras,
             nomeProduto: item.produto.nome,
             precoRegular: item.produto.precoVenda,
+            custoMedio: item.produto.custoMedio,
             precoPromocional: novoValor,
             percentualDesconto: 0,
             quantidadeCartazes: 0,

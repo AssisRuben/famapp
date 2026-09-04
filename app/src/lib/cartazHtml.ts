@@ -54,12 +54,23 @@ function cartazHtml(grupo: GrupoCartazete): string {
   // por levar mais de um, então mostrar "%OFF" isolado confundiria.
   const primeiroProduto = grupo.produtos[0];
   const kit = primeiroProduto?.tipoPromocao === 'kit' ? primeiroProduto.kit : null;
+  // Preço fixo (02/09/2026) não tem "preço por unidade" pra mostrar
+  // como CADA — é um valor fechado pras N unidades do kit, então usa
+  // POR igual ao layout normal (unitário), só que com o preço do
+  // pacote inteiro, não de uma unidade.
+  const kitPrecoLinhaHtml =
+    kit?.tipoPrecificacao === 'preco_fixo' && kit.precoFixo != null
+      ? `<div class="preco-linha">
+           <span class="preco-por-label">POR</span>
+           <span class="preco">${escapeHtml(formatBRL(kit.precoFixo))}</span>
+         </div>`
+      : `<div class="preco-linha">
+           <span class="preco-por-label">CADA</span>
+           <span class="preco">${escapeHtml(formatBRL(precoDe))}</span>
+         </div>`;
   const faixaPrecoHtml = kit
     ? `<div class="kit-titulo">${escapeHtml(descricaoKit(kit).toUpperCase())}</div>
-       <div class="preco-linha">
-         <span class="preco-por-label">CADA</span>
-         <span class="preco">${escapeHtml(formatBRL(precoDe))}</span>
-       </div>`
+       ${kitPrecoLinhaHtml}`
     : `${descontoBadgeHtml}
        ${precoDeHtml}
        <div class="preco-linha">
