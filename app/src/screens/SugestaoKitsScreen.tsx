@@ -18,26 +18,51 @@ import {
   descricaoKitMultiProduto,
   margemResultanteKitMultiProduto,
   margemResultanteKitProdutoUnico,
-  PRESETS_KIT,
 } from '../lib/kits';
 import {
   CampanhaProduto,
   KitMultiProduto,
   KitPromocao,
   ProdutoCatalogo,
+  ProdutoElegibilidade,
   SugestaoParAfinidade,
   TipoPrecificacaoKit,
 } from '../types/domain';
 
 type ModoKit = 'diferentes' | 'mesmo_item';
 
-interface ItemMesmoProduto {
+// Sugestão de kit de produto ÚNICO (leve N, pague menos) — mesmo
+// espírito de ItemSugerido (par de afinidade), mas pra 1 produto só.
+// Gerado a partir de sugerirProdutosCampanha (mesmo motor que Campanhas
+// já usa, modo 'popularidade'), reaproveitando margem mínima/desconto
+// alvo já configurados — pedido explícito 02/09/2026: "rode da mesma
+// forma buscando por margem e por desconto alvo".
+interface ItemSugeridoMesmo {
+  chave: string;
   codigoProduto: number;
   codigoBarras: string;
   nomeProduto: string;
   precoRegular: number;
   custoMedio: number;
-  kit: KitPromocao;
+  quantidadeVendida30d: number;
+  selecionado: boolean;
+  quantidadeMinima: number;
+  tipoPrecificacao: TipoPrecificacaoKit;
+  percentualDescontoItem: number;
+  precoFixo: number;
+}
+
+function produtoParaCalculoMesmo(item: ItemSugeridoMesmo) {
+  return [{ precoVenda: item.precoRegular, custoMedio: item.custoMedio, quantidade: item.quantidadeMinima }];
+}
+
+function itemMesmoParaKit(item: ItemSugeridoMesmo): KitPromocao {
+  return {
+    quantidadeMinima: item.quantidadeMinima,
+    tipoPrecificacao: item.tipoPrecificacao,
+    percentualDescontoItem: item.tipoPrecificacao === 'percentual' ? item.percentualDescontoItem : null,
+    precoFixo: item.tipoPrecificacao === 'preco_fixo' ? item.precoFixo : null,
+  };
 }
 
 function round2(valor: number): number {
@@ -197,6 +222,102 @@ function CardParSugerido({
   );
 }
 
+interface CardProdutoSugeridoMesmoProps {
+  item: ItemSugeridoMesmo;
+  onToggle: (chave: string) => void;
+  onAlternarTipo: (chave: string, tipo: TipoPrecificacaoKit) => void;
+  valorExibido: (item: ItemSugeridoMesmo, campo: 'quantidade' | 'valor') => string;
+  onDigitarQuantidade: (chave: string, texto: string) => void;
+  onConfirmarQuantidade: (chave: string) => void;
+  onDigitarValor: (chave: string, texto: string) => void;
+  onConfirmarValor: (chave: string) => void;
+}
+
+// Análogo a CardParSugerido, só que pra kit de produto ÚNICO — mesma
+// mecânica de seleção/edição, um produto só em vez de um par.
+function CardProdutoSugeridoMesmo({
+  item,
+  onToggle,
+  onAlternarTipo,
+  valorExibido,
+  onDigitarQuantidade,
+  onConfirmarQuantidade,
+  onDigitarValor,
+  onConfirmarValor,
+}: CardProdutoSugeridoMesmoProps) {
+  const { totalCusto, totalPago } = margemResultanteKitProdutoUnico(itemMesmoParaKit(item), item.precoRegular, item.custoMedio);
+  const margemPct = totalPago > 0 ? round2(((totalPago - totalCusto) / totalPago) * 100) : 0;
+  return (
+    <Card>
+      <Pressable style={styles.itemHeaderRow} onPress={() => onToggle(item.chave)}>
+        <Ionicons
+          name={item.selecionado ? 'checkbox' : 'square-outline'}
+          size={22}
+          color={item.selecionado ? colors.navy : colors.textMuted}
+        />
+        <View style={styles.itemHeaderTexto}>
+          <Text style={styles.itemNome} numberOfLines={2}>
+            {item.nomeProduto} ({item.codigoProduto})
+          </Text>
+          <Text style={styles.itemSubinfo}>
+            {item.quantidadeVendida30d} vendido(s) em 30d · {formatBRL(item.precoRegular)} cada
+          </Text>
+          <Text style={[styles.margemTexto, margemPct < 0 && styles.margemTextoNegativa]}>
+            Preço de compra {formatBRL(totalCusto)} · margem {margemPct.toLocaleString('pt-BR')}%
+          </Text>
+        </View>
+      </Pressable>
+
+      {item.selecionado && (
+        <View style={styles.painelExpandido}>
+          <Text style={styles.campoLabel}>Quantos itens no kit</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={valorExibido(item, 'quantidade')}
+            onChangeText={(texto) => onDigitarQuantidade(item.chave, texto)}
+            onBlur={() => onConfirmarQuantidade(item.chave)}
+          />
+
+          <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Tipo de preço</Text>
+          <View style={styles.grupoGrid}>
+            <Pressable
+              style={[styles.chip, item.tipoPrecificacao === 'percentual' && styles.chipAtivo]}
+              onPress={() => onAlternarTipo(item.chave, 'percentual')}
+            >
+              <Text style={[styles.chipTexto, item.tipoPrecificacao === 'percentual' && styles.chipTextoAtivo]}>
+                % no {item.quantidadeMinima}º item
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.chip, item.tipoPrecificacao === 'preco_fixo' && styles.chipAtivo]}
+              onPress={() => onAlternarTipo(item.chave, 'preco_fixo')}
+            >
+              <Text style={[styles.chipTexto, item.tipoPrecificacao === 'preco_fixo' && styles.chipTextoAtivo]}>
+                Preço fixo pra {item.quantidadeMinima}
+              </Text>
+            </Pressable>
+          </View>
+
+          <Text style={styles.campoLabel}>
+            {item.tipoPrecificacao === 'preco_fixo' ? `Preço fixo (R$) pras ${item.quantidadeMinima} unidades` : 'Desconto (%) no último item'}
+          </Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="decimal-pad"
+            value={valorExibido(item, 'valor')}
+            onChangeText={(texto) => onDigitarValor(item.chave, texto)}
+            onBlur={() => onConfirmarValor(item.chave)}
+          />
+
+          <Text style={styles.previaTexto}>{descricaoKit(itemMesmoParaKit(item))}</Text>
+          <ComparativoCustoVenda custo={totalCusto} venda={totalPago} legenda={`por ${item.quantidadeMinima} unidades`} />
+        </View>
+      )}
+    </Card>
+  );
+}
+
 export function SugestaoKitsScreen() {
   const { profile } = useAuth();
   const [modo, setModo] = useState<ModoKit>('diferentes');
@@ -215,17 +336,17 @@ export function SugestaoKitsScreen() {
   const [valorBuffer, setValorBuffer] = useState<Record<string, string>>({});
 
   // Modo "Mesmo item" — kit de produto único (leve N, pague menos),
-  // pedido explícito 02/09/2026: até aqui só dava pra criar esse tipo
-  // de kit depois, na tela Cartazetes, convertendo um item já existente
-  // de uma campanha comum. Monta um por vez (busca produto, configura,
-  // adiciona à lista) — mesma fórmula/painel já usado em CartazetesScreen.
-  const [buscaProdutoMesmo, setBuscaProdutoMesmo] = useState('');
-  const [produtoEscolhido, setProdutoEscolhido] = useState<ProdutoCatalogo | null>(null);
-  const KIT_PADRAO: KitPromocao = { quantidadeMinima: 2, tipoPrecificacao: 'percentual', percentualDescontoItem: 0, precoFixo: null };
-  const [kitConfig, setKitConfig] = useState<KitPromocao>(KIT_PADRAO);
-  const [kitQuantidadeBuffer, setKitQuantidadeBuffer] = useState<string | undefined>(undefined);
-  const [kitValorBuffer, setKitValorBuffer] = useState<string | undefined>(undefined);
-  const [itensMesmoProduto, setItensMesmoProduto] = useState<ItemMesmoProduto[]>([]);
+  // pedido explícito 02/09/2026. Reusa os MESMOS campos de filtro do
+  // modo "Itens diferentes" (categoria/margem mínima/desconto alvo) +
+  // "quantos são" — "Gerar sugestões" roda igual, só que via
+  // sugerirProdutosCampanha (mesmo motor de Campanhas, modo
+  // 'popularidade') em vez da RPC de afinidade, pedido explícito
+  // 02/09/2026 ("rode da mesma forma buscando por margem e desconto alvo").
+  const [quantidadeKit, setQuantidadeKit] = useState('3');
+  const [itensMesmoProduto, setItensMesmoProduto] = useState<ItemSugeridoMesmo[]>([]);
+  const [geradaMesmo, setGeradaMesmo] = useState(false);
+  const [valorBufferMesmo, setValorBufferMesmo] = useState<Record<string, string>>({});
+  const [quantidadeBufferMesmo, setQuantidadeBufferMesmo] = useState<Record<string, string>>({});
 
   const [nome, setNome] = useState('');
   const [dataInicio, setDataInicio] = useState(todayISO());
@@ -233,105 +354,125 @@ export function SugestaoKitsScreen() {
   const [calendarioAberto, setCalendarioAberto] = useState(false);
   const [salvando, setSalvando] = useState(false);
 
-  const escolherModo = async (novoModo: ModoKit) => {
-    setModo(novoModo);
-    if (novoModo === 'mesmo_item' && catalogo.length === 0 && profile) {
-      setCatalogo(await repository.getCatalogoProdutos(profile));
-    }
+  const alternarSelecionadoMesmo = (chave: string) => {
+    setItensMesmoProduto((atual) => atual.map((i) => (i.chave === chave ? { ...i, selecionado: !i.selecionado } : i)));
   };
 
-  const resultadosBuscaProdutoMesmo =
-    buscaProdutoMesmo.trim().length < 2
-      ? []
-      : catalogo
-          .filter((p) => {
-            const termo = buscaProdutoMesmo.trim().toLowerCase();
-            return p.nome.toLowerCase().includes(termo) || String(p.codigo).includes(termo);
-          })
-          .slice(0, 8);
-
-  const escolherProdutoMesmo = (produto: ProdutoCatalogo) => {
-    setProdutoEscolhido(produto);
-    setBuscaProdutoMesmo('');
-    const margemMinimaPct = parseDecimalBR(margemMinima) || 0;
-    const descontoAlvoPct = parseDecimalBR(descontoAlvo) || 0;
-    const { percentualDesconto } = calcularKitPercentualSustentavel(
-      [{ precoVenda: produto.precoVenda, custoMedio: produto.custoMedio, quantidade: 2 }],
-      descontoAlvoPct,
-      margemMinimaPct
-    );
-    setKitConfig({ quantidadeMinima: 2, tipoPrecificacao: 'percentual', percentualDescontoItem: percentualDesconto, precoFixo: null });
-    setKitQuantidadeBuffer(undefined);
-    setKitValorBuffer(undefined);
-  };
-
-  const confirmarKitQuantidadeMesmo = () => {
-    if (kitQuantidadeBuffer !== undefined) {
-      const quantidade = Math.max(2, Math.round(parseDecimalBR(kitQuantidadeBuffer)) || 2);
-      setKitConfig((atual) => ({ ...atual, quantidadeMinima: quantidade }));
-    }
-    setKitQuantidadeBuffer(undefined);
-  };
-
-  const confirmarKitValorMesmo = () => {
-    if (kitValorBuffer !== undefined) {
-      const digitado = parseDecimalBR(kitValorBuffer);
-      setKitConfig((atual) =>
-        atual.tipoPrecificacao === 'preco_fixo'
-          ? { ...atual, precoFixo: Math.max(0.01, round2(digitado)) }
-          : { ...atual, percentualDescontoItem: Math.min(100, Math.max(0, round2(digitado))) }
-      );
-    }
-    setKitValorBuffer(undefined);
-  };
-
-  // Mesmo espírito de alternarTipoPrecificacaoKitProduto (CartazetesScreen)
-  // — converte o valor pro novo formato em vez de zerar.
-  const alternarTipoPrecificacaoMesmo = (tipo: TipoPrecificacaoKit) => {
-    if (!produtoEscolhido) return;
-    setKitConfig((atual) => {
-      if (tipo === atual.tipoPrecificacao) return atual;
-      const totalRegular = produtoEscolhido.precoVenda * atual.quantidadeMinima;
-      if (tipo === 'preco_fixo') {
-        const percentual = atual.percentualDescontoItem ?? 0;
-        return { ...atual, tipoPrecificacao: tipo, precoFixo: round2(totalRegular * (1 - percentual / 100)), percentualDescontoItem: null };
-      }
-      const precoFixo = atual.precoFixo ?? totalRegular;
-      const percentual = totalRegular > 0 ? Math.max(0, round2(((totalRegular - precoFixo) / totalRegular) * 100)) : 0;
-      return { ...atual, tipoPrecificacao: tipo, percentualDescontoItem: percentual, precoFixo: null };
+  const alternarTipoMesmo = (chave: string, tipo: TipoPrecificacaoKit) => {
+    setItensMesmoProduto((atual) => atual.map((i) => (i.chave === chave ? { ...i, tipoPrecificacao: tipo } : i)));
+    setValorBufferMesmo((atual) => {
+      const { [chave]: _removido, ...resto } = atual;
+      return resto;
     });
   };
 
-  const valorExibidoKitMesmo = (campo: 'quantidade' | 'valor'): string => {
-    if (campo === 'quantidade') return kitQuantidadeBuffer ?? String(kitConfig.quantidadeMinima);
-    if (kitValorBuffer !== undefined) return kitValorBuffer;
-    return kitConfig.tipoPrecificacao === 'preco_fixo'
-      ? formatDecimalBR(kitConfig.precoFixo ?? 0)
-      : formatDecimalBR(kitConfig.percentualDescontoItem ?? 0);
+  const valorExibidoMesmo = (item: ItemSugeridoMesmo, campo: 'quantidade' | 'valor'): string => {
+    if (campo === 'quantidade') return quantidadeBufferMesmo[item.chave] ?? String(item.quantidadeMinima);
+    const digitado = valorBufferMesmo[item.chave];
+    if (digitado !== undefined) return digitado;
+    return item.tipoPrecificacao === 'percentual' ? formatDecimalBR(item.percentualDescontoItem) : formatDecimalBR(item.precoFixo);
   };
 
-  const adicionarKitMesmoProduto = () => {
-    if (!produtoEscolhido) return;
-    setItensMesmoProduto((atual) => [
-      ...atual,
-      {
-        codigoProduto: produtoEscolhido.codigo,
-        codigoBarras: produtoEscolhido.codigoBarras,
-        nomeProduto: produtoEscolhido.nome,
-        precoRegular: produtoEscolhido.precoVenda,
-        custoMedio: produtoEscolhido.custoMedio,
-        kit: kitConfig,
-      },
-    ]);
-    setProdutoEscolhido(null);
-    setKitConfig(KIT_PADRAO);
+  const digitarQuantidadeMesmo = (chave: string, texto: string) => {
+    setQuantidadeBufferMesmo((atual) => ({ ...atual, [chave]: texto }));
   };
 
-  const removerKitMesmoProduto = (codigoProduto: number) => {
-    setItensMesmoProduto((atual) => atual.filter((i) => i.codigoProduto !== codigoProduto));
+  // Mesmo padrão de confirmarKitQuantidade (CartazetesScreen) — só
+  // atualiza a quantidade, não recalcula o valor sozinho (o gestor
+  // ajusta o desconto/preço fixo à parte se quiser).
+  const confirmarQuantidadeMesmo = (chave: string) => {
+    const texto = quantidadeBufferMesmo[chave];
+    if (texto !== undefined) {
+      const quantidade = Math.max(2, Math.round(parseDecimalBR(texto)) || 2);
+      setItensMesmoProduto((atual) => atual.map((i) => (i.chave === chave ? { ...i, quantidadeMinima: quantidade } : i)));
+    }
+    setQuantidadeBufferMesmo((atual) => {
+      const { [chave]: _removido, ...resto } = atual;
+      return resto;
+    });
   };
 
-  const gerarSugestoes = async () => {
+  const digitarValorMesmo = (chave: string, texto: string) => {
+    setValorBufferMesmo((atual) => ({ ...atual, [chave]: texto }));
+  };
+
+  const confirmarValorMesmo = (chave: string) => {
+    const texto = valorBufferMesmo[chave];
+    if (texto !== undefined) {
+      const digitado = parseDecimalBR(texto);
+      setItensMesmoProduto((atual) =>
+        atual.map((i) => {
+          if (i.chave !== chave) return i;
+          if (i.tipoPrecificacao === 'percentual') {
+            return { ...i, percentualDescontoItem: Math.min(100, Math.max(0, round2(digitado))) };
+          }
+          return { ...i, precoFixo: Math.max(0.01, round2(digitado)) };
+        })
+      );
+    }
+    setValorBufferMesmo((atual) => {
+      const { [chave]: _removido, ...resto } = atual;
+      return resto;
+    });
+  };
+
+  const gerarSugestoesMesmoItem = async () => {
+    if (!profile || !macroGrupo) return;
+    setGerando(true);
+    try {
+      const margemMinimaPct = parseDecimalBR(margemMinima) || 0;
+      const descontoAlvoPct = parseDecimalBR(descontoAlvo) || 0;
+      const quantidadeMinima = Math.max(2, Math.round(parseDecimalBR(quantidadeKit)) || 2);
+      const sugestoes = await repository.sugerirProdutosCampanha(profile, {
+        margemMinimaPct,
+        descontoAlvoPct,
+        quantidadeMaxima: 20,
+        modo: 'popularidade',
+        macroGrupo,
+      });
+      if (sugestoes.length === 0) {
+        alertar('Nenhum produto nessa categoria', 'Escolha outra categoria — não achei produto elegível pra sugerir kit.');
+        setItensMesmoProduto((atual) => atual.filter((i) => i.selecionado));
+        setGeradaMesmo(true);
+        return;
+      }
+      const itensGerados: ItemSugeridoMesmo[] = sugestoes.map((s: ProdutoElegibilidade) => {
+        const base = { precoVenda: s.produto.precoVenda, custoMedio: s.produto.custoMedio, quantidade: quantidadeMinima };
+        const { percentualDesconto } = calcularKitPercentualSustentavel([base], descontoAlvoPct, margemMinimaPct);
+        const { precoFixo } = calcularKitPrecoFixoSustentavel([base], margemMinimaPct);
+        return {
+          chave: String(s.produto.codigo),
+          codigoProduto: s.produto.codigo,
+          codigoBarras: s.produto.codigoBarras,
+          nomeProduto: s.produto.nome,
+          precoRegular: s.produto.precoVenda,
+          custoMedio: s.produto.custoMedio,
+          quantidadeVendida30d: s.quantidadeVendida30d,
+          selecionado: false,
+          quantidadeMinima,
+          tipoPrecificacao: 'percentual',
+          percentualDescontoItem: percentualDesconto,
+          precoFixo,
+        };
+      });
+      // Mesmo critério de gerarSugestoes (afinidade): gerar de novo não
+      // apaga quem já estava selecionado, só descarta o "lixo" não
+      // selecionado da geração anterior.
+      setItensMesmoProduto((atual) => {
+        const selecionadosAtuais = atual.filter((i) => i.selecionado);
+        const chavesJaSelecionadas = new Set(selecionadosAtuais.map((i) => i.chave));
+        const novos = itensGerados.filter((i) => !chavesJaSelecionadas.has(i.chave));
+        return [...selecionadosAtuais, ...novos];
+      });
+      setGeradaMesmo(true);
+    } catch (erro) {
+      alertar('Erro ao gerar sugestões', erro instanceof Error ? erro.message : 'Tente novamente.');
+    } finally {
+      setGerando(false);
+    }
+  };
+
+  const gerarSugestoesAfinidade = async () => {
     if (!profile || !macroGrupo) return;
     setGerando(true);
     try {
@@ -382,6 +523,10 @@ export function SugestaoKitsScreen() {
       setGerando(false);
     }
   };
+
+  // Um botão só (mesma posição/rótulo nos dois modos) — despacha pro
+  // motor certo conforme o modo escolhido, pedido explícito 02/09/2026.
+  const gerarSugestoes = () => (modo === 'diferentes' ? gerarSugestoesAfinidade() : gerarSugestoesMesmoItem());
 
   const alternarSelecionado = (chave: string) => {
     setItens((atual) => atual.map((i) => (i.chave === chave ? { ...i, selecionado: !i.selecionado } : i)));
@@ -438,6 +583,8 @@ export function SugestaoKitsScreen() {
 
   const selecionados = itens.filter((i) => i.selecionado);
   const naoSelecionados = itens.filter((i) => !i.selecionado);
+  const selecionadosMesmo = itensMesmoProduto.filter((i) => i.selecionado);
+  const naoSelecionadosMesmo = itensMesmoProduto.filter((i) => !i.selecionado);
 
   const salvar = async () => {
     setSalvando(true);
@@ -447,8 +594,9 @@ export function SugestaoKitsScreen() {
       // (mesmo formato que CartazetesScreen já grava) — precoPromocional/
       // percentualDesconto aqui são só um resumo pra exibição, quem manda
       // no cartaz de verdade é o objeto `kit`.
-      const produtosMesmoItem: CampanhaProduto[] = itensMesmoProduto.map((item) => {
-        const { precoMedioUnidade } = margemResultanteKitProdutoUnico(item.kit, item.precoRegular, item.custoMedio);
+      const produtosMesmoItem: CampanhaProduto[] = selecionadosMesmo.map((item) => {
+        const kit = itemMesmoParaKit(item);
+        const { precoMedioUnidade } = margemResultanteKitProdutoUnico(kit, item.precoRegular, item.custoMedio);
         const percentualDesconto =
           item.precoRegular > 0 ? round2(((item.precoRegular - precoMedioUnidade) / item.precoRegular) * 100) : 0;
         return {
@@ -463,7 +611,7 @@ export function SugestaoKitsScreen() {
           dataInicio,
           dataFim,
           tipoPromocao: 'kit',
-          kit: item.kit,
+          kit,
         };
       });
       const totalKits = kits.length + produtosMesmoItem.length;
@@ -474,6 +622,7 @@ export function SugestaoKitsScreen() {
       setItens([]);
       setItensMesmoProduto([]);
       setGerada(false);
+      setGeradaMesmo(false);
       setMacroGrupo(null);
     } catch (erro) {
       alertar('Erro ao salvar campanha', erro instanceof Error ? erro.message : 'Tente novamente.');
@@ -482,7 +631,7 @@ export function SugestaoKitsScreen() {
     }
   };
 
-  const totalSelecionado = selecionados.length + itensMesmoProduto.length;
+  const totalSelecionado = selecionados.length + selecionadosMesmo.length;
 
   // Botão "Fechar campanha" pede confirmação antes de gravar — pedido
   // explícito ("quando fechar, confirme"), já que pode juntar kits de
@@ -515,157 +664,24 @@ export function SugestaoKitsScreen() {
       <Text style={styles.subtitle}>
         {modo === 'diferentes'
           ? 'Produtos DIFERENTES que os clientes já compram juntos, calculado a partir da venda real — escolha uma categoria pra começar.'
-          : 'Kit do MESMO produto (ex.: leve 3, pague 2) — escolha o produto e configure a quantidade/desconto.'}
+          : 'Kit do MESMO produto (ex.: leve 3, pague 2) — escolha uma categoria e quantos itens por kit pra começar.'}
       </Text>
 
       <View style={styles.segmentedWrap}>
         <Pressable
           style={[styles.segmentButton, modo === 'diferentes' && styles.segmentButtonAtivo]}
-          onPress={() => escolherModo('diferentes')}
+          onPress={() => setModo('diferentes')}
         >
           <Text style={[styles.segmentText, modo === 'diferentes' && styles.segmentTextAtivo]}>Itens diferentes</Text>
         </Pressable>
         <Pressable
           style={[styles.segmentButton, modo === 'mesmo_item' && styles.segmentButtonAtivo]}
-          onPress={() => escolherModo('mesmo_item')}
+          onPress={() => setModo('mesmo_item')}
         >
           <Text style={[styles.segmentText, modo === 'mesmo_item' && styles.segmentTextAtivo]}>Mesmo item</Text>
         </Pressable>
       </View>
 
-      {modo === 'mesmo_item' && (
-        <>
-          <Card>
-            <Text style={styles.cardTitulo}>Produto</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Buscar produto pelo nome ou código"
-              value={buscaProdutoMesmo}
-              onChangeText={setBuscaProdutoMesmo}
-            />
-            {resultadosBuscaProdutoMesmo.map((p) => (
-              <Pressable key={p.codigo} style={styles.resultadoBusca} onPress={() => escolherProdutoMesmo(p)}>
-                <Text style={styles.resultadoBuscaTexto} numberOfLines={1}>
-                  {p.nome} · cód. {p.codigo}
-                </Text>
-                <Ionicons name="add-circle" size={20} color={colors.navy} />
-              </Pressable>
-            ))}
-
-            {produtoEscolhido && (
-              <View style={styles.painelExpandido}>
-                <Text style={styles.campoLabel}>Produto escolhido</Text>
-                <Text style={styles.campoSomenteLeitura}>
-                  {produtoEscolhido.nome} · cód. {produtoEscolhido.codigo} · {formatBRL(produtoEscolhido.precoVenda)}
-                </Text>
-
-                <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Atalhos</Text>
-                <View style={styles.grupoGrid}>
-                  {PRESETS_KIT.map((preset) => {
-                    const ativo =
-                      kitConfig.quantidadeMinima === preset.kit.quantidadeMinima &&
-                      kitConfig.tipoPrecificacao === preset.kit.tipoPrecificacao &&
-                      kitConfig.percentualDescontoItem === preset.kit.percentualDescontoItem;
-                    return (
-                      <Pressable
-                        key={preset.label}
-                        style={[styles.chip, ativo && styles.chipAtivo]}
-                        onPress={() => setKitConfig(preset.kit)}
-                      >
-                        <Text style={[styles.chipTexto, ativo && styles.chipTextoAtivo]}>{preset.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                <Text style={styles.campoLabel}>Quantidade mínima</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={valorExibidoKitMesmo('quantidade')}
-                  onChangeText={setKitQuantidadeBuffer}
-                  onBlur={confirmarKitQuantidadeMesmo}
-                />
-
-                <Text style={[styles.campoLabel, styles.grupoLabelEspacado]}>Tipo de preço</Text>
-                <View style={styles.grupoGrid}>
-                  <Pressable
-                    style={[styles.chip, kitConfig.tipoPrecificacao === 'percentual' && styles.chipAtivo]}
-                    onPress={() => alternarTipoPrecificacaoMesmo('percentual')}
-                  >
-                    <Text style={[styles.chipTexto, kitConfig.tipoPrecificacao === 'percentual' && styles.chipTextoAtivo]}>
-                      % no {kitConfig.quantidadeMinima}º item
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.chip, kitConfig.tipoPrecificacao === 'preco_fixo' && styles.chipAtivo]}
-                    onPress={() => alternarTipoPrecificacaoMesmo('preco_fixo')}
-                  >
-                    <Text style={[styles.chipTexto, kitConfig.tipoPrecificacao === 'preco_fixo' && styles.chipTextoAtivo]}>
-                      Preço fixo pra {kitConfig.quantidadeMinima}
-                    </Text>
-                  </Pressable>
-                </View>
-
-                <Text style={styles.campoLabel}>
-                  {kitConfig.tipoPrecificacao === 'preco_fixo'
-                    ? `Preço fixo (R$) pras ${kitConfig.quantidadeMinima} unidades`
-                    : 'Desconto (%) no último item'}
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="decimal-pad"
-                  value={valorExibidoKitMesmo('valor')}
-                  onChangeText={setKitValorBuffer}
-                  onBlur={confirmarKitValorMesmo}
-                />
-
-                {(() => {
-                  const { totalCusto, totalPago } = margemResultanteKitProdutoUnico(
-                    kitConfig,
-                    produtoEscolhido.precoVenda,
-                    produtoEscolhido.custoMedio
-                  );
-                  return (
-                    <>
-                      <Text style={styles.previaTexto}>{descricaoKit(kitConfig)}</Text>
-                      <ComparativoCustoVenda custo={totalCusto} venda={totalPago} legenda={`por ${kitConfig.quantidadeMinima} unidades`} />
-                    </>
-                  );
-                })()}
-
-                <Pressable style={styles.botaoGerar} onPress={adicionarKitMesmoProduto}>
-                  <Text style={styles.botaoGerarTexto}>Adicionar à lista</Text>
-                </Pressable>
-              </View>
-            )}
-          </Card>
-
-          {itensMesmoProduto.length > 0 && (
-            <>
-              <Text style={styles.sectionTitulo}>Kits de item único ({itensMesmoProduto.length})</Text>
-              {itensMesmoProduto.map((item) => (
-                <Card key={item.codigoProduto}>
-                  <View style={styles.itemHeaderRow}>
-                    <View style={styles.itemHeaderTexto}>
-                      <Text style={styles.itemNome} numberOfLines={2}>
-                        {item.nomeProduto} ({item.codigoProduto})
-                      </Text>
-                      <Text style={styles.itemSubinfo}>{descricaoKit(item.kit)}</Text>
-                    </View>
-                    <Pressable onPress={() => removerKitMesmoProduto(item.codigoProduto)} hitSlop={8}>
-                      <Ionicons name="trash-outline" size={20} color={colors.red} />
-                    </Pressable>
-                  </View>
-                </Card>
-              ))}
-            </>
-          )}
-        </>
-      )}
-
-      {modo === 'diferentes' && (
-      <>
       <Card>
         <Text style={styles.cardTitulo}>Categoria</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -695,6 +711,13 @@ export function SugestaoKitsScreen() {
           </View>
         </View>
 
+        {modo === 'mesmo_item' && (
+          <>
+            <Text style={[styles.rotulo, styles.espacado]}>Quantos itens no kit</Text>
+            <TextInput style={styles.input} keyboardType="numeric" value={quantidadeKit} onChangeText={setQuantidadeKit} />
+          </>
+        )}
+
         <Pressable
           style={[styles.botaoGerar, !macroGrupo && styles.botaoDesabilitado]}
           onPress={gerarSugestoes}
@@ -708,54 +731,106 @@ export function SugestaoKitsScreen() {
         </Pressable>
       </Card>
 
-      {selecionados.length > 0 && (
+      {modo === 'diferentes' ? (
         <>
-          <Text style={styles.sectionTitulo}>Selecionados ({selecionados.length})</Text>
-          {selecionados.map((item) => (
-            <CardParSugerido
-              key={item.chave}
-              item={item}
-              dataInicio={dataInicio}
-              dataFim={dataFim}
-              onToggle={alternarSelecionado}
-              onAlternarTipo={alternarTipo}
-              valorExibido={valorExibido}
-              onDigitarValor={digitarValor}
-              onConfirmarValor={confirmarValor}
-            />
-          ))}
-        </>
-      )}
+          {selecionados.length > 0 && (
+            <>
+              <Text style={styles.sectionTitulo}>Selecionados ({selecionados.length})</Text>
+              {selecionados.map((item) => (
+                <CardParSugerido
+                  key={item.chave}
+                  item={item}
+                  dataInicio={dataInicio}
+                  dataFim={dataFim}
+                  onToggle={alternarSelecionado}
+                  onAlternarTipo={alternarTipo}
+                  valorExibido={valorExibido}
+                  onDigitarValor={digitarValor}
+                  onConfirmarValor={confirmarValor}
+                />
+              ))}
+            </>
+          )}
 
-      {gerada && (
-        <>
-          <Text style={styles.sectionTitulo}>Pares sugeridos ({naoSelecionados.length})</Text>
-          {naoSelecionados.length === 0 ? (
-            <Card>
-              <Text style={styles.empty}>
-                {itens.length === 0
-                  ? 'Nenhum par com co-ocorrência relevante nessa categoria no período analisado.'
-                  : 'Todos os pares sugeridos dessa categoria já estão selecionados acima.'}
-              </Text>
-            </Card>
-          ) : (
-            naoSelecionados.map((item) => (
-              <CardParSugerido
-                key={item.chave}
-                item={item}
-                dataInicio={dataInicio}
-                dataFim={dataFim}
-                onToggle={alternarSelecionado}
-                onAlternarTipo={alternarTipo}
-                valorExibido={valorExibido}
-                onDigitarValor={digitarValor}
-                onConfirmarValor={confirmarValor}
-              />
-            ))
+          {gerada && (
+            <>
+              <Text style={styles.sectionTitulo}>Pares sugeridos ({naoSelecionados.length})</Text>
+              {naoSelecionados.length === 0 ? (
+                <Card>
+                  <Text style={styles.empty}>
+                    {itens.length === 0
+                      ? 'Nenhum par com co-ocorrência relevante nessa categoria no período analisado.'
+                      : 'Todos os pares sugeridos dessa categoria já estão selecionados acima.'}
+                  </Text>
+                </Card>
+              ) : (
+                naoSelecionados.map((item) => (
+                  <CardParSugerido
+                    key={item.chave}
+                    item={item}
+                    dataInicio={dataInicio}
+                    dataFim={dataFim}
+                    onToggle={alternarSelecionado}
+                    onAlternarTipo={alternarTipo}
+                    valorExibido={valorExibido}
+                    onDigitarValor={digitarValor}
+                    onConfirmarValor={confirmarValor}
+                  />
+                ))
+              )}
+            </>
           )}
         </>
-      )}
-      </>
+      ) : (
+        <>
+          {selecionadosMesmo.length > 0 && (
+            <>
+              <Text style={styles.sectionTitulo}>Selecionados ({selecionadosMesmo.length})</Text>
+              {selecionadosMesmo.map((item) => (
+                <CardProdutoSugeridoMesmo
+                  key={item.chave}
+                  item={item}
+                  onToggle={alternarSelecionadoMesmo}
+                  onAlternarTipo={alternarTipoMesmo}
+                  valorExibido={valorExibidoMesmo}
+                  onDigitarQuantidade={digitarQuantidadeMesmo}
+                  onConfirmarQuantidade={confirmarQuantidadeMesmo}
+                  onDigitarValor={digitarValorMesmo}
+                  onConfirmarValor={confirmarValorMesmo}
+                />
+              ))}
+            </>
+          )}
+
+          {geradaMesmo && (
+            <>
+              <Text style={styles.sectionTitulo}>Produtos sugeridos ({naoSelecionadosMesmo.length})</Text>
+              {naoSelecionadosMesmo.length === 0 ? (
+                <Card>
+                  <Text style={styles.empty}>
+                    {itensMesmoProduto.length === 0
+                      ? 'Nenhum produto elegível nessa categoria com esses critérios.'
+                      : 'Todos os produtos sugeridos dessa categoria já estão selecionados acima.'}
+                  </Text>
+                </Card>
+              ) : (
+                naoSelecionadosMesmo.map((item) => (
+                  <CardProdutoSugeridoMesmo
+                    key={item.chave}
+                    item={item}
+                    onToggle={alternarSelecionadoMesmo}
+                    onAlternarTipo={alternarTipoMesmo}
+                    valorExibido={valorExibidoMesmo}
+                    onDigitarQuantidade={digitarQuantidadeMesmo}
+                    onConfirmarQuantidade={confirmarQuantidadeMesmo}
+                    onDigitarValor={digitarValorMesmo}
+                    onConfirmarValor={confirmarValorMesmo}
+                  />
+                ))
+              )}
+            </>
+          )}
+        </>
       )}
 
       {totalSelecionado > 0 && (
@@ -890,16 +965,5 @@ const styles = StyleSheet.create({
   segmentButtonAtivo: { backgroundColor: colors.navy },
   segmentText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
   segmentTextAtivo: { color: colors.white },
-  resultadoBusca: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  resultadoBuscaTexto: { flex: 1, fontSize: 13, color: colors.textPrimary, marginRight: 8 },
-  campoSomenteLeitura: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
   grupoLabelEspacado: { marginTop: 14 },
 });
