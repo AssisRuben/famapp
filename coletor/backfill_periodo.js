@@ -16,6 +16,8 @@
 //
 // Opcionais:
 //   DATA_INICIAL    — default '2026-01-01T00:00:00-03:00'
+//   DATA_FINAL      — default agora. Útil pra puxar só um período
+//                     antigo sem reprocessar até hoje (23/09/2026).
 //   ENTIDADES       — lista separada por vírgula pra rodar só um
 //                     subconjunto (ex.: "produto,fornecedor,compra"),
 //                     útil pra retomar depois de uma falha parcial sem
@@ -39,7 +41,7 @@ const TRIER_TOKEN = process.env.TRIER_TOKEN;
 const DATABASE_URL = process.env.DATABASE_URL;
 const BASE_URL = process.env.TRIER_BASE_URL || 'https://api-sgf-gateway.triersistemas.com.br/sgfpod1/rest/integracao';
 const DATA_INICIAL = new Date(process.env.DATA_INICIAL || '2026-01-01T00:00:00-03:00');
-const DATA_FINAL = new Date();
+const DATA_FINAL = process.env.DATA_FINAL ? new Date(process.env.DATA_FINAL) : new Date();
 const ENTIDADES = new Set(
   (process.env.ENTIDADES || 'vendedor,cliente,produto,fornecedor,compra,venda,atendimentos')
     .split(',')
@@ -47,6 +49,10 @@ const ENTIDADES = new Set(
     .filter(Boolean)
 );
 
+if (isNaN(DATA_INICIAL) || isNaN(DATA_FINAL) || DATA_FINAL <= DATA_INICIAL) {
+  console.error('DATA_INICIAL/DATA_FINAL inválidas (formato: 2025-10-01T00:00:00-03:00, e a final depois da inicial).');
+  process.exit(1);
+}
 if (!TRIER_TOKEN) {
   console.error('Faltou TRIER_TOKEN (o mesmo Bearer da credencial "SGF Trier - Bearer" no n8n).');
   process.exit(1);
