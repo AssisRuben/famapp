@@ -262,8 +262,13 @@ function CardProdutoSugeridoMesmo({
           <Text style={styles.itemSubinfo}>
             {item.quantidadeVendida30d} vendido(s) em 30d · {formatBRL(item.precoRegular)} cada
           </Text>
+          <Text style={styles.itemSubinfo}>Preço de compra {formatBRL(item.custoMedio)} cada</Text>
+          {/* Linha do kit: custo e venda do kit INTEIRO (quantidadeMinima
+              unidades) — antes mostrava o custo total do kit ao lado do
+              preço unitário, e parecia que o custo passava da venda. */}
           <Text style={[styles.margemTexto, margemPct < 0 && styles.margemTextoNegativa]}>
-            Preço de compra {formatBRL(totalCusto)} · margem {margemPct.toLocaleString('pt-BR')}%
+            Kit de {item.quantidadeMinima}: custo {formatBRL(totalCusto)} · venda {formatBRL(totalPago)} · margem{' '}
+            {margemPct.toLocaleString('pt-BR')}%
           </Text>
         </View>
       </Pressable>

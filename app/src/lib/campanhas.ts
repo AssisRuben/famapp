@@ -26,16 +26,57 @@ function passaNoFiltroDoModelo(modelo: ModeloCampanha, produto: ProdutoCatalogo,
     case 'nao_medicamentos':
       return !!macro && !MACROS_MEDICAMENTO.includes(macro) && macro !== 'outros_administrativo';
     case 'desodorantes':
-      // sem subcategoria própria no catálogo — precisa ser por nome.
-      return nomeNormalizado.includes('DESODORANTE');
+      // sem subcategoria própria no catálogo — precisa ser por nome. O
+      // catálogo da Trier abrevia ("DES DOVE AER...", "+DESOD"), quase
+      // nunca escreve DESODORANTE inteiro (conferido no banco 23/09/2026).
+      // Palavra inteira pra não pegar "ADES" (adesivo de dentadura).
+      return /(^|[^A-Z])DES(OD[A-Z]*)?([^A-Z]|$)/.test(nomeNormalizado);
     case 'bebe_idoso':
-      // "FRALDAS" (grupo bruto) cobre infantil E geriátrica no mesmo
-      // balde — confirmado com a farmácia (18/08/2026). Nome também
-      // serve de rede de segurança caso algum item geriátrico não caia
-      // nesse grupo bruto.
-      return macro === 'infantil_puericultura' || nomeNormalizado.includes('GERIATRIC');
+      return ehProdutoBebeIdoso(nomeNormalizado);
   }
 }
+
+// Bebê & Idoso por NOME, não por grupo (23/09/2026): no catálogo real
+// quase tudo fora fralda está em PERFUMARIA/ETICO/SIMILAR/LEITES (lenço
+// umedecido, Johnson's Baby, Hipoglos, Nutra Senior...), e o grupo
+// FRALDAS também tem absorvente feminino — o filtro antigo por grupo
+// devolvia só fralda. Tokens conferidos contra o catálogo.
+const PALAVRAS_BEBE_IDOSO = new Set([
+  'BABY', 'BEBE', 'BEBES', 'KIDS', 'KID', 'INF', 'INFAN', 'INFANT', 'INFANTIL',
+  'FR', 'HIPOGLOS', 'ASSAD', 'GERIAT', 'GERIATRICA', 'GERIATRICO', 'GERIAMAX', 'GER',
+  'SENIOR', 'TENA', 'PLENITUD', 'COREGA', 'DENTALFIX',
+]);
+const TRECHOS_BEBE_IDOSO = ['LENC UME', 'TOALHA UMED', 'ROUP INT', 'POS PARTO', 'ABS SEIOS', 'CR PREV'];
+// NBCAL (Lei 11.265/2006): fórmula infantil, mamadeira, bico e chupeta
+// não podem ter promoção comercial.
+const PALAVRAS_PROIBIDAS_NBCAL = new Set(['MAMAD', 'MAMADEIRA', 'CHUPETA', 'APTAMIL', 'NAN', 'NESTOGENO', 'ENFAMIL', 'MILNUTRI']);
+const TRECHOS_PROIBIDOS_NBCAL = ['BICO MAM'];
+
+function ehProdutoBebeIdoso(nomeNormalizado: string): boolean {
+  const palavras = nomeNormalizado.split(/[^A-Z0-9]+/).filter(Boolean);
+  if (palavras.some((p) => PALAVRAS_PROIBIDAS_NBCAL.has(p))) return false;
+  if (TRECHOS_PROIBIDOS_NBCAL.some((t) => nomeNormalizado.includes(t))) return false;
+  // perfume adulto ("PERF MENS CLUB 52 INF") e absorvente feminino
+  // (ABS INTIMUS/DIANA...) não são do tema — absorvente só entra se
+  // for geriátrico/pós-parto/amamentação (pegos pelas listas acima).
+  if (palavras[0] === 'PERF') return false;
+  const casou = palavras.some((p) => PALAVRAS_BEBE_IDOSO.has(p)) || TRECHOS_BEBE_IDOSO.some((t) => nomeNormalizado.includes(t));
+  if (!casou) return false;
+  if (palavras[0] === 'ABS') {
+    return palavras.some((p) => ['GER', 'GERIAMAX', 'TENA'].includes(p)) || nomeNormalizado.includes('POS PARTO') || nomeNormalizado.includes('ABS SEIOS');
+  }
+  return true;
+}
+
+function exigeReceita(produto: ProdutoCatalogo): boolean {
+  const grupo = (produto.grupo ?? '').toUpperCase();
+  return !!produto.tipoLista?.trim() || grupo.includes('CONTROLAD') || grupo.includes('ANTIMICROB');
+}
+
+// Abaixo disso a "promoção" não muda o preço de verdade — acontece
+// quando a margem atual está colada na margem mínima (o piso da margem
+// come o desconto inteiro). Cartaz com 0% não serve pra nada.
+const DESCONTO_MINIMO_SUGESTAO_PCT = 1;
 
 interface VendaRecenteInfo {
   quantidadeVendida30d: number;
@@ -116,6 +157,13 @@ export function sugerirCandidatos(
 
   const base = catalogo
     .filter((produto) => !codigosParaEvitar.has(produto.codigo))
+    // sem estoque não tem como atender a promoção (23/09/2026) — vale
+    // pra todo modo/modelo, inclusive as sugestões de kit.
+    .filter((produto) => produto.estoqueAtual > 0)
+    // remédio que exige receita (controlado, antimicrobiano, tarja com
+    // tipoLista) não pode ter promoção — estava vindo Venvanse no
+    // estoque parado 60+ (23/09/2026). Vale pra todo modo/modelo.
+    .filter((produto) => !exigeReceita(produto))
     // filtro temático opcional (campanha "Dia do Genérico", "Perfumaria"...)
     // — só quando NÃO há modelo fixo (modelo tem o próprio filtro abaixo).
     .filter((produto) => params.modelo || !params.macroGrupo || macroGrupoDoProduto(produto.grupo) === params.macroGrupo)
@@ -167,6 +215,7 @@ export function sugerirCandidatos(
         _pontuacao: pontuacao,
       };
     })
+    .filter((candidato) => candidato.percentualDescontoSugerido >= DESCONTO_MINIMO_SUGESTAO_PCT)
     .sort((a, b) => b._pontuacao - a._pontuacao)
     .slice(0, params.quantidadeMaxima)
     .map(({ _pontuacao, ...resto }) => resto);

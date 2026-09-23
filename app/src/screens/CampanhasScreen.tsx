@@ -422,7 +422,7 @@ export function CampanhasScreen() {
             <TextInput style={styles.input} keyboardType="numeric" value={margemMinima} onChangeText={setMargemMinima} />
             <Text style={[styles.rotulo, styles.espacado]}>Desconto alvo (%)</Text>
             <TextInput style={styles.input} keyboardType="numeric" value={descontoAlvo} onChangeText={setDescontoAlvo} />
-            <Text style={[styles.rotulo, styles.espacado]}>Quantidade máxima de produtos</Text>
+            <Text style={[styles.rotulo, styles.espacado]}>Quantidade máxima de produtos sugeridos pela busca</Text>
             <TextInput style={styles.input} keyboardType="numeric" value={quantidadeMaxima} onChangeText={setQuantidadeMaxima} />
 
             <Pressable style={styles.botaoGerar} onPress={gerarSugestao} disabled={gerando}>
