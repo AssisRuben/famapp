@@ -96,7 +96,7 @@ async function lerFotoComoArrayBuffer(uri: string): Promise<ArrayBuffer> {
   return new ExpoFile(uri).arrayBuffer();
 }
 
-function mapearProdutoCatalogo(r: any): ProdutoCatalogo {
+function mapearProdutoCatalogo(r: any, mapaPrecoPraticado?: Map<number, number>): ProdutoCatalogo {
   return {
     codigo: r.codigo,
     codigoBarras: r.codigo_barras ?? '',
@@ -105,6 +105,7 @@ function mapearProdutoCatalogo(r: any): ProdutoCatalogo {
     grupo: (r.grupo ?? '').trim(),
     marca: r.marca ?? '',
     precoVenda: Number(r.preco_venda),
+    precoPraticado: mapaPrecoPraticado?.get(r.codigo),
     custoMedio: Number(r.custo_medio),
     estoqueAtual: r.estoque_atual,
     tipoLista: r.tipo_lista ?? null,
@@ -1178,6 +1179,25 @@ class SupabaseRepository implements DataRepository {
       .not('nome', 'ilike', '%DELIVERY%');
   }
 
+  // Preço de tabela (produto_catalogo.preco_venda) é frequentemente
+  // fictício — diagnóstico real (23/09/2026) achou genérico vendido a
+  // 30% da tabela por desconto padrão de balcão não registrado no
+  // cadastro. Campanhas/Kits/Precificação decidem desconto e margem em
+  // cima de preço, então usam vw_preco_praticado_atual (mediana real
+  // paga, cascata de janela 14/30/90 dias) em vez da tabela. Produto
+  // sem venda recente suficiente fica fora do mapa — quem chama trata
+  // isso com `precoPraticado ?? precoVenda`.
+  private async getMapaPrecoPraticado(): Promise<Map<number, number>> {
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase.from('vw_preco_praticado_atual').select('codigo_produto, preco_praticado').range(inicio, fim)
+    );
+    const mapa = new Map<number, number>();
+    for (const r of linhas as { codigo_produto: number; preco_praticado: number }[]) {
+      mapa.set(r.codigo_produto, Number(r.preco_praticado));
+    }
+    return mapa;
+  }
+
   async getStatusWhatsApp(_profile: Profile): Promise<Record<number, boolean>> {
     const linhas = await this.buscarPaginado((inicio, fim) =>
       supabase
@@ -1205,7 +1225,7 @@ class SupabaseRepository implements DataRepository {
   }
 
   async sugerirProdutosCampanha(profile: Profile, params: SugestaoCampanhaParams): Promise<ProdutoElegibilidade[]> {
-    const [catalogoLinhas, vendaLinhas, campanhas] = await Promise.all([
+    const [catalogoLinhas, vendaLinhas, campanhas, mapaPreco] = await Promise.all([
       this.buscarPaginado((inicio, fim) =>
         this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
       ),
@@ -1213,9 +1233,10 @@ class SupabaseRepository implements DataRepository {
         supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
       ),
       this.getCampanhas(profile),
+      this.getMapaPrecoPraticado(),
     ]);
 
-    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
+    const catalogo = catalogoLinhas.map((r: any) => mapearProdutoCatalogo(r, mapaPreco));
     const vendaPorProduto = new Map(
       vendaLinhas.map((r: any) => [
         r.codigo_produto,
@@ -1232,10 +1253,13 @@ class SupabaseRepository implements DataRepository {
   }
 
   async sugerirParesAfinidade(_profile: Profile, params: SugestaoKitsParams): Promise<SugestaoParAfinidade[]> {
-    const catalogoLinhas = await this.buscarPaginado((inicio, fim) =>
-      this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
-    );
-    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
+    const [catalogoLinhas, mapaPreco] = await Promise.all([
+      this.buscarPaginado((inicio, fim) =>
+        this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
+      ),
+      this.getMapaPrecoPraticado(),
+    ]);
+    const catalogo = catalogoLinhas.map((r: any) => mapearProdutoCatalogo(r, mapaPreco));
     const codigosSeed = resolverCodigosSeed(catalogo, params.macroGrupo);
     if (codigosSeed.length === 0) return [];
 
@@ -2045,7 +2069,7 @@ class SupabaseRepository implements DataRepository {
       ),
     ]);
 
-    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
+    const catalogo = catalogoLinhas.map((r: any) => mapearProdutoCatalogo(r));
     const demandaPorProduto = new Map(
       vendaLinhas.map((r: any) => [r.codigo_produto, { quantidadeVendidaPeriodo: Number(r.quantidade_vendida) }])
     );
@@ -2133,7 +2157,7 @@ class SupabaseRepository implements DataRepository {
   }
 
   async getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]> {
-    const [catalogoLinhas, vendaLinhas, campanhas] = await Promise.all([
+    const [catalogoLinhas, vendaLinhas, campanhas, mapaPreco] = await Promise.all([
       // estoque_atual > 0: produto zerado não é candidato a reajuste de
       // preço (sem estoque, ajustar preço não faz sentido — isso é
       // assunto da aba Compras, não Precificação).
@@ -2144,9 +2168,10 @@ class SupabaseRepository implements DataRepository {
         supabase.from('vw_venda_recente_produto').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
       ),
       this.getCampanhas(profile),
+      this.getMapaPrecoPraticado(),
     ]);
 
-    const catalogo = catalogoLinhas.map(mapearProdutoCatalogo);
+    const catalogo = catalogoLinhas.map((r: any) => mapearProdutoCatalogo(r, mapaPreco));
     const vendaPorProduto = new Map(
       vendaLinhas.map((r: any) => [
         r.codigo_produto,

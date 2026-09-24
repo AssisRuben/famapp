@@ -152,3 +152,85 @@ join periodos p using (campanha_id, codigo_produto)
 left join elasticidade_antes e using (campanha_id, codigo_produto)
 group by i.campanha_id, i.nome
 order by i.campanha_id;
+
+
+-- ============================================================
+-- QUERY 3 — Backtest COM grupo de controle (23/09/2026)
+-- A Query 2 compara a campanha com o passado do próprio produto, o que
+-- confunde efeito de desconto com sazonalidade: a campanha 7 (desconto
+-- ZERO, só acompanhamento) caiu 40% em volume sem nenhuma intervenção,
+-- provando que a 2a quinzena de setembro cai sozinha.
+-- Aqui a variação dos produtos promovidos é comparada com a dos produtos
+-- NÃO promovidos dos MESMOS grupos, no MESMO período. O que sobra
+-- (efeito_liquido_pct) é o efeito da campanha, já descontado o movimento
+-- geral do mercado.
+-- ============================================================
+with itens as (
+  select
+    c.id as campanha_id,
+    c.nome,
+    cp.codigo_produto,
+    coalesce(cp.data_inicio, c.data_inicio) as inicio,
+    least(coalesce(cp.data_fim, c.data_fim), current_date - 1) as fim
+  from campanhas c
+  join campanha_produtos cp on cp.campanha_id = c.id
+  where coalesce(cp.data_inicio, c.data_inicio) < current_date
+),
+janela as (
+  select campanha_id, nome, min(inicio) as inicio, max(fim) as fim
+  from itens
+  group by 1, 2
+),
+-- controle: produtos dos mesmos grupos que NÃO entraram na campanha
+controle as (
+  select distinct g.campanha_id, pc.codigo
+  from (
+    select distinct i.campanha_id, trim(pc.grupo) as grupo
+    from itens i
+    join produto_catalogo pc on pc.codigo = i.codigo_produto
+  ) g
+  join produto_catalogo pc on trim(pc.grupo) = g.grupo
+  where not exists (
+    select 1 from itens i
+    where i.campanha_id = g.campanha_id and i.codigo_produto = pc.codigo
+  )
+),
+vendas_dia as (
+  select vi.codigo_produto, v.data_emissao as dia, sum(vi.quantidade_produtos) as qtd
+  from venda_itens vi
+  join vendas v on v.id = vi.venda_id
+  where v.tipo_cancelamento is null
+    and v.data_emissao >= current_date - interval '2 years'
+    and vi.quantidade_produtos > 0
+  group by 1, 2
+),
+promovidos as (
+  select j.campanha_id,
+    coalesce(sum(d.qtd) filter (where d.dia between j.inicio and j.fim), 0) / greatest(j.fim - j.inicio + 1, 1) as dur,
+    coalesce(sum(d.qtd) filter (where d.dia between j.inicio - 28 and j.inicio - 1), 0) / 28.0 as ant
+  from janela j
+  join itens i on i.campanha_id = j.campanha_id
+  left join vendas_dia d on d.codigo_produto = i.codigo_produto and d.dia between j.inicio - 28 and j.fim
+  group by j.campanha_id, j.inicio, j.fim
+),
+nao_promovidos as (
+  select j.campanha_id,
+    coalesce(sum(d.qtd) filter (where d.dia between j.inicio and j.fim), 0) / greatest(j.fim - j.inicio + 1, 1) as dur,
+    coalesce(sum(d.qtd) filter (where d.dia between j.inicio - 28 and j.inicio - 1), 0) / 28.0 as ant
+  from janela j
+  join controle c on c.campanha_id = j.campanha_id
+  left join vendas_dia d on d.codigo_produto = c.codigo and d.dia between j.inicio - 28 and j.fim
+  group by j.campanha_id, j.inicio, j.fim
+)
+select
+  j.campanha_id,
+  j.nome,
+  j.inicio,
+  j.fim,
+  round((p.dur / nullif(p.ant, 0) - 1) * 100, 1) as var_promovidos_pct,
+  round((n.dur / nullif(n.ant, 0) - 1) * 100, 1) as var_controle_pct,
+  round(((p.dur / nullif(p.ant, 0)) / nullif(n.dur / nullif(n.ant, 0), 0) - 1) * 100, 1) as efeito_liquido_pct
+from janela j
+join promovidos p using (campanha_id)
+join nao_promovidos n using (campanha_id)
+order by j.campanha_id;

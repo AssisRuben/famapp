@@ -40,7 +40,7 @@ export function gerarCsvPrecificacao(itens: ItemPrecificacao[]): string {
     String(item.quantidadeVendida30d),
     item.diasSemVenda === null ? '' : String(item.diasSemVenda),
     item.produto.custoMedio.toFixed(2).replace('.', ','),
-    item.produto.precoVenda.toFixed(2).replace('.', ','),
+    (item.produto.precoPraticado ?? item.produto.precoVenda).toFixed(2).replace('.', ','),
     String(item.produto.estoqueAtual),
     item.margemAtualPct.toFixed(1).replace('.', ','),
     item.temDescontoAtivo ? 'Sim' : 'Não',

@@ -104,11 +104,20 @@ export function calcularDescontoSustentavel(
   // clamp, 100 zera o divisor (Infinity) e acima de 100 inverte o
   // sinal (preço mínimo negativo). 95 é o teto prático: margem de
   // 100% significaria custo zero, o que não existe no varejo.
+  // precoVenda (tabela da Trier) é frequentemente fictício — genérico
+  // real chega a sair a 30% da tabela por desconto padrão de balcão não
+  // registrado no cadastro (achado 23/09/2026). precoPraticado (mediana
+  // real paga, ver vw_preco_praticado_atual) é a referência certa pra
+  // decidir desconto; sem isso o "desconto sugerido" podia virar aumento
+  // de preço disfarçado (achado real: Losartana tabela R$24,45, preço
+  // de fato praticado R$4,57 — sugestão de "R$22,49 promocional" teria
+  // sido 5x o preço real).
+  const precoReferencia = produto.precoPraticado ?? produto.precoVenda;
   const margemMinimaSegura = Math.min(95, Math.max(0, margemMinimaPct));
   const precoMinimoPelaMargem = produto.custoMedio / (1 - margemMinimaSegura / 100);
-  const precoComDescontoAlvo = produto.precoVenda * (1 - descontoAlvoPct / 100);
+  const precoComDescontoAlvo = precoReferencia * (1 - descontoAlvoPct / 100);
   const precoSugerido = Math.max(precoComDescontoAlvo, precoMinimoPelaMargem, produto.custoMedio);
-  const percentualDesconto = Math.max(0, ((produto.precoVenda - precoSugerido) / produto.precoVenda) * 100);
+  const percentualDesconto = Math.max(0, ((precoReferencia - precoSugerido) / precoReferencia) * 100);
   return {
     percentualDesconto: round2(percentualDesconto),
     precoSugerido: round2(precoSugerido),
@@ -169,7 +178,7 @@ export function sugerirCandidatos(
     .filter((produto) => params.modelo || !params.macroGrupo || macroGrupoDoProduto(produto.grupo) === params.macroGrupo)
     .map((produto) => {
       const venda = vendaRecentePorProduto.get(produto.codigo) ?? { quantidadeVendida30d: 0, diasSemVenda: null };
-      const margemAtualPct = calcularMargemPct(produto.precoVenda, produto.custoMedio);
+      const margemAtualPct = calcularMargemPct(produto.precoPraticado ?? produto.precoVenda, produto.custoMedio);
       return { produto, venda, margemAtualPct };
     })
     // margem abaixo do mínimo = descontar isso quebraria a farmácia,

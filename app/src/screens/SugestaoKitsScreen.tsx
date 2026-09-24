@@ -442,7 +442,13 @@ export function SugestaoKitsScreen() {
         return;
       }
       const itensGerados: ItemSugeridoMesmo[] = sugestoes.map((s: ProdutoElegibilidade) => {
-        const base = { precoVenda: s.produto.precoVenda, custoMedio: s.produto.custoMedio, quantidade: quantidadeMinima };
+        // precoVenda (tabela) é frequentemente fictício — precoPraticado
+        // (preço real pago) é a base certa pro preço do kit.
+        const base = {
+          precoVenda: s.produto.precoPraticado ?? s.produto.precoVenda,
+          custoMedio: s.produto.custoMedio,
+          quantidade: quantidadeMinima,
+        };
         const { percentualDesconto } = calcularKitPercentualSustentavel([base], descontoAlvoPct, margemMinimaPct);
         const { precoFixo } = calcularKitPrecoFixoSustentavel([base], margemMinimaPct);
         return {
@@ -450,7 +456,7 @@ export function SugestaoKitsScreen() {
           codigoProduto: s.produto.codigo,
           codigoBarras: s.produto.codigoBarras,
           nomeProduto: s.produto.nome,
-          precoRegular: s.produto.precoVenda,
+          precoRegular: s.produto.precoPraticado ?? s.produto.precoVenda,
           custoMedio: s.produto.custoMedio,
           quantidadeVendida30d: s.quantidadeVendida30d,
           selecionado: false,

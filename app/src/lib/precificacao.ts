@@ -40,14 +40,18 @@ export function calcularRelatorioPrecificacao(
   vendaPorProduto: Map<number, VendaInfo>,
   codigosComDescontoAtivo: Set<number>
 ): ItemPrecificacao[] {
-  const margens = catalogo.map((p) => calcularMargemPct(p.precoVenda, p.custoMedio));
+  // precoVenda (tabela) é frequentemente fictício — usa precoPraticado
+  // (preço real pago, ver vw_preco_praticado_atual) sempre que houver
+  // dado, senão o "candidato a reajuste" e a margem exibida ficam
+  // baseados num preço que ninguém paga de fato.
+  const margens = catalogo.map((p) => calcularMargemPct(p.precoPraticado ?? p.precoVenda, p.custoMedio));
   const giros = catalogo.map((p) => vendaPorProduto.get(p.codigo)?.quantidadeVendida30d ?? 0);
   const margemLimiarAlta = percentil(margens, 0.75);
   const giroLimiarAlto = percentil(giros, 0.75);
 
   return catalogo.map((produto) => {
     const venda = vendaPorProduto.get(produto.codigo) ?? { quantidadeVendida30d: 0, diasSemVenda: null };
-    const margemAtualPct = calcularMargemPct(produto.precoVenda, produto.custoMedio);
+    const margemAtualPct = calcularMargemPct(produto.precoPraticado ?? produto.precoVenda, produto.custoMedio);
     const temDescontoAtivo = codigosComDescontoAtivo.has(produto.codigo);
 
     const tags: TagPrecificacao[] = [];

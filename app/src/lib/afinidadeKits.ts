@@ -40,11 +40,15 @@ export function mapearSugestoesAfinidade(
     sugestoes.push({
       codigoProdutoSeed: seed.codigo,
       nomeProdutoSeed: seed.nome,
-      precoRegularSeed: seed.precoVenda,
+      // precoVenda (tabela) é frequentemente fictício — precoPraticado
+      // (preço real pago) é a base certa pro preço do combo, senão o kit
+      // "sustentável" seria calculado em cima de um preço que ninguém
+      // paga (ver vw_preco_praticado_atual).
+      precoRegularSeed: seed.precoPraticado ?? seed.precoVenda,
       custoMedioSeed: seed.custoMedio,
       codigoProdutoParceiro: parceiro.codigo,
       nomeProdutoParceiro: parceiro.nome,
-      precoRegularParceiro: parceiro.precoVenda,
+      precoRegularParceiro: parceiro.precoPraticado ?? parceiro.precoVenda,
       custoMedioParceiro: parceiro.custoMedio,
       coOcorrencias: Number(linha.co_ocorrencias),
       vendasSeed: Number(linha.vendas_seed),

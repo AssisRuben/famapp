@@ -1,0 +1,142 @@
+{
+  "name": "Motor de campanhas - proposta mensal",
+  "nodes": [
+    {
+      "id": "trigger-dia14",
+      "name": "Dia 14 as 22:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 14 * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "gerar-proposta",
+      "name": "Gerar proposta",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -60,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Gera a proposta de campanha do mês. Roda dia 14 à noite; a campanha\n-- vale do dia 15 ao fim do mês.\n--\n-- Preço de referência: vw_preco_praticado_atual (preço da ÚLTIMA VENDA\n-- de cada produto, não a tabela e não uma mediana — achado 23/09/2026:\n-- produto_catalogo.preco_venda é fictício pra boa parte do catálogo;\n-- mediana/janela atrasava reagir quando o preço muda de verdade).\n-- Nasce com status 'proposta': nada chega ao caixa antes de o gestor\n-- revisar e exportar o .txt manualmente no app.\n--\n-- Seleção restrita ao acervo de produtos JÁ APROVADOS em campanhas\n-- anteriores (campanha_produtos), menos os vetados. Isso impede que o\n-- motor proponha medicamento de prescrição que nenhum humano escolheu\n-- -- o catálogo não tem campo que distinga tarja de MIP (tipo_lista e\n-- categoria vêm nulos ou só repetem o grupo).\ndo $$\ndeclare\n  v_id bigint;\n  -- sempre o PRÓXIMO dia 15: rodando dia 14 pega este mês; rodando\n  -- em teste fora da data, pega o mês seguinte (nunca cria no passado)\n  v_inicio date := case\n    when extract(day from current_date) <= 14\n      then (date_trunc('month', current_date)::date + 14)\n    else (date_trunc('month', current_date + interval '1 month')::date + 14)\n  end;\n  v_fim date := (date_trunc('month', v_inicio) + interval '1 month' - interval '1 day')::date;\n  v_qtd int;\nbegin\n  if exists (select 1 from campanhas where origem = 'motor' and data_inicio = v_inicio) then\n    raise notice 'Proposta para % ja existe, nada a fazer', v_inicio;\n    return;\n  end if;\n\n  insert into campanhas (nome, data_inicio, data_fim, status, origem, proposta_em)\n  values ('Campanha ' || to_char(v_inicio, 'MM/YYYY'), v_inicio, v_fim, 'proposta', 'motor', now())\n  returning id into v_id;\n\n  insert into campanha_produtos (campanha_id, codigo_produto, preco_promocional, percentual_desconto, braco)\n  select v_id, sel.codigo, round(sel.preco_promocional, 2), sel.desconto_pct,\n         case when sel.pos_no_bloco = 5 then 'controle' else 'desconto' end\n  from (with parametros as (\n  select\n    0.10::numeric as desconto_alvo,\n    0.20::numeric as margem_minima_resultante,\n    5.0::numeric  as desconto_minimo_pct,\n    1.5::numeric  as cobertura_estoque,\n    10            as estoque_minimo_abs,\n    15            as min_clientes,\n    15            as dias_campanha,\n    40            as qtd_candidatos\n),\naprovados as (\n  select distinct cp.codigo_produto\n  from campanha_produtos cp\n  where not exists (\n    select 1 from campanha_produtos_vetados v where v.codigo_produto = cp.codigo_produto\n  )\n),\nvolume as (\n  select vi.codigo_produto, sum(vi.quantidade_produtos) as qtd_90d\n  from venda_itens vi join vendas v on v.id = vi.venda_id\n  where v.data_emissao >= current_date - 90\n    and v.tipo_cancelamento is null and vi.quantidade_produtos > 0\n  group by 1\n),\nalcance as (\n  select vi.codigo_produto, count(distinct v.codigo_cliente) as clientes\n  from venda_itens vi join vendas v on v.id = vi.venda_id\n  where v.data_emissao >= current_date - interval '12 months'\n    and v.tipo_cancelamento is null and v.codigo_cliente is not null and vi.quantidade_produtos > 0\n  group by 1\n),\nelegiveis as (\n  select\n    pc.codigo, pc.nome, upper(trim(pc.nome)) as nome_chave,\n    pp.preco_praticado as praticado,\n    pc.custo_medio, pc.estoque_atual, coalesce(vol.qtd_90d, 0) as qtd_90d,\n    coalesce(a.clientes, 0) as clientes,\n    greatest(\n      pp.preco_praticado * (1 - p.desconto_alvo),\n      pc.custo_medio / (1 - p.margem_minima_resultante)\n    ) as preco_promocional\n  from aprovados ap\n  join produto_catalogo pc on pc.codigo = ap.codigo_produto\n  join vw_preco_praticado_atual pp on pp.codigo_produto = pc.codigo\n  left join volume vol on vol.codigo_produto = pc.codigo\n  left join alcance a on a.codigo_produto = pc.codigo\n  cross join parametros p\n  where pc.estoque_atual > 0\n    and pc.custo_medio > 0\n    and pp.preco_praticado > pc.custo_medio\n    and coalesce(a.clientes, 0) >= p.min_clientes\n    and pc.estoque_atual >= greatest(coalesce(vol.qtd_90d,0) / 90.0 * p.dias_campanha * p.cobertura_estoque, p.estoque_minimo_abs)\n),\ncom_desconto as (\n  select e.*,\n    round((1 - e.preco_promocional / nullif(e.praticado, 0)) * 100, 1) as desconto_pct,\n    e.clientes * (e.praticado - e.custo_medio) as potencial_alcance\n  from elegiveis e cross join parametros p\n  where (1 - e.preco_promocional / nullif(e.praticado, 0)) * 100 >= p.desconto_minimo_pct\n),\nsem_duplicata as (\n  select distinct on (nome_chave) * from com_desconto\n  order by nome_chave, potencial_alcance desc\n),\ntopo as (\n  select s.*, row_number() over (order by s.potencial_alcance desc) as rn\n  from sem_duplicata s\n  order by s.potencial_alcance desc\n  limit (select qtd_candidatos from parametros)\n)\nselect t.*,\n  row_number() over (partition by (t.rn - 1) / 5 order by md5(t.codigo::text)) as pos_no_bloco\nfrom topo t) sel;\n\n  get diagnostics v_qtd = row_count;\n  raise notice 'Campanha % criada com % produtos', v_id, v_qtd;\nend $$;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "ler-lista",
+      "name": "Ler proposta gerada",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  c.id as campanha_id,\n  c.nome as campanha,\n  to_char(c.data_inicio, 'DD/MM') as inicio,\n  to_char(c.data_fim, 'DD/MM') as fim,\n  cp.braco,\n  cp.codigo_produto,\n  pc.nome as produto,\n  round(cp.preco_promocional, 2) as preco_promocional,\n  cp.percentual_desconto as desconto_pct,\n  pc.estoque_atual\nfrom campanhas c\njoin campanha_produtos cp on cp.campanha_id = c.id\njoin produto_catalogo pc on pc.codigo = cp.codigo_produto\nwhere c.origem = 'motor'\n  and c.status = 'proposta'\n  and c.data_inicio = case when extract(day from current_date) <= 14 then (date_trunc('month', current_date)::date + 14) else (date_trunc('month', current_date + interval '1 month')::date + 14) end\norder by cp.braco, cp.preco_promocional desc;"
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "id": "montar-mensagem",
+      "name": "Montar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "const linhas = $input.all().map((i) => i.json);\nif (linhas.length === 0) {\n  return [];\n}\n\nconst cab = linhas[0];\nconst fmtBRL = (v) => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n\nconst cartaz = linhas.filter((l) => l.braco === 'desconto');\nconst controle = linhas.filter((l) => l.braco === 'controle');\n\nconst out = [\n  `📋 *Proposta de campanha — ${cab.campanha}*`,\n  `Período: ${cab.inicio} a ${cab.fim}`,\n  '',\n  `*${cartaz.length} produtos pro cartaz:*`,\n  '',\n];\n\ncartaz.forEach((l, i) => {\n  out.push(`${i + 1}. ${l.produto}`);\n  out.push(`   ${fmtBRL(l.preco_promocional)} (-${l.desconto_pct}%) · estoque ${l.estoque_atual}`);\n});\n\nif (controle.length) {\n  out.push('');\n  out.push(`🔒 *${controle.length} em grupo de controle* — não imprimir, não exportar. Servem pra medir se o cartaz fez diferença no fim do mês.`);\n}\n\nout.push('');\nout.push('Abra a aba *Campanhas* no app pra revisar, ajustar preço ou excluir item. O preço só vale no caixa depois que você exportar o .txt e importar no Trier.');\n\nreturn [{ json: { mensagem: out.join('\\n') } }];"
+      }
+    },
+    {
+      "id": "enviar",
+      "name": "➡️ Enviar via Evolution API (troque por aqui)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        720,
+        300
+      ],
+      "notes": "Placeholder — troque pelo nó de envio da instância Evolution API, apontando pro WhatsApp do gestor. O texto pronto chega em $json.mensagem.",
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Dia 14 as 22:00": {
+      "main": [
+        [
+          {
+            "node": "Gerar proposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar proposta": {
+      "main": [
+        [
+          {
+            "node": "Ler proposta gerada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler proposta gerada": {
+      "main": [
+        [
+          {
+            "node": "Montar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar mensagem": {
+      "main": [
+        [
+          {
+            "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}

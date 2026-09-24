@@ -516,6 +516,14 @@ export interface ProdutoCatalogo {
   grupo?: string;
   marca: string;
   precoVenda: number;
+  // Preço de tabela cadastrado na Trier — frequentemente fictício (ex.:
+  // genérico com "preço de tabela" de R$24 vendido a R$4,57 na prática,
+  // por desconto padrão da farmácia). precoPraticado é a mediana real
+  // paga pelo cliente numa janela recente (ver vw_preco_praticado_atual
+  // no schema) — undefined quando não há venda recente suficiente pra
+  // calcular. Toda lógica de margem/desconto deve usar
+  // `precoPraticado ?? precoVenda`, nunca precoVenda sozinho.
+  precoPraticado?: number;
   custoMedio: number;
   estoqueAtual: number;
   // ProdutoIntegracaoDto.tipoLista — null/vazio = não exige receita,

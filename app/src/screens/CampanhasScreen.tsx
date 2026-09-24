@@ -160,15 +160,18 @@ export function CampanhasScreen() {
           .slice(0, 8);
 
   const adicionarProdutoManual = (produto: ProdutoCatalogo) => {
+    // precoVenda (tabela) é frequentemente fictício — precoPraticado
+    // (preço real pago) é a referência certa pra calcular o desconto.
+    const precoReferencia = produto.precoPraticado ?? produto.precoVenda;
     const descontoPct = Number(descontoAlvo.replace(',', '.')) || 0;
-    const precoPromocional = Math.max(0, produto.precoVenda * (1 - descontoPct / 100));
+    const precoPromocional = Math.max(0, precoReferencia * (1 - descontoPct / 100));
     setItens((atual) => [
       ...atual,
       {
         codigoProduto: produto.codigo,
         codigoBarras: produto.codigoBarras,
         nomeProduto: produto.nome,
-        precoRegular: produto.precoVenda,
+        precoRegular: precoReferencia,
         custoMedio: produto.custoMedio,
         precoPromocional: Number(precoPromocional.toFixed(2)),
         percentualDesconto: descontoPct,
@@ -571,7 +574,7 @@ function mapearSugestaoParaItem(sugestao: ProdutoElegibilidade, dataInicio: stri
     codigoProduto: sugestao.produto.codigo,
     codigoBarras: sugestao.produto.codigoBarras,
     nomeProduto: sugestao.produto.nome,
-    precoRegular: sugestao.produto.precoVenda,
+    precoRegular: sugestao.produto.precoPraticado ?? sugestao.produto.precoVenda,
     custoMedio: sugestao.produto.custoMedio,
     precoPromocional: sugestao.precoSugerido,
     percentualDesconto: sugestao.percentualDescontoSugerido,

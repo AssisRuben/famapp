@@ -163,7 +163,11 @@ export function PrecificacaoScreen() {
 
   const produtosAlterados = useMemo(() => {
     return itens.flatMap((item) => {
-      const novoValor = precoAlterado(item.produto.precoVenda, novoPreco[item.produto.codigo]);
+      // precoVenda (tabela) é frequentemente fictício — compara contra
+      // precoPraticado (preço real pago) pra saber se o valor digitado
+      // é de fato diferente do que o cliente paga hoje.
+      const precoAtual = item.produto.precoPraticado ?? item.produto.precoVenda;
+      const novoValor = precoAlterado(precoAtual, novoPreco[item.produto.codigo]);
       return novoValor === null ? [] : [{ item, novoValor }];
     });
   }, [itens, novoPreco]);
@@ -238,7 +242,7 @@ export function PrecificacaoScreen() {
             codigoProduto: item.produto.codigo,
             codigoBarras: item.produto.codigoBarras,
             nomeProduto: item.produto.nome,
-            precoRegular: item.produto.precoVenda,
+            precoRegular: item.produto.precoPraticado ?? item.produto.precoVenda,
             custoMedio: item.produto.custoMedio,
             precoPromocional: novoValor,
             percentualDesconto: 0,
@@ -317,7 +321,7 @@ export function PrecificacaoScreen() {
           </View>
           <View style={styles.detalheItem}>
             <Text style={styles.detalheLabel}>Venda</Text>
-            <Text style={styles.detalheValor}>{formatBRL(item.produto.precoVenda)}</Text>
+            <Text style={styles.detalheValor}>{formatBRL(item.produto.precoPraticado ?? item.produto.precoVenda)}</Text>
           </View>
           <View style={styles.detalheItem}>
             <Text style={styles.detalheLabel}>Estoque</Text>
@@ -330,7 +334,7 @@ export function PrecificacaoScreen() {
           <TextInput
             style={styles.inputNovoPreco}
             keyboardType="numeric"
-            placeholder={item.produto.precoVenda.toFixed(2).replace('.', ',')}
+            placeholder={(item.produto.precoPraticado ?? item.produto.precoVenda).toFixed(2).replace('.', ',')}
             placeholderTextColor={colors.textMuted}
             value={novoPreco[item.produto.codigo] ?? ''}
             onChangeText={(texto) => ajustarNovoPreco(item.produto.codigo, texto)}
