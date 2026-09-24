@@ -12,8 +12,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
@@ -23,9 +21,8 @@ import { colors } from '../theme/colors';
 import { formatBRL, formatDateBR, formatDateCurtoBR, formatDecimalBR, parseDateBR, parseDecimalBR } from '../lib/format';
 import { agruparParaCartazetes } from '../lib/cartazetes';
 import { CartazesPorPagina, gerarHtmlCartazes } from '../lib/cartazHtml';
-import { gerarTxtTrier } from '../lib/trierTxt';
 import { imprimirHtmlNoWeb } from '../lib/printWeb';
-import { baixarArquivoTextoNoWeb } from '../lib/downloadWeb';
+import { exportarTxtCampanha } from '../lib/exportarTxtCampanha';
 import { alertar } from '../lib/alert';
 import { descricaoKit, descricaoKitMultiProduto, margemResultanteKitMultiProduto, margemResultanteKitProdutoUnico, PRESETS_KIT } from '../lib/kits';
 import {
@@ -60,6 +57,11 @@ export function CartazetesScreen() {
   const [loading, setLoading] = useState(true);
   const [campanhaSelecionada, setCampanhaSelecionada] = useState<Campanha | null>(null);
   const [itens, setItens] = useState<CampanhaProduto[]>([]);
+  // Grupo de controle do motor (24/09/2026): fora do cartaz e do .txt,
+  // mas precisa voltar pro salvarCampanha — que substitui a lista de
+  // produtos inteira — senão salvar aqui apagaria esses itens.
+  const [itensControle, setItensControle] = useState<CampanhaProduto[]>([]);
+  const [propostasPendentes, setPropostasPendentes] = useState(0);
   const [kits, setKits] = useState<KitMultiProduto[]>([]);
   const [expandido, setExpandido] = useState<number | null>(null);
   const [expandidoKit, setExpandidoKit] = useState<string | null>(null);
@@ -71,7 +73,11 @@ export function CartazetesScreen() {
   const carregar = useCallback(async () => {
     if (!profile) return;
     setLoading(true);
-    setCampanhas(await repository.getCampanhas(profile));
+    // Cartaz/.txt só pra campanha aprovada — proposta do motor ainda
+    // pode ter preço errado e rejeitada não vale (24/09/2026).
+    const todas = await repository.getCampanhas(profile);
+    setCampanhas(todas.filter((c) => c.status === 'aprovada'));
+    setPropostasPendentes(todas.filter((c) => c.status === 'proposta').length);
     setLoading(false);
   }, [profile]);
 
@@ -90,14 +96,17 @@ export function CartazetesScreen() {
     try {
       const resolvida = (await repository.getCampanha(profile, campanha.id)) ?? campanha;
       setCampanhaSelecionada(resolvida);
+      setItensControle(resolvida.produtos.filter((p) => p.braco === 'controle'));
       setItens(
-        resolvida.produtos.map((p) => ({
-          ...p,
-          // campanhas salvas antes da validade por item existir não têm
-          // dataInicio/dataFim no produto — cai pra validade da campanha.
-          dataInicio: p.dataInicio || resolvida.dataInicio,
-          dataFim: p.dataFim || resolvida.dataFim,
-        }))
+        resolvida.produtos
+          .filter((p) => p.braco !== 'controle')
+          .map((p) => ({
+            ...p,
+            // campanhas salvas antes da validade por item existir não têm
+            // dataInicio/dataFim no produto — cai pra validade da campanha.
+            dataInicio: p.dataInicio || resolvida.dataInicio,
+            dataFim: p.dataFim || resolvida.dataFim,
+          }))
       );
       setKits(resolvida.kits);
       setExpandido(null);
@@ -399,7 +408,7 @@ export function CartazetesScreen() {
         nome: campanhaSelecionada.nome,
         dataInicio: campanhaSelecionada.dataInicio,
         dataFim: campanhaSelecionada.dataFim,
-        produtos: itens,
+        produtos: [...itens, ...itensControle],
         kits,
       });
       setCampanhaSelecionada(salva);
@@ -431,44 +440,11 @@ export function CartazetesScreen() {
 
   const exportarTxt = async () => {
     if (!campanhaSelecionada || itens.length === 0) return;
-    // Formato do .txt (ver lib/trierTxt.ts) é 1 preço fixo por linha —
-    // não tem como representar "kit" nele (a Trier não tem um formato
-    // confirmado pra promoção de leve-mais-pague-menos). Produto em kit
-    // fica de fora do arquivo; avisa quantos ficaram.
-    const itensUnitarios = itens.filter((i) => i.tipoPromocao !== 'kit');
-    if (itensUnitarios.length === 0) {
-      alertar(
-        'Nada pra exportar',
-        'Todos os produtos dessa campanha estão como "Kit" — o formato de importação da Trier ainda não suporta esse tipo de promoção.'
-      );
-      return;
-    }
     setProcessando('txt');
     try {
-      const conteudo = gerarTxtTrier(itensUnitarios);
-      const nomeArquivo = `campanha-${campanhaSelecionada.id}.txt`;
-      const puladosKit = itens.length - itensUnitarios.length;
-
-      if (Platform.OS === 'web') {
-        baixarArquivoTextoNoWeb(nomeArquivo, conteudo);
-      } else {
-        const uri = `${FileSystem.documentDirectory}${nomeArquivo}`;
-        await FileSystem.writeAsStringAsync(uri, conteudo);
-
-        const podeCompartilhar = await Sharing.isAvailableAsync();
-        if (podeCompartilhar) {
-          await Sharing.shareAsync(uri, { mimeType: 'text/plain', dialogTitle: 'Exportar para importação no Trier' });
-        } else {
-          alertar('Arquivo gerado', `Salvo em: ${uri}`);
-        }
-      }
-
-      if (puladosKit > 0) {
-        alertar(
-          'Kits não exportados',
-          `${puladosKit} produto(s) "Kit" não entraram no .txt — cadastre essa promoção direto no sistema, se precisar.`
-        );
-      }
+      // itens (não campanhaSelecionada.produtos): leva o que foi editado
+      // aqui na tela (de/por, validade) mesmo antes de salvar.
+      await exportarTxtCampanha(campanhaSelecionada.id, itens);
     } catch (erro) {
       alertar('Erro ao gerar TXT', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
@@ -490,6 +466,14 @@ export function CartazetesScreen() {
         <Text style={styles.title}>🖨️ Gerador de cartazes</Text>
         <Text style={styles.subtitle}>Escolha uma campanha pra gerar os cartazes e o arquivo de importação.</Text>
 
+        {propostasPendentes > 0 && (
+          <Card>
+            <Text style={styles.campanhaInfo}>
+              🤖 {propostasPendentes} proposta(s) aguardando aprovação na aba Campanhas — aparecem aqui depois de aprovadas.
+            </Text>
+          </Card>
+        )}
+
         {campanhas.length === 0 ? (
           <Card>
             <Text style={styles.empty}>
@@ -501,7 +485,8 @@ export function CartazetesScreen() {
             <Card key={campanha.id} onPress={() => selecionar(campanha)}>
               <Text style={styles.itemNome}>{campanha.nome}</Text>
               <Text style={styles.campanhaInfo}>
-                {formatDateBR(campanha.dataInicio)} a {formatDateBR(campanha.dataFim)} · {campanha.produtos.length} produto(s)
+                {formatDateBR(campanha.dataInicio)} a {formatDateBR(campanha.dataFim)} ·{' '}
+                {campanha.produtos.filter((p) => p.braco !== 'controle').length} produto(s)
               </Text>
             </Card>
           ))

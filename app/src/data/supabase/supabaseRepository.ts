@@ -71,7 +71,7 @@ import {
 } from '../../types/domain';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
-import { sugerirCandidatos } from '../../lib/campanhas';
+import { codigosEmCampanhaValendo, sugerirCandidatos } from '../../lib/campanhas';
 import { LinhaRpcAfinidade, mapearSugestoesAfinidade, resolverCodigosSeed } from '../../lib/afinidadeKits';
 import { rotuloSemana } from '../../lib/metas';
 import { todayISO } from '../../lib/format';
@@ -1283,9 +1283,7 @@ class SupabaseRepository implements DataRepository {
     );
 
     const hojeIso = todayISO();
-    const codigosEmCampanhaAtiva = new Set(
-      campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
-    );
+    const codigosEmCampanhaAtiva = codigosEmCampanhaValendo(campanhas, hojeIso);
 
     return sugerirCandidatos(catalogo, vendaPorProduto, params, codigosEmCampanhaAtiva);
   }
@@ -1321,7 +1319,7 @@ class SupabaseRepository implements DataRepository {
     let query = supabase
       .from('campanhas')
       .select(
-        'id, nome, data_inicio, data_fim, created_at, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item, kit_preco_fixo), campanha_kits(id, nome, tipo_precificacao, percentual_desconto_item, preco_fixo, quantidade_cartazes, data_inicio, data_fim, campanha_kit_produtos(codigo_produto, quantidade))'
+        'id, nome, data_inicio, data_fim, created_at, status, origem, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item, kit_preco_fixo, braco), campanha_kits(id, nome, tipo_precificacao, percentual_desconto_item, preco_fixo, quantidade_cartazes, data_inicio, data_fim, campanha_kit_produtos(codigo_produto, quantidade))'
       )
       .order('created_at', { ascending: false });
     if (filtroId !== undefined) query = query.eq('id', filtroId);
@@ -1377,6 +1375,8 @@ class SupabaseRepository implements DataRepository {
       dataInicio: c.data_inicio,
       dataFim: c.data_fim,
       criadaEm: c.created_at,
+      status: c.status ?? 'aprovada',
+      origem: c.origem === 'motor' ? 'motor' : 'manual',
       quantidadeVendida: desempenhoPorCampanha.get(c.id)?.quantidade ?? 0,
       valorVendido: desempenhoPorCampanha.get(c.id)?.valor ?? 0,
       produtos: (c.campanha_produtos ?? []).map((cp: any) => {
@@ -1402,6 +1402,7 @@ class SupabaseRepository implements DataRepository {
           dataInicio: cp.data_inicio ?? c.data_inicio,
           dataFim: cp.data_fim ?? c.data_fim,
           tipoPromocao: cp.tipo_promocao === 'kit' ? 'kit' : 'unitario',
+          braco: cp.braco ?? 'desconto',
           kit:
             cp.tipo_promocao === 'kit' && cp.kit_quantidade_minima != null
               ? {
@@ -1497,6 +1498,9 @@ class SupabaseRepository implements DataRepository {
           kit_percentual_desconto_item:
             p.tipoPromocao === 'kit' && p.kit?.tipoPrecificacao === 'percentual' ? p.kit?.percentualDescontoItem ?? null : null,
           kit_preco_fixo: p.tipoPromocao === 'kit' && p.kit?.tipoPrecificacao === 'preco_fixo' ? p.kit?.precoFixo ?? null : null,
+          // editar = apagar e reinserir tudo; sem isso o grupo de
+          // controle do motor virava 'desconto' (default) ao salvar.
+          braco: p.braco ?? 'desconto',
         }))
       );
       if (error) throw error;
@@ -1580,6 +1584,15 @@ class SupabaseRepository implements DataRepository {
         nomeProduto: nomePorCodigo.get(p.codigo_produto) ?? `Produto ${p.codigo_produto}`,
       })),
     }));
+  }
+
+  async decidirCampanha(id: string, decisao: 'aprovada' | 'rejeitada'): Promise<void> {
+    const { data: auth } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('campanhas')
+      .update({ status: decisao, decidida_em: new Date().toISOString(), decidida_por: auth.user?.id ?? null })
+      .eq('id', Number(id));
+    if (error) throw error;
   }
 
   async getCampanhasVendaAdicional(_profile: Profile): Promise<CampanhaVendaAdicional[]> {
@@ -2218,9 +2231,7 @@ class SupabaseRepository implements DataRepository {
     );
 
     const hojeIso = todayISO();
-    const codigosComDescontoAtivo = new Set(
-      campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
-    );
+    const codigosComDescontoAtivo = codigosEmCampanhaValendo(campanhas, hojeIso);
 
     return calcularRelatorioPrecificacao(catalogo, vendaPorProduto, codigosComDescontoAtivo);
   }

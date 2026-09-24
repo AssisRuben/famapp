@@ -630,7 +630,14 @@ export interface CampanhaProduto {
   // dois pro cartaz/preço e usa `kit` em vez disso (ver KitPromocao).
   tipoPromocao: TipoPromocaoProduto;
   kit: KitPromocao | null;
+  // Braço do experimento do motor (24/09/2026, ver
+  // supabase/migracao_motor_campanhas.sql). 'controle' = preço normal,
+  // fora do cartaz e do .txt — só serve de linha de base pra medir o
+  // efeito da campanha. Ausente = 'desconto' (campanha manual).
+  braco?: BracoCampanha;
 }
+
+export type BracoCampanha = 'desconto' | 'incentivo' | 'controle';
 
 // Kit multi-produto por afinidade de compra (02/09/2026) — DIFERENTE
 // de KitPromocao acima (que é "leve mais unidades do MESMO produto").
@@ -701,9 +708,16 @@ export interface Campanha {
   // Desempenho real de venda no período da campanha (26/08/2026) —
   // diferente de produtos.length (quantidade de produtos CADASTRADOS),
   // isso é quantidade VENDIDA de fato. 0 quando ninguém vendeu ainda.
+  // Ciclo de aprovação (24/09/2026): o motor (n8n, dia 14) grava
+  // 'proposta'; só o gestor aprova/rejeita. Campanha manual nasce
+  // 'aprovada'. Só 'aprovada' vale pra cartaz, .txt, alertas e métricas.
+  status: StatusCampanha;
+  origem: 'manual' | 'motor';
   quantidadeVendida: number;
   valorVendido: number;
 }
+
+export type StatusCampanha = 'proposta' | 'aprovada' | 'rejeitada';
 
 export interface SalvarCampanhaInput {
   id?: string;

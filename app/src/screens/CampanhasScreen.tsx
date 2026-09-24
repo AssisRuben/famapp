@@ -21,6 +21,7 @@ import { alertar, confirmar } from '../lib/alert';
 import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroGrupo';
 import { MODELO_CAMPANHA_LABEL, nomeSugeridoPorModelo, ORDEM_MODELOS_CAMPANHA } from '../lib/modeloCampanha';
 import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
+import { exportarTxtCampanha } from '../lib/exportarTxtCampanha';
 import {
   Campanha,
   CampanhaProduto,
@@ -81,6 +82,7 @@ export function CampanhasScreen() {
   // nenhum feedback (achado 23/08/2026).
   const [gerada, setGerada] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [exportandoId, setExportandoId] = useState<string | null>(null);
   const [itens, setItens] = useState<CampanhaProduto[]>([]);
   // Texto BRUTO do campo "Preço promocional", por produto — desacoplado
   // de item.precoPromocional (number). Sem isso, o TextInput reformatava
@@ -300,6 +302,51 @@ export function CampanhasScreen() {
     }
   };
 
+  const ehGestor = profile?.role === 'gestor';
+  // Proposta pendente no topo — é o que pede ação do gestor.
+  const campanhasOrdenadas = [...campanhas].sort(
+    (a, b) => Number(b.status === 'proposta') - Number(a.status === 'proposta')
+  );
+
+  const decidir = (campanha: Campanha, decisao: 'aprovada' | 'rejeitada') => {
+    const qtdControle = campanha.produtos.filter((p) => p.braco === 'controle').length;
+    const qtdCartaz = campanha.produtos.length - qtdControle;
+    const aprovar = decisao === 'aprovada';
+    confirmar(
+      aprovar ? 'Aprovar campanha' : 'Rejeitar campanha',
+      aprovar
+        ? `Aprovar "${campanha.nome}"? Os ${qtdCartaz} produto(s) passam a valer pra cartaz, .txt do Trier e alertas dos vendedores` +
+            (qtdControle > 0 ? `; os ${qtdControle} do grupo de controle continuam a preço normal, fora do cartaz.` : '.')
+        : `Rejeitar "${campanha.nome}"? Ela sai da lista de pendentes e não vale pra nada.`,
+      async () => {
+        try {
+          await repository.decidirCampanha(campanha.id, decisao);
+          await carregarLista();
+        } catch (erro) {
+          alertar('Erro ao registrar decisão', erro instanceof Error ? erro.message : 'Tente novamente.');
+        }
+      },
+      { textoConfirmar: aprovar ? 'Aprovar' : 'Rejeitar', destrutivo: !aprovar }
+    );
+  };
+
+  // .txt direto da lista (24/09/2026) — nem toda campanha passa por
+  // Cartazetes. A lista é "leve" (sem código de barras), então busca a
+  // campanha completa antes de gerar.
+  const exportarTxt = async (campanha: Campanha) => {
+    if (!profile) return;
+    setExportandoId(campanha.id);
+    try {
+      const completa = await repository.getCampanha(profile, campanha.id);
+      if (!completa) throw new Error('Campanha não encontrada.');
+      await exportarTxtCampanha(completa.id, completa.produtos);
+    } catch (erro) {
+      alertar('Erro ao gerar TXT', erro instanceof Error ? erro.message : 'Tente novamente.');
+    } finally {
+      setExportandoId(null);
+    }
+  };
+
   const excluir = (campanha: Campanha) => {
     confirmar(
       'Excluir campanha',
@@ -467,6 +514,11 @@ export function CampanhasScreen() {
             )}
             {itens.map((item) => (
               <Card key={item.codigoProduto}>
+                {item.braco === 'controle' && (
+                  <Text style={styles.tagControle}>
+                    🔒 Grupo de controle · fica a preço normal, fora do cartaz e do .txt
+                  </Text>
+                )}
                 <View style={styles.itemHeader}>
                   <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
                   <Pressable onPress={() => removerItem(item.codigoProduto)} hitSlop={8}>
@@ -536,10 +588,24 @@ export function CampanhasScreen() {
           <Text style={styles.empty}>Nenhuma campanha criada ainda.</Text>
         </Card>
       ) : (
-        campanhas.map((campanha) => {
-          const totalCartazes = campanha.produtos.reduce((acc, p) => acc + p.quantidadeCartazes, 0);
+        campanhasOrdenadas.map((campanha) => {
+          const produtosCartaz = campanha.produtos.filter((p) => p.braco !== 'controle');
+          const qtdControle = campanha.produtos.length - produtosCartaz.length;
+          const totalCartazes = produtosCartaz.reduce((acc, p) => acc + p.quantidadeCartazes, 0);
           return (
             <Card key={campanha.id}>
+              {campanha.status === 'proposta' && (
+                <View style={styles.faixaProposta}>
+                  <Text style={styles.faixaPropostaTexto}>
+                    🤖 {campanha.origem === 'motor' ? 'Proposta do motor' : 'Proposta'} · aguardando aprovação
+                  </Text>
+                </View>
+              )}
+              {campanha.status === 'rejeitada' && (
+                <View style={styles.faixaRejeitada}>
+                  <Text style={styles.faixaRejeitadaTexto}>Rejeitada</Text>
+                </View>
+              )}
               <View style={styles.itemHeader}>
                 <Text style={styles.itemNome}>{campanha.nome}</Text>
                 <View style={styles.acoes}>
@@ -555,12 +621,49 @@ export function CampanhasScreen() {
                 {formatDateBR(campanha.dataInicio)} a {formatDateBR(campanha.dataFim)}
               </Text>
               <Text style={styles.campanhaResumo}>
-                {campanha.produtos.length} produto(s) · {totalCartazes} cartaz(es)
+                {produtosCartaz.length} produto(s) · {totalCartazes} cartaz(es)
+                {qtdControle > 0 ? ` · ${qtdControle} em grupo de controle` : ''}
               </Text>
-              <Text style={styles.campanhaDesempenho}>
-                {campanha.quantidadeVendida ?? 0} vendido{(campanha.quantidadeVendida ?? 0) === 1 ? '' : 's'} ·{' '}
-                {formatBRL(campanha.valorVendido ?? 0)}
-              </Text>
+              {campanha.status === 'aprovada' ? (
+                <>
+                  <Text style={styles.campanhaDesempenho}>
+                    {campanha.quantidadeVendida ?? 0} vendido{(campanha.quantidadeVendida ?? 0) === 1 ? '' : 's'} ·{' '}
+                    {formatBRL(campanha.valorVendido ?? 0)}
+                  </Text>
+                  <Pressable
+                    style={styles.botaoTxt}
+                    onPress={() => exportarTxt(campanha)}
+                    disabled={exportandoId !== null}
+                  >
+                    {exportandoId === campanha.id ? (
+                      <ActivityIndicator size="small" color={colors.navy} />
+                    ) : (
+                      <>
+                        <Ionicons name="download-outline" size={16} color={colors.navy} />
+                        <Text style={styles.botaoTxtTexto}>Exportar .txt para o Trier</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </>
+              ) : campanha.status === 'proposta' ? (
+                <>
+                  <Text style={styles.propostaAjuda}>
+                    Revise os itens no lápis antes de aprovar. O .txt e os cartazes só liberam depois da aprovação.
+                  </Text>
+                  {ehGestor && (
+                    <View style={styles.botoesDecisao}>
+                      <Pressable style={styles.botaoAprovar} onPress={() => decidir(campanha, 'aprovada')}>
+                        <Ionicons name="checkmark" size={16} color={colors.white} />
+                        <Text style={styles.botaoDecisaoTexto}>Aprovar</Text>
+                      </Pressable>
+                      <Pressable style={styles.botaoRejeitar} onPress={() => decidir(campanha, 'rejeitada')}>
+                        <Ionicons name="close" size={16} color={colors.red} />
+                        <Text style={styles.botaoRejeitarTexto}>Rejeitar</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </>
+              ) : null}
             </Card>
           );
         })
@@ -615,6 +718,19 @@ const styles = StyleSheet.create({
   campanhaPeriodo: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
   campanhaResumo: { fontSize: 12, color: colors.textMuted },
   campanhaDesempenho: { fontSize: 12, fontWeight: '700', color: colors.navy, marginTop: 2 },
+  faixaProposta: { backgroundColor: '#FEF3C7', borderRadius: 6, paddingVertical: 4, paddingHorizontal: 8, marginBottom: 8, alignSelf: 'flex-start' },
+  faixaPropostaTexto: { fontSize: 12, fontWeight: '700', color: '#92400E' },
+  faixaRejeitada: { backgroundColor: colors.border, borderRadius: 6, paddingVertical: 4, paddingHorizontal: 8, marginBottom: 8, alignSelf: 'flex-start' },
+  faixaRejeitadaTexto: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
+  botaoTxt: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, alignSelf: 'flex-start', borderWidth: 1, borderColor: colors.navy, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 12, marginTop: 10, minHeight: 34 },
+  botaoTxtTexto: { color: colors.navy, fontWeight: '700', fontSize: 13 },
+  propostaAjuda: { fontSize: 12, color: colors.textSecondary, marginTop: 6, lineHeight: 16 },
+  botoesDecisao: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  botaoAprovar: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.success, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
+  botaoDecisaoTexto: { color: colors.white, fontWeight: '700', fontSize: 13 },
+  botaoRejeitar: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: colors.red, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
+  botaoRejeitarTexto: { color: colors.red, fontWeight: '700', fontSize: 13 },
+  tagControle: { fontSize: 11, fontWeight: '700', color: colors.textSecondary, marginBottom: 6 },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary, marginBottom: 8 },
   rotulo: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
   espacado: { marginTop: 10 },
