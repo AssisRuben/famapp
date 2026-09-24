@@ -181,6 +181,14 @@ export interface ClienteBusca {
   telefone: string | null;
 }
 
+// Resultado leve de busca no catálogo (Produto em falta) — mesmo
+// espírito de ClienteBusca: só os campos que a sugestão de autocomplete
+// precisa, não o ProdutoCatalogo inteiro.
+export interface ProdutoBusca {
+  codigo: number;
+  nome: string;
+}
+
 // Espelha vw_cliente_dono_carteira (21/08/2026) — quem já é "dono" de
 // cada cliente na carteira, SEM o resto dos dados de vw_carteira_clientes
 // (valor comprado, telefone): só o suficiente pra avisar "esse cliente já

@@ -10,6 +10,7 @@ import {
   CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteBusca,
+  ProdutoBusca,
   ClienteCarteira,
   ClienteDoVendedor,
   ClienteInatividade,
@@ -440,20 +441,15 @@ class SupabaseRepository implements DataRepository {
     // pode empatar entre clientes diferentes, e sem desempate único a
     // ordenação não é garantida estável entre páginas (mesmo risco do
     // getProdutosRecorrentesDoVendedor abaixo).
-    const TAMANHO_PAGINA = 1000;
-    const linhas: Record<string, unknown>[] = [];
-    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-      const { data, error } = await supabase
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase
         .from('vw_clientes_por_vendedor')
         .select('*')
         .eq('codigo_vendedor', profile.codigoVendedor)
         .order('ultima_compra', { ascending: false })
         .order('codigo', { ascending: true })
-        .range(inicio, inicio + TAMANHO_PAGINA - 1);
-      if (error) throw error;
-      linhas.push(...(data ?? []));
-      if (!data || data.length < TAMANHO_PAGINA) break;
-    }
+        .range(inicio, fim)
+    );
     return linhas.map((r: any) => ({
       codigo: r.codigo,
       nome: r.nome,
@@ -469,19 +465,14 @@ class SupabaseRepository implements DataRepository {
     // Mesma paginação de getClientesDoVendedor (PostgREST limita 1000
     // linhas por request) — aqui sem filtro de vendedor, então o total
     // de clientes é ainda maior.
-    const TAMANHO_PAGINA = 1000;
-    const linhas: Record<string, unknown>[] = [];
-    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-      const { data, error } = await supabase
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase
         .from('vw_clientes_valor_geral')
         .select('*')
         .order('ultima_compra', { ascending: false })
         .order('codigo', { ascending: true })
-        .range(inicio, inicio + TAMANHO_PAGINA - 1);
-      if (error) throw error;
-      linhas.push(...(data ?? []));
-      if (!data || data.length < TAMANHO_PAGINA) break;
-    }
+        .range(inicio, fim)
+    );
     return linhas.map((r: any) => ({
       codigo: r.codigo,
       nome: r.nome,
@@ -547,6 +538,26 @@ class SupabaseRepository implements DataRepository {
     }));
   }
 
+  // Busca no catálogo por nome/código, limitada a 8 — mesmo espírito de
+  // buscarClientesParaCarteira. Substitui carregar produto_catalogo
+  // inteiro (Produto em falta buscava tudo — 4-5 mil linhas paginadas —
+  // só pra sugestão de autocomplete; achado 23/09/2026, auditoria de
+  // performance). ilike '%termo%' casa em qualquer posição do nome, não
+  // só início de palavra como o filtro local antigo — mesma semântica
+  // (mais solta) que buscarClientesParaCarteira já usa pra cliente.
+  async buscarProdutosCatalogo(termo: string): Promise<ProdutoBusca[]> {
+    const termoLimpo = termo.trim();
+    if (!termoLimpo) return [];
+    const filtros = [`nome.ilike.%${termoLimpo}%`];
+    if (/^\d+$/.test(termoLimpo)) filtros.push(`codigo.eq.${termoLimpo}`);
+    const { data, error } = await this.queryProdutoCatalogo('codigo, nome')
+      .or(filtros.join(','))
+      .order('nome', { ascending: true })
+      .limit(8);
+    if (error) throw error;
+    return (data ?? []).map((r: any) => ({ codigo: r.codigo, nome: r.nome }));
+  }
+
   async adicionarClienteCarteira(codigoVendedor: number, codigoCliente: number): Promise<void> {
     const { data: sessao } = await supabase.auth.getUser();
     const { error } = await supabase.from('carteira_clientes').insert({
@@ -596,20 +607,15 @@ class SupabaseRepository implements DataRepository {
     // em duas páginas (e outra sumir), causando produto duplicado pro
     // mesmo cliente (achado 01/08/2026 — "Encountered two children
     // with the same key" no app, key = codigo_produto repetido).
-    const TAMANHO_PAGINA = 1000;
-    const linhas: Record<string, unknown>[] = [];
-    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-      const { data, error } = await supabase
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase
         .from('vw_clientes_produtos_vendedor')
         .select('*')
         .eq('codigo_vendedor', profile.codigoVendedor)
         .order('codigo_cliente', { ascending: true })
         .order('codigo_produto', { ascending: true })
-        .range(inicio, inicio + TAMANHO_PAGINA - 1);
-      if (error) throw error;
-      linhas.push(...(data ?? []));
-      if (!data || data.length < TAMANHO_PAGINA) break;
-    }
+        .range(inicio, fim)
+    );
     return linhas.map((r: any) => ({
       codigoCliente: r.codigo_cliente,
       codigoProduto: r.codigo_produto,
@@ -629,19 +635,14 @@ class SupabaseRepository implements DataRepository {
   // filtro de codigo_vendedor — vw_clientes_produtos já agrega por
   // cliente somando qualquer vendedor.
   async getProdutosRecorrentesClientes(_profile: Profile): Promise<ProdutoRecorrenteCliente[]> {
-    const TAMANHO_PAGINA = 1000;
-    const linhas: Record<string, unknown>[] = [];
-    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-      const { data, error } = await supabase
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase
         .from('vw_clientes_produtos')
         .select('*')
         .order('codigo_cliente', { ascending: true })
         .order('codigo_produto', { ascending: true })
-        .range(inicio, inicio + TAMANHO_PAGINA - 1);
-      if (error) throw error;
-      linhas.push(...(data ?? []));
-      if (!data || data.length < TAMANHO_PAGINA) break;
-    }
+        .range(inicio, fim)
+    );
     return linhas.map((r: any) => ({
       codigoCliente: r.codigo_cliente,
       codigoProduto: r.codigo_produto,
@@ -698,10 +699,13 @@ class SupabaseRepository implements DataRepository {
   }
 
   async getVendasComReceita(_profile: Profile): Promise<VendaReceitaPendente[]> {
-    const { data, error } = await supabase.from('vw_vendas_receita_status').select('*');
-    if (error) throw error;
-
-    const linhas = data ?? [];
+    // Sem paginação, isso cortava silenciosamente em 1000 linhas (limite
+    // padrão do PostgREST) — achado 23/09/2026: a view não tinha uma
+    // janela de tempo que garantisse ficar sempre abaixo disso (ver
+    // migracao_vw_vendas_receita_status.sql).
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase.from('vw_vendas_receita_status').select('*').order('venda_item_id', { ascending: true }).range(inicio, fim)
+    );
 
     // foto_url na view é só o path dentro do bucket (bucket "receitas" é
     // privado) — precisa virar signed URL pra <Image> conseguir carregar.
@@ -1148,16 +1152,50 @@ class SupabaseRepository implements DataRepository {
   // vw_produto_fornecedor_recente) precisa passar por aqui, não só
   // getCatalogoProdutos (achado 03/08/2026, catalogado em
   // README.md#pendências-técnicas — varreu 5 métodos com o mesmo bug).
+  // Busca a primeira página sequencial (resolve de cara a maioria das
+  // listas, que cabem numa página só) e, só se precisar de mais,
+  // continua em BLOCOS PARALELOS de tamanho crescente em vez de uma
+  // página de cada vez — não dá pra saber o total de linhas de
+  // antemão (sem um count à parte), então busca especulativamente
+  // várias páginas ao mesmo tempo e para assim que achar uma que não
+  // veio cheia. Troca N requisições em série (uma tabela de 8 mil
+  // linhas = 8 idas e voltas sequenciais, 1,5-3s só de rede) por
+  // ~log(N) rodadas paralelas (achado 23/09/2026, auditoria de
+  // performance).
   private async buscarPaginado<T = any>(
     montarQuery: (inicio: number, fim: number) => PromiseLike<{ data: T[] | null; error: any }>
   ): Promise<T[]> {
     const TAMANHO_PAGINA = 1000;
-    const linhas: T[] = [];
-    for (let inicio = 0; ; inicio += TAMANHO_PAGINA) {
-      const { data, error } = await montarQuery(inicio, inicio + TAMANHO_PAGINA - 1);
-      if (error) throw error;
-      linhas.push(...(data ?? []));
-      if (!data || data.length < TAMANHO_PAGINA) break;
+    const TAMANHO_MAX_BLOCO = 16; // teto pra não abrir requisições demais de uma vez
+
+    const primeira = await montarQuery(0, TAMANHO_PAGINA - 1);
+    if (primeira.error) throw primeira.error;
+    const linhas: T[] = [...(primeira.data ?? [])];
+    if (!primeira.data || primeira.data.length < TAMANHO_PAGINA) return linhas;
+
+    let proximaPagina = 1;
+    let tamanhoBloco = 4;
+    for (;;) {
+      const paginasDoBloco = Array.from({ length: tamanhoBloco }, (_, i) => proximaPagina + i);
+      const resultados = await Promise.all(
+        paginasDoBloco.map((p) => montarQuery(p * TAMANHO_PAGINA, p * TAMANHO_PAGINA + TAMANHO_PAGINA - 1))
+      );
+
+      let acabou = false;
+      for (const { data, error } of resultados) {
+        if (error) throw error;
+        linhas.push(...(data ?? []));
+        // página não veio cheia = chegou ao fim; páginas seguintes do
+        // mesmo bloco (já buscadas em paralelo) vêm vazias, ignora.
+        if (!data || data.length < TAMANHO_PAGINA) {
+          acabou = true;
+          break;
+        }
+      }
+      if (acabou) break;
+
+      proximaPagina += tamanhoBloco;
+      tamanhoBloco = Math.min(tamanhoBloco * 2, TAMANHO_MAX_BLOCO);
     }
     return linhas;
   }

@@ -17,7 +17,7 @@ import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
-import { ProdutoCatalogo, ProdutoEmFalta } from '../types/domain';
+import { ProdutoBusca, ProdutoEmFalta } from '../types/domain';
 
 export function ProdutoEmFaltaScreen() {
   const { profile } = useAuth();
@@ -25,7 +25,7 @@ export function ProdutoEmFaltaScreen() {
 
   const [itens, setItens] = useState<ProdutoEmFalta[]>([]);
   const [loadingLista, setLoadingLista] = useState(true);
-  const [catalogo, setCatalogo] = useState<ProdutoCatalogo[]>([]);
+  const [resultadosBusca, setResultadosBusca] = useState<ProdutoBusca[]>([]);
 
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [nomeProduto, setNomeProduto] = useState('');
@@ -48,27 +48,25 @@ export function ProdutoEmFaltaScreen() {
     carregarLista();
   }, [carregarLista]);
 
+  // Sugestões só aparecem enquanto o nome ainda não está vinculado a um
+  // produto do catálogo — assim que escolhe uma, a lista some; editar o
+  // texto de novo desfaz o vínculo e traz as sugestões de volta. Busca
+  // remota com debounce (mesmo padrão de CarteiraClientesScreen) em vez
+  // de carregar o catálogo inteiro (4-5 mil produtos) só pra isso —
+  // achado 23/09/2026, auditoria de performance.
+  const termoBusca = nomeProduto.trim();
   useEffect(() => {
-    (async () => {
-      if (profile) setCatalogo(await repository.getCatalogoProdutos(profile));
-    })();
-  }, [profile]);
+    if (codigoVinculado != null || termoBusca.length < 2) {
+      setResultadosBusca([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setResultadosBusca(await repository.buscarProdutosCatalogo(termoBusca));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [termoBusca, codigoVinculado]);
 
-  // Sugestões só aparecem enquanto o nome ainda não está vinculado a
-  // um produto do catálogo — assim que escolhe uma, a lista some;
-  // editar o texto de novo desfaz o vínculo e traz as sugestões de
-  // volta. Bate só quando alguma PALAVRA do nome começa com o termo
-  // digitado (não "contém" em qualquer posição) — "dip" tinha que
-  // achar "Dipirona", não "Adipept" (que só tem "dip" no meio).
-  const termoBusca = nomeProduto.trim().toLowerCase();
-  const resultadosBusca =
-    codigoVinculado != null || termoBusca.length < 2
-      ? []
-      : catalogo
-          .filter((p) => p.nome.toLowerCase().split(/\s+/).some((palavra) => palavra.startsWith(termoBusca)))
-          .slice(0, 8);
-
-  const escolherSugestao = (produto: ProdutoCatalogo) => {
+  const escolherSugestao = (produto: ProdutoBusca) => {
     setNomeProduto(produto.nome);
     setCodigoVinculado(produto.codigo);
   };

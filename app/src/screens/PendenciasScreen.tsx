@@ -21,14 +21,15 @@ import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
-import { ClienteInatividade, Pendencia } from '../types/domain';
+import { ClienteBusca, Pendencia } from '../types/domain';
 
 export function PendenciasScreen() {
   const { profile } = useAuth();
   const [itens, setItens] = useState<Pendencia[]>([]);
   const [loadingLista, setLoadingLista] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [clientes, setClientes] = useState<ClienteInatividade[]>([]);
+  const [resultadosBusca, setResultadosBusca] = useState<ClienteBusca[]>([]);
+  const [buscandoCliente, setBuscandoCliente] = useState(false);
 
   const [nomeCliente, setNomeCliente] = useState('');
   // Só enquanto o nome não bate com um cliente já escolhido da lista —
@@ -42,11 +43,25 @@ export function PendenciasScreen() {
   const [baixandoId, setBaixandoId] = useState<string | null>(null);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
 
+  // Busca remota com debounce (mesmo padrão de CarteiraClientesScreen)
+  // em vez de carregar a base de clientes inteira só pra sugestão de
+  // autocomplete — achado 23/09/2026, auditoria de performance.
+  const termoBusca = nomeCliente.trim();
   useEffect(() => {
-    (async () => {
-      if (profile) setClientes(await repository.getClientesInatividade(profile));
-    })();
-  }, [profile]);
+    if (clienteVinculado || termoBusca.length < 2) {
+      setResultadosBusca([]);
+      return;
+    }
+    setBuscandoCliente(true);
+    const timer = setTimeout(async () => {
+      try {
+        setResultadosBusca((await repository.buscarClientesParaCarteira(termoBusca)).slice(0, 8));
+      } finally {
+        setBuscandoCliente(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [termoBusca, clienteVinculado]);
 
   const carregarLista = useCallback(async () => {
     if (!profile) return;
@@ -65,18 +80,7 @@ export function PendenciasScreen() {
     setRefreshing(false);
   };
 
-  // Mesmo critério de Produto em Falta: só casa início de palavra (evita
-  // "ana" achando "Mariana" no meio do nome) — some assim que o cliente
-  // é escolhido da lista, volta a aparecer se o texto for editado de novo.
-  const termoBusca = nomeCliente.trim().toLowerCase();
-  const resultadosBusca =
-    clienteVinculado || termoBusca.length < 2
-      ? []
-      : clientes
-          .filter((c) => c.nome.toLowerCase().split(/\s+/).some((palavra) => palavra.startsWith(termoBusca)))
-          .slice(0, 8);
-
-  const escolherCliente = (cliente: ClienteInatividade) => {
+  const escolherCliente = (cliente: ClienteBusca) => {
     setNomeCliente(cliente.nome);
     setClienteVinculado(true);
   };

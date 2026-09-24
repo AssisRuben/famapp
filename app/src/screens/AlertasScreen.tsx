@@ -451,7 +451,7 @@ export function AlertasScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     const hoje = new Date();
-    const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont, carteira, donos] = await Promise.all([
+    const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont, carteira, donos, todasCampanhasVA] = await Promise.all([
       repository.getProdutosEmPromocao(profile),
       repository.getClientesDoVendedor(profile),
       repository.getClientesValorGeral(profile),
@@ -469,13 +469,16 @@ export function AlertasScreen() {
       // vendedor logado) — usado no card "Cliente de alto valor
       // sumindo" pra avisar se o cliente já é acompanhado por alguém.
       repository.getDonosCarteira(profile),
+      // Venda adicional: só as campanhas ativas hoje interessam pro
+      // card de Alertas. Não depende de nenhuma das chamadas acima —
+      // estava rodando depois deste Promise.all inteiro terminar, sem
+      // motivo (achado 23/09/2026, auditoria de performance).
+      repository.getCampanhasVendaAdicional(profile),
     ]);
 
-    // Venda adicional: só as campanhas ativas hoje interessam pro card
-    // de Alertas — busca as vendas de cada uma já aqui (não é lazy
-    // como o histórico de cliente, porque o número do card precisa da
-    // soma antes mesmo de expandir).
-    const todasCampanhasVA = await repository.getCampanhasVendaAdicional(profile);
+    // Busca as vendas de cada campanha ativa já aqui (não é lazy como o
+    // histórico de cliente, porque o número do card precisa da soma
+    // antes mesmo de expandir).
     const hojeIso = todayISO();
     const ativasVA = todasCampanhasVA.filter((c) => campanhaAtiva(c, hojeIso));
     const vendasPorCampanhaVA: Record<string, VendaVendaAdicional[]> = {};

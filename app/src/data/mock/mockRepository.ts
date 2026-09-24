@@ -7,6 +7,7 @@ import {
   CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteBusca,
+  ProdutoBusca,
   ClienteCarteira,
   ClienteCompradorPromocao,
   ClienteDoVendedor,
@@ -1817,6 +1818,17 @@ class MockRepository implements DataRepository {
         .filter((c) => c.nome.toLowerCase().includes(termoLimpo) || String(c.codigo).includes(termoLimpo))
         .slice(0, 20)
         .map((c) => ({ codigo: c.codigo, nome: c.nome, numeroCpfCnpj: null, telefone: c.telefone }))
+    );
+  }
+
+  async buscarProdutosCatalogo(termo: string): Promise<ProdutoBusca[]> {
+    const termoLimpo = termo.trim().toLowerCase();
+    if (!termoLimpo) return delay([]);
+    return delay(
+      catalogoProdutosSeed
+        .filter((p) => p.nome.toLowerCase().includes(termoLimpo) || String(p.codigo).includes(termoLimpo))
+        .slice(0, 8)
+        .map((p) => ({ codigo: p.codigo, nome: p.nome }))
     );
   }
 

@@ -23,6 +23,13 @@ import { colors } from '../theme/colors';
 import { formatDateBR, nomeCurto } from '../lib/format';
 import { GRUPOS_FILTRO } from '../lib/gruposClientes';
 import { foiContatadoRecentemente } from '../lib/contatos';
+import { cacheGet, cacheSet } from '../lib/cache';
+
+type ClientesCache = {
+  clientes: ClienteInatividade[];
+  produtos: ProdutoRecorrenteCliente[];
+  contatos: ContatoCliente[];
+};
 
 // Últimas 7 (não 5 como em "Meus clientes" — pedido específico desta
 // tela, pra dar mais contexto de quem atendeu antes de decidir o
@@ -63,6 +70,7 @@ export function ClientesScreen() {
     setClientes(c);
     setProdutos(p);
     setContatos(ct);
+    cacheSet(`clientes:${profile.id}`, { clientes: c, produtos: p, contatos: ct });
   }, [profile]);
 
   // Registra a tentativa de contato e já tira o cliente da lista na
@@ -70,7 +78,13 @@ export function ClientesScreen() {
   const registrarContatoResgate = (codigoCliente: number, tipoContato: 'whatsapp' | 'ligacao') => {
     if (!profile) return;
     const novo: ContatoCliente = { codigoCliente, motivo: 'resgate', codigoProduto: null, contatadoEm: new Date().toISOString() };
+    const chaveCache = `clientes:${profile.id}`;
     setContatos((atual) => [...atual, novo]);
+    // mantém o cache em sincronia com o otimismo acima — senão reabrir
+    // a tela antes do próximo load() terminar mostraria o cliente de
+    // volta por um instante (mesmo padrão de ClientesVendedorScreen).
+    const cacheado = cacheGet<ClientesCache>(chaveCache);
+    if (cacheado) cacheSet(chaveCache, { ...cacheado, contatos: [...cacheado.contatos, novo] });
     repository
       .registrarContato({ codigoCliente, motivo: 'resgate', tipoContato, codigoVendedor: profile.codigoVendedor })
       .catch(() => {
@@ -78,13 +92,29 @@ export function ClientesScreen() {
         // reaparecer do que sumir da lista sem o contato ter sido
         // registrado de verdade.
         setContatos((atual) => atual.filter((c) => c !== novo));
+        const atual = cacheGet<ClientesCache>(chaveCache);
+        if (atual) cacheSet(chaveCache, { ...atual, contatos: atual.contatos.filter((c) => c !== novo) });
       });
   };
 
+  // Stale-while-revalidate (ver lib/cache.ts): é a tela mais pesada do
+  // app em volume de dado (base de clientes inteira + 1 linha por
+  // combinação cliente×produto) e, até 23/09/2026, a única das telas
+  // grandes sem cache — recarregava tudo do zero toda vez que o gestor
+  // abria a aba.
   useEffect(() => {
-    setLoading(true);
+    if (!profile) return;
+    const cacheado = cacheGet<ClientesCache>(`clientes:${profile.id}`);
+    if (cacheado) {
+      setClientes(cacheado.clientes);
+      setProdutos(cacheado.produtos);
+      setContatos(cacheado.contatos);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     load().finally(() => setLoading(false));
-  }, [load]);
+  }, [load, profile]);
 
   const onRefresh = async () => {
     setRefreshing(true);

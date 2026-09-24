@@ -5,6 +5,7 @@ import {
   CampanhaVendaAdicional,
   ChecklistItemStatus,
   ClienteBusca,
+  ProdutoBusca,
   ClienteCarteira,
   ClienteDoVendedor,
   ClienteInatividade,
@@ -131,6 +132,10 @@ export interface DataRepository {
   buscarClientesParaCarteira(termo: string): Promise<ClienteBusca[]>;
   adicionarClienteCarteira(codigoVendedor: number, codigoCliente: number): Promise<void>;
   removerClienteCarteira(id: string): Promise<void>;
+  // Busca no catálogo por nome/código, limitada — pra sugestão de
+  // Produto em falta parar de carregar o catálogo inteiro (23/09/2026,
+  // auditoria de performance). Mesmo espírito de buscarClientesParaCarteira.
+  buscarProdutosCatalogo(termo: string): Promise<ProdutoBusca[]>;
 
   // Histórico de compra do cliente (qualquer vendedor), mostrado ao
   // expandir um cliente na tela "Meus clientes" (limite padrão 5) e na
