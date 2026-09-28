@@ -1,4 +1,4 @@
-import { ModeloCampanha, ProdutoCatalogo, ProdutoElegibilidade, SugestaoCampanhaParams } from '../types/domain';
+import { Campanha, ModeloCampanha, ProdutoCatalogo, ProdutoElegibilidade, SugestaoCampanhaParams } from '../types/domain';
 import { ehEstoqueParado } from './estoqueParado';
 import { ehBaixaElasticidade } from './elasticidade';
 import { macroGrupoDoProduto, MacroGrupo } from './macroGrupo';
@@ -228,4 +228,15 @@ export function sugerirCandidatos(
     .sort((a, b) => b._pontuacao - a._pontuacao)
     .slice(0, params.quantidadeMaxima)
     .map(({ _pontuacao, ...resto }) => resto);
+}
+
+// Produtos com promoção VALENDO (ou agendada) — só campanha aprovada e
+// fora do grupo de controle do motor. Proposta ainda não aprovada não
+// bloqueia nada (24/09/2026).
+export function codigosEmCampanhaValendo(campanhas: Campanha[], hojeIso: string): Set<number> {
+  return new Set(
+    campanhas
+      .filter((c) => c.status === 'aprovada' && c.dataFim >= hojeIso)
+      .flatMap((c) => c.produtos.filter((p) => p.braco !== 'controle').map((p) => p.codigoProduto))
+  );
 }

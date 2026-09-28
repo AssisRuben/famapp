@@ -250,6 +250,8 @@ export interface DataRepository {
   getCampanha(profile: Profile, id: string): Promise<Campanha | null>;
   salvarCampanha(input: SalvarCampanhaInput): Promise<Campanha>;
   excluirCampanha(id: string): Promise<void>;
+  // Aprovar/rejeitar proposta do motor (só gestor — RLS de campanhas).
+  decidirCampanha(id: string, decisao: 'aprovada' | 'rejeitada'): Promise<void>;
 
   // Venda adicional — gestor cria/edita (aba "Venda adicional"), todo
   // vendedor lê (card em Alertas). Prêmio é só informativo, não entra

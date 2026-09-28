@@ -88,7 +88,7 @@ import {
 } from './seed';
 import { diasDecorridosNaSemana, rotuloSemana, semanaDoDia } from '../../lib/metas';
 import { todayISO } from '../../lib/format';
-import { sugerirCandidatos } from '../../lib/campanhas';
+import { codigosEmCampanhaValendo, sugerirCandidatos } from '../../lib/campanhas';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
 
@@ -299,6 +299,8 @@ async function getCampanhasStore(): Promise<Campanha[]> {
   return campanhas.map((c) => ({
     ...c,
     kits: c.kits ?? [],
+    status: c.status ?? 'aprovada',
+    origem: c.origem ?? 'manual',
     produtos: c.produtos.map((p) =>
       p.kit && !p.kit.tipoPrecificacao
         ? { ...p, kit: { ...p.kit, tipoPrecificacao: 'percentual' as const, precoFixo: null } }
@@ -1188,9 +1190,7 @@ class MockRepository implements DataRepository {
     // ativa/futura — não faz sentido empilhar desconto no mesmo item.
     const campanhas = await getCampanhasStore();
     const hojeIso = new Date().toISOString().slice(0, 10);
-    const codigosEmCampanhaAtiva = new Set(
-      campanhas.filter((c) => c.dataFim >= hojeIso).flatMap((c) => c.produtos.map((p) => p.codigoProduto))
-    );
+    const codigosEmCampanhaAtiva = codigosEmCampanhaValendo(campanhas, hojeIso);
 
     const sugestoes = sugerirCandidatos(catalogoProdutosSeed, vendaRecentePorProduto, params, codigosEmCampanhaAtiva);
     return delay(sugestoes);
@@ -1278,6 +1278,8 @@ class MockRepository implements DataRepository {
         // igual a uma campanha recém-criada de verdade.
         quantidadeVendida: 0,
         valorVendido: 0,
+        status: 'aprovada',
+        origem: 'manual',
         produtos: input.produtos,
         kits: input.kits,
       };
@@ -1286,6 +1288,14 @@ class MockRepository implements DataRepository {
 
     await salvarCampanhasStore(campanhas);
     return delay(salva);
+  }
+
+  async decidirCampanha(id: string, decisao: 'aprovada' | 'rejeitada'): Promise<void> {
+    const campanhas = await getCampanhasStore();
+    const campanha = campanhas.find((c) => c.id === id);
+    if (!campanha) throw new Error('Campanha não encontrada.');
+    campanha.status = decisao;
+    await salvarCampanhasStore(campanhas);
   }
 
   async gerarSugestaoCompras(_profile: Profile, params: ParametrosCompra): Promise<SugestaoCompra[]> {
