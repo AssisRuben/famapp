@@ -37,6 +37,23 @@ import {
   VendedorAtivo,
 } from '../types/domain';
 
+// Números do ranking com rótulo em cima de cada um, abaixo do nome —
+// antes ficavam numa string "12 ofertados · 5 itens · R$ 234,50" na
+// mesma linha do nome, que sobrava pouca largura no celular e cortava o
+// nome do vendedor (28/09/2026). Quebra pra linha de baixo se não couber.
+function Metricas({ itens }: { itens: { rotulo: string; valor: string }[] }) {
+  return (
+    <View style={styles.metricasRow}>
+      {itens.map((m) => (
+        <View key={m.rotulo} style={styles.metricaCol}>
+          <Text style={styles.metricaRotulo}>{m.rotulo}</Text>
+          <Text style={styles.metricaValor}>{m.valor}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // Mesmo critério de semana do mês usado no resto do app (Metas/Desempenho):
 // dia 1-7 = semana 1, 8-14 = semana 2, 15-21 = semana 3, 22-fim = semana 4.
 function semanaDoDia(dia: number): number {
@@ -516,15 +533,18 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
       ) : (
         <View style={styles.espacado}>
           {ranking.map((item) => (
-            <View key={item.codigoVendedor} style={styles.andamentoLinha}>
-              <Text style={styles.andamentoNome} numberOfLines={1}>
+            <View key={item.codigoVendedor} style={styles.andamentoLinhaEmpilhada}>
+              <Text style={styles.andamentoNome}>
                 {item.premio != null ? medalhaPosicaoComplementar(item.posicao) : `${item.posicao}º`}{' '}
                 {item.nomeVendedor}
               </Text>
-              <Text style={styles.andamentoValor}>
-                {formatBRL(item.valorTotal)} · {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'}
-                {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
-              </Text>
+              <Metricas
+                itens={[
+                  { rotulo: 'Itens', valor: String(item.quantidadeTotal) },
+                  { rotulo: 'Valor', valor: formatBRL(item.valorTotal) },
+                  ...(item.premio != null ? [{ rotulo: 'Prêmio', valor: formatBRL(item.premio) }] : []),
+                ]}
+              />
             </View>
           ))}
         </View>
@@ -547,29 +567,29 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                 {aberto && (
                   <View>
                     {grupo.itens.map((item) => (
-                      <View key={item.codigoVendedor} style={styles.andamentoLinha}>
-                        <Text style={styles.andamentoNome} numberOfLines={1}>
-                          {item.nomeVendedor}
-                        </Text>
-                        <Text style={styles.andamentoValor}>
-                          {item.clientesOfertados != null ? `${item.clientesOfertados} ofertados` : 'sem info'} ·{' '}
-                          {item.quantidadeItens} {item.quantidadeItens === 1 ? 'item' : 'itens'} ·{' '}
-                          {formatBRL(item.valorVenda)}
-                        </Text>
+                      <View key={item.codigoVendedor} style={styles.andamentoLinhaEmpilhada}>
+                        <Text style={styles.andamentoNome}>{item.nomeVendedor}</Text>
+                        <Metricas
+                          itens={[
+                            { rotulo: 'Ofertados', valor: item.clientesOfertados != null ? String(item.clientesOfertados) : '—' },
+                            { rotulo: 'Itens', valor: String(item.quantidadeItens) },
+                            { rotulo: 'Valor', valor: formatBRL(item.valorVenda) },
+                          ]}
+                        />
                       </View>
                     ))}
 
                     <Text style={styles.resultadoTotalTitulo}>Total do período</Text>
                     {totalPeriodo.map((item) => (
-                      <View key={item.codigoVendedor} style={styles.andamentoLinha}>
-                        <Text style={styles.andamentoNome} numberOfLines={1}>
-                          {item.nomeVendedor}
-                        </Text>
-                        <Text style={styles.andamentoValor}>
-                          {item.clientesOfertados != null ? `${item.clientesOfertados} ofertados` : 'sem info'} ·{' '}
-                          {item.quantidadeItens} {item.quantidadeItens === 1 ? 'item' : 'itens'} ·{' '}
-                          {formatBRL(item.valorVenda)}
-                        </Text>
+                      <View key={item.codigoVendedor} style={styles.andamentoLinhaEmpilhada}>
+                        <Text style={styles.andamentoNome}>{item.nomeVendedor}</Text>
+                        <Metricas
+                          itens={[
+                            { rotulo: 'Ofertados', valor: item.clientesOfertados != null ? String(item.clientesOfertados) : '—' },
+                            { rotulo: 'Itens', valor: String(item.quantidadeItens) },
+                            { rotulo: 'Valor', valor: formatBRL(item.valorVenda) },
+                          ]}
+                        />
                       </View>
                     ))}
                   </View>
@@ -821,20 +841,15 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
               return (
                 <View key={item.codigoVendedor} style={styles.andamentoBloco}>
                   <Pressable
-                    style={styles.andamentoLinha}
+                    style={styles.andamentoLinhaEmpilhada}
                     onPress={() =>
                       setVendedorAberto((atual) => (atual === item.codigoVendedor ? null : item.codigoVendedor))
                     }
                   >
-                    <Text style={styles.andamentoNome} numberOfLines={1}>
-                      {item.premio != null ? medalhaPosicaoComplementar(item.posicao) : `${item.posicao}º`}{' '}
-                      {item.nomeVendedor}
-                    </Text>
-                    <View style={styles.andamentoValorRow}>
-                      <Text style={styles.andamentoValor}>
-                        {ofertados != null ? `${ofertados} ofertados · ` : ''}
-                        {item.quantidadeTotal} {item.quantidadeTotal === 1 ? 'item' : 'itens'} · {formatBRL(item.valorTotal)}
-                        {item.premio != null ? ` · ${formatBRL(item.premio)}` : ''}
+                    <View style={styles.andamentoTopo}>
+                      <Text style={styles.andamentoNome}>
+                        {item.premio != null ? medalhaPosicaoComplementar(item.posicao) : `${item.posicao}º`}{' '}
+                        {item.nomeVendedor}
                       </Text>
                       <Ionicons
                         name={vendedorEstaAberto ? 'chevron-up' : 'chevron-down'}
@@ -842,6 +857,14 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                         color={colors.textMuted}
                       />
                     </View>
+                    <Metricas
+                      itens={[
+                        ...(ofertados != null ? [{ rotulo: 'Ofertados', valor: String(ofertados) }] : []),
+                        { rotulo: 'Itens', valor: String(item.quantidadeTotal) },
+                        { rotulo: 'Valor', valor: formatBRL(item.valorTotal) },
+                        ...(item.premio != null ? [{ rotulo: 'Prêmio', valor: formatBRL(item.premio) }] : []),
+                      ]}
+                    />
                   </Pressable>
                   {vendedorEstaAberto &&
                     diasDoVendedor.map((dia) => {
@@ -853,18 +876,20 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                             style={styles.diaVendedorLinha}
                             onPress={() => setDiaAberto((atual) => (atual === chave ? null : chave))}
                           >
-                            <View style={styles.diaVendedorInfo}>
+                            <View style={styles.andamentoTopo}>
                               <Text style={styles.resultadoDiaData}>{formatDateBR(dia.data)}</Text>
-                              <Text style={styles.andamentoValor}>
-                                {dia.atendimentos} {dia.atendimentos === 1 ? 'atendimento' : 'atendimentos'} ·{' '}
-                                {dia.quantidadeItens} {dia.quantidadeItens === 1 ? 'item' : 'itens'} ·{' '}
-                                {formatBRL(dia.valorVenda)}
-                              </Text>
+                              <Ionicons
+                                name={diaEstaAberto ? 'chevron-up' : 'chevron-down'}
+                                size={20}
+                                color={colors.textMuted}
+                              />
                             </View>
-                            <Ionicons
-                              name={diaEstaAberto ? 'chevron-up' : 'chevron-down'}
-                              size={20}
-                              color={colors.textMuted}
+                            <Metricas
+                              itens={[
+                                { rotulo: 'Atendimentos', valor: String(dia.atendimentos) },
+                                { rotulo: 'Itens', valor: String(dia.quantidadeItens) },
+                                { rotulo: 'Valor', valor: formatBRL(dia.valorVenda) },
+                              ]}
                             />
                           </Pressable>
                           {diaEstaAberto && <Text style={styles.andamentoProdutos}>{dia.produtos}</Text>}
@@ -1344,27 +1369,18 @@ const styles = StyleSheet.create({
   andamentoToggleTexto: { fontSize: 14, fontWeight: '600', color: colors.navy },
   andamentoPainel: { marginTop: 6 },
   andamentoBloco: { paddingVertical: 4 },
-  andamentoLinha: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-  },
-  andamentoNome: { flex: 1, fontSize: 12, color: colors.textPrimary },
-  andamentoValor: { fontSize: 12, color: colors.textSecondary },
-  andamentoValorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  andamentoNome: { flex: 1, fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+  // Linha do ranking em duas camadas (nome em cima, números embaixo) —
+  // o nome ganha a largura toda em vez de dividir com os números.
+  andamentoLinhaEmpilhada: { paddingVertical: 8, gap: 4 },
+  andamentoTopo: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  metricasRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 18, rowGap: 6 },
+  metricaCol: { gap: 1 },
+  metricaRotulo: { fontSize: 10, color: colors.textMuted },
+  metricaValor: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
   andamentoProdutos: { fontSize: 11, color: colors.textMuted, marginTop: 2, marginLeft: 10 },
   diaVendedorBloco: { marginTop: 2 },
-  diaVendedorLinha: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingLeft: 10,
-  },
-  diaVendedorInfo: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  diaVendedorLinha: { paddingVertical: 8, paddingLeft: 10, gap: 4 },
   resultadoDiaBloco: { marginTop: 8 },
   resultadoDiaToggle: {
     flexDirection: 'row',
