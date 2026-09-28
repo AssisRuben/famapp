@@ -23,6 +23,7 @@ import {
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
   ItemClassificacaoCompra,
+  IrmaoEmEstoque,
   ItemEstoqueZeradoGiroAlto,
   ItemPrecificacao,
   ItemRelatorioFalta,
@@ -1716,9 +1717,14 @@ class MockRepository implements DataRepository {
           data: f.data,
           nomeRegistradoPor: f.nomeRegistradoPor,
           temSaldoEstoque: f.temSaldoEstoque,
+          irmaosEmEstoque: [],
         };
       })
     );
+  }
+
+  async getIrmaosEmEstoque(_codigos: number[]): Promise<Record<number, IrmaoEmEstoque[]>> {
+    return delay({});
   }
 
   async limparProdutosEmFalta(ids: string[]): Promise<void> {

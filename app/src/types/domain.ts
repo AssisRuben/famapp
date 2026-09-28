@@ -972,6 +972,9 @@ export interface ItemRelatorioFalta {
   data: string;
   nomeRegistradoPor: string | null;
   temSaldoEstoque: boolean;
+  // Outros cadastros do mesmo produto com estoque (a falta pode já ter
+  // sido reposta por outro laboratório) — vazio quando não há.
+  irmaosEmEstoque: IrmaoEmEstoque[];
 }
 
 // ============================================================
@@ -1073,10 +1076,32 @@ export interface ItemPrecificacao {
 // quem vendeu algo, e estoque zerado agora. Mantido em espelho pra não
 // mostrar no app um produto que não está (ou vice-versa) no zap que o
 // gestor já recebe todo dia às 08h.
+// Outro cadastro (código) do MESMO produto que tem estoque — espelha
+// vw_produto_irmaos (nome idêntico, ignorando REV).
+export interface IrmaoEmEstoque {
+  codigo: number;
+  nome: string;
+  estoque: number;
+}
+
+// Quanto os outros cadastros do mesmo produto cobrem a demanda do item
+// zerado. "coberto" = estoque dos irmãos aguenta COBERTURA_MIN_DIAS de
+// giro (ver lib/equivalentes.ts).
+export interface CoberturaPorIrmaos {
+  estoqueIrmaos: number;
+  // null quando o grupo não vendeu nada em 30d (não dá pra estimar dias)
+  coberturaDias: number | null;
+  coberto: boolean;
+  irmaos: IrmaoEmEstoque[];
+}
+
 export interface ItemEstoqueZeradoGiroAlto {
   codigoProduto: number;
   nomeProduto: string;
   quantidadeVendida30d: number;
+  // Só vem preenchido quando existe outro cadastro do mesmo produto com
+  // estoque (o comprador pode ter reposto por outro laboratório).
+  cobertura?: CoberturaPorIrmaos;
 }
 
 // Classificação em lote de itens da sugestão de compras (18/08/2026) —

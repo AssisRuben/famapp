@@ -25,6 +25,7 @@ import {
   HistoricoCompraCliente,
   IdentificacaoCompradorVendedor,
   ItemClassificacaoCompra,
+  IrmaoEmEstoque,
   ItemEstoqueZeradoGiroAlto,
   ItemPrecificacao,
   ItemRelatorioFalta,
@@ -71,6 +72,7 @@ import {
 } from '../../types/domain';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
+import { calcularCobertura, IrmaosBrutos } from '../../lib/equivalentes';
 import { codigosEmCampanhaValendo, sugerirCandidatos } from '../../lib/campanhas';
 import { LinhaRpcAfinidade, mapearSugestoesAfinidade, resolverCodigosSeed } from '../../lib/afinidadeKits';
 import { rotuloSemana } from '../../lib/metas';
@@ -1994,10 +1996,16 @@ class SupabaseRepository implements DataRepository {
 
     const catalogoPorCodigo = new Map((catalogoLinhas.data ?? []).map((r: any) => [r.codigo, r]));
     const fornecedorPorCodigo = new Map((fornecedorLinhas.data ?? []).map((r: any) => [r.codigo_produto, r.nome_fornecedor]));
+    // Falta com saldo (ruptura de gôndola) não é compra — só olha irmão
+    // pra quem realmente está zerado.
+    const irmaosPorCodigo = await this.getIrmaosEmEstoque(
+      faltas.filter((f) => !f.temSaldoEstoque && f.codigoProduto != null).map((f) => f.codigoProduto as number)
+    );
 
     return faltas.map((f) => {
       const cat = f.codigoProduto != null ? catalogoPorCodigo.get(f.codigoProduto) : null;
       return {
+        irmaosEmEstoque: f.codigoProduto != null ? irmaosPorCodigo[f.codigoProduto] ?? [] : [],
         id: f.id,
         nomeProduto: f.nomeProduto,
         codigoProduto: f.codigoProduto,
@@ -2202,9 +2210,70 @@ class SupabaseRepository implements DataRepository {
     );
     const codigosClassificados = new Set(classificacoesLinhas.map((r: any) => r.codigo_produto));
 
-    return calcularEstoqueZeradoGiroAlto(catalogo, vendaPorProduto).filter(
+    const lista = calcularEstoqueZeradoGiroAlto(catalogo, vendaPorProduto).filter(
       (item) => !codigosClassificados.has(item.codigoProduto)
     );
+
+    // Comprador pode ter reposto por outro laboratório (código novo, mesmo
+    // nome) — o código antigo fica zerado mas o produto está no balcão.
+    // Marca quem já tem cobertura em outro cadastro, em vez de tratar
+    // tudo como falta (achado 28/09/2026).
+    const irmaos = await this.buscarIrmaos(lista.map((item) => item.codigoProduto));
+    if (irmaos.size === 0) return lista;
+    const giroPorProduto = new Map([...vendaPorProduto].map(([codigo, v]) => [codigo, v.quantidadeVendida30d]));
+    return lista.map((item) => {
+      const brutos = irmaos.get(item.codigoProduto);
+      return brutos && brutos.irmaos.length > 0 ? { ...item, cobertura: calcularCobertura(brutos, giroPorProduto) } : item;
+    });
+  }
+
+  // Cadastros irmãos (mesmo produto, outro código) — ver vw_produto_irmaos.
+  // Enriquecimento OPCIONAL: se a view ainda não existir no banco ou a
+  // consulta falhar, devolve vazio e a lista principal continua igual a
+  // antes, em vez de derrubar a tela inteira por um detalhe.
+  private async buscarIrmaos(codigos: number[]): Promise<Map<number, IrmaosBrutos>> {
+    const mapa = new Map<number, IrmaosBrutos>();
+    const unicos = [...new Set(codigos)];
+    if (unicos.length === 0) return mapa;
+
+    const TAMANHO_BLOCO = 150;
+    const blocos: number[][] = [];
+    for (let i = 0; i < unicos.length; i += TAMANHO_BLOCO) blocos.push(unicos.slice(i, i + TAMANHO_BLOCO));
+
+    try {
+      const respostas = await Promise.all(
+        blocos.map((bloco) =>
+          supabase
+            .from('vw_produto_irmaos')
+            .select('codigo, estoque_irmaos, codigos_grupo, cadastros_com_estoque')
+            .in('codigo', bloco)
+        )
+      );
+      for (const { data, error } of respostas) {
+        if (error) throw error;
+        for (const r of data ?? []) {
+          const irmaos = ((r.cadastros_com_estoque ?? []) as IrmaoEmEstoque[]).filter((c) => c.codigo !== r.codigo);
+          mapa.set(r.codigo, {
+            estoqueIrmaos: Number(r.estoque_irmaos),
+            codigosGrupo: (r.codigos_grupo ?? []) as number[],
+            irmaos,
+          });
+        }
+      }
+    } catch (erro) {
+      console.warn('vw_produto_irmaos indisponível — seguindo sem cobertura por cadastro irmão.', erro);
+      return new Map();
+    }
+    return mapa;
+  }
+
+  async getIrmaosEmEstoque(codigos: number[]): Promise<Record<number, IrmaoEmEstoque[]>> {
+    const mapa = await this.buscarIrmaos(codigos);
+    const resultado: Record<number, IrmaoEmEstoque[]> = {};
+    for (const [codigo, brutos] of mapa) {
+      if (brutos.irmaos.length > 0) resultado[codigo] = brutos.irmaos;
+    }
+    return resultado;
   }
 
   async getRelatorioPrecificacao(profile: Profile): Promise<ItemPrecificacao[]> {

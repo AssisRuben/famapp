@@ -17,7 +17,7 @@ import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
 import { formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
-import { ProdutoBusca, ProdutoEmFalta } from '../types/domain';
+import { IrmaoEmEstoque, ProdutoBusca, ProdutoEmFalta } from '../types/domain';
 
 export function ProdutoEmFaltaScreen() {
   const { profile } = useAuth();
@@ -26,6 +26,7 @@ export function ProdutoEmFaltaScreen() {
   const [itens, setItens] = useState<ProdutoEmFalta[]>([]);
   const [loadingLista, setLoadingLista] = useState(true);
   const [resultadosBusca, setResultadosBusca] = useState<ProdutoBusca[]>([]);
+  const [irmaos, setIrmaos] = useState<Record<number, IrmaoEmEstoque[]>>({});
 
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [nomeProduto, setNomeProduto] = useState('');
@@ -40,8 +41,22 @@ export function ProdutoEmFaltaScreen() {
   const carregarLista = useCallback(async () => {
     if (!profile) return;
     setLoadingLista(true);
-    setItens(await repository.getProdutosEmFalta(profile));
+    const lista = await repository.getProdutosEmFalta(profile);
+    setItens(lista);
     setLoadingLista(false);
+    // Enriquecimento opcional: o mesmo produto sob outro código com estoque.
+    const codigos = lista
+      .filter((i) => i.codigoProduto != null && !i.temSaldoEstoque)
+      .map((i) => i.codigoProduto as number);
+    if (codigos.length > 0) {
+      try {
+        setIrmaos(await repository.getIrmaosEmEstoque(codigos));
+      } catch {
+        setIrmaos({});
+      }
+    } else {
+      setIrmaos({});
+    }
   }, [profile]);
 
   useEffect(() => {
@@ -221,6 +236,12 @@ export function ProdutoEmFaltaScreen() {
             <Text style={item.temSaldoEstoque ? styles.itemAviso : styles.itemAvisoOk}>
               {item.temSaldoEstoque ? 'Tem saldo no estoque (ruptura de gôndola)' : 'Sem saldo no estoque'}
             </Text>
+            {item.codigoProduto != null && (irmaos[item.codigoProduto] ?? []).length > 0 && (
+              <Text style={styles.itemIrmao}>
+                Já tem em outro cadastro:{' '}
+                {irmaos[item.codigoProduto].map((i) => `${i.nome} (${i.estoque} un.)`).join('; ')}
+              </Text>
+            )}
           </Card>
         ))
       )}
@@ -271,5 +292,6 @@ const styles = StyleSheet.create({
   itemAcoes: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   itemData: { fontSize: 12, color: colors.textMuted },
   itemAviso: { fontSize: 12, color: colors.red, fontWeight: '600', marginTop: 4 },
+  itemIrmao: { fontSize: 12, color: colors.success, fontWeight: '600', marginTop: 4 },
   itemAvisoOk: { fontSize: 12, color: colors.textMuted, marginTop: 4 },
 });

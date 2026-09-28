@@ -19,6 +19,7 @@ import {
   FaixaComissao,
   HistoricoCompraCliente,
   ItemClassificacaoCompra,
+  IrmaoEmEstoque,
   ItemEstoqueZeradoGiroAlto,
   ItemPrecificacao,
   ItemRelatorioFalta,
@@ -330,6 +331,10 @@ export interface DataRepository {
   // compras_classificacoes — classificar aqui ou na Sugestão de
   // compras tem o mesmo efeito.
   getEstoqueZeradoGiroAlto(profile: Profile): Promise<ItemEstoqueZeradoGiroAlto[]>;
+  // Outros cadastros (códigos) do MESMO produto que têm estoque, por
+  // código consultado — só entram códigos que têm pelo menos um irmão
+  // com estoque. Nome idêntico, ignorando REV (ver vw_produto_irmaos).
+  getIrmaosEmEstoque(codigos: number[]): Promise<Record<number, IrmaoEmEstoque[]>>;
 
   // Precificação — gestor-only na UI. Diagnóstico (quem merece atenção
   // e por quê), diferente de Campanhas (decide quanto descontar).

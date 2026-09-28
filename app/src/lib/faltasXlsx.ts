@@ -10,6 +10,7 @@ const CABECALHO = [
   'Custo médio (referência)',
   'Data do registro',
   'Registrado por',
+  'Já em estoque em outro cadastro',
 ];
 
 function linha(item: ItemRelatorioFalta): (string | number)[] {
@@ -21,6 +22,9 @@ function linha(item: ItemRelatorioFalta): (string | number)[] {
     item.custoMedio ?? '',
     formatDateBR(item.data),
     item.nomeRegistradoPor ?? '',
+    // O mesmo produto sob outro código (outro laboratório) com estoque —
+    // confira antes de comprar de novo.
+    item.irmaosEmEstoque.map((i) => `${i.nome} (${i.estoque} un.)`).join('; '),
   ];
 }
 

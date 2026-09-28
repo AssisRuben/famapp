@@ -25,6 +25,7 @@ import { baixarArquivoBase64NoWeb } from '../lib/downloadWeb';
 import { alertar, confirmar } from '../lib/alert';
 import { ORDEM_MACRO_GRUPOS, MACRO_GRUPO_LABEL, MacroGrupo } from '../lib/macroGrupo';
 import { MOTIVO_CLASSIFICACAO_LABEL, ORDEM_MOTIVOS_CLASSIFICACAO } from '../lib/comprasClassificacao';
+import { textoCobertura } from '../lib/equivalentes';
 import {
   ItemClassificacaoCompra,
   ItemEstoqueZeradoGiroAlto,
@@ -57,6 +58,7 @@ export function ComprasScreen() {
   const [classificacoes, setClassificacoes] = useState<ItemClassificacaoCompra[]>([]);
   const [carregandoClassificacoes, setCarregandoClassificacoes] = useState(true);
   const [mostrarClassificados, setMostrarClassificados] = useState(false);
+  const [mostrarCobertos, setMostrarCobertos] = useState(false);
   const [selecionados, setSelecionados] = useState<number[]>([]);
   const [classificando, setClassificando] = useState(false);
   const [modalOutrosAberto, setModalOutrosAberto] = useState(false);
@@ -239,6 +241,43 @@ export function ComprasScreen() {
     );
   };
 
+  // Zerado que já tem o mesmo produto em outro cadastro (outro
+  // laboratório) com estoque pro giro não é falta de verdade — vai pra um
+  // grupo à parte em vez de sumir, pro comprador conferir.
+  const zeradosAComprar = estoqueZeradoGiroAlto.filter((i) => !i.cobertura?.coberto);
+  const zeradosCobertos = estoqueZeradoGiroAlto.filter((i) => i.cobertura?.coberto);
+  const faltasComIrmao = faltas.filter((f) => !f.temSaldoEstoque && f.irmaosEmEstoque.length > 0).length;
+
+  const renderItemZerado = (item: ItemEstoqueZeradoGiroAlto) => {
+    const selecionado = selecionados.includes(item.codigoProduto);
+    return (
+      <Pressable
+        key={item.codigoProduto}
+        style={styles.linhaClassificado}
+        onPress={() => alternarSelecao(item.codigoProduto)}
+        hitSlop={4}
+      >
+        <Ionicons
+          name={selecionado ? 'checkbox' : 'square-outline'}
+          size={22}
+          color={selecionado ? colors.navy : colors.textMuted}
+        />
+        <View style={styles.flex1}>
+          <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
+          <Text style={styles.itemSubinfo}>
+            cód. {item.codigoProduto} · {item.quantidadeVendida30d} vendidos em 30d
+          </Text>
+          {item.cobertura && (
+            <Text style={item.cobertura.coberto ? styles.itemCoberto : styles.itemCobertoParcial}>
+              {item.cobertura.coberto ? 'Coberto por outro cadastro: ' : 'Outro cadastro em estoque, mas pouco: '}
+              {textoCobertura(item.cobertura)}
+            </Text>
+          )}
+        </View>
+      </Pressable>
+    );
+  };
+
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container}>
@@ -251,12 +290,17 @@ export function ComprasScreen() {
         <Pressable style={styles.itemHeaderRow} onPress={() => setMostrarEstoqueZeradoGiroAlto((v) => !v)}>
           <Ionicons name="flame" size={18} color={colors.red} />
           <Text style={[styles.cardTitulo, styles.cardTituloDestaque, styles.flex1]}>
-            Estoque zerado — giro alto ({carregandoEstoqueZeradoGiroAlto ? '...' : estoqueZeradoGiroAlto.length})
+            Estoque zerado — giro alto (
+            {carregandoEstoqueZeradoGiroAlto
+              ? '...'
+              : `${zeradosAComprar.length}${zeradosCobertos.length > 0 ? ` · ${zeradosCobertos.length} cobertos` : ''}`}
+            )
           </Text>
           <Ionicons name={mostrarEstoqueZeradoGiroAlto ? 'chevron-up' : 'chevron-down'} size={18} color={colors.red} />
         </Pressable>
         <Text style={styles.itemSubinfo}>
           Mesma lista que sai no WhatsApp da farmácia todo dia às 08h: produtos entre os que mais vendem, zerados agora.
+          Os que já têm o mesmo produto em outro cadastro, com estoque pro giro, ficam num grupo à parte.
         </Text>
         {mostrarEstoqueZeradoGiroAlto && (
           carregandoEstoqueZeradoGiroAlto ? (
@@ -268,29 +312,29 @@ export function ComprasScreen() {
               <Text style={[styles.resumoLinha, styles.espacadoCima]}>
                 Toque pra selecionar e classificar quem não vai ser reposto.
               </Text>
-              {estoqueZeradoGiroAlto.map((item) => {
-                const selecionado = selecionados.includes(item.codigoProduto);
-                return (
+              {zeradosAComprar.length === 0 ? (
+                <Text style={styles.empty}>Todos os zerados já têm cobertura em outro cadastro.</Text>
+              ) : (
+                zeradosAComprar.map(renderItemZerado)
+              )}
+              {zeradosCobertos.length > 0 && (
+                <>
                   <Pressable
-                    key={item.codigoProduto}
-                    style={styles.linhaClassificado}
-                    onPress={() => alternarSelecao(item.codigoProduto)}
-                    hitSlop={4}
+                    style={[styles.itemHeaderRow, styles.espacadoCima]}
+                    onPress={() => setMostrarCobertos((v) => !v)}
                   >
+                    <Text style={[styles.cardTitulo, styles.flex1]}>
+                      Cobertos por outro cadastro ({zeradosCobertos.length})
+                    </Text>
                     <Ionicons
-                      name={selecionado ? 'checkbox' : 'square-outline'}
-                      size={22}
-                      color={selecionado ? colors.navy : colors.textMuted}
+                      name={mostrarCobertos ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={colors.textSecondary}
                     />
-                    <View style={styles.flex1}>
-                      <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
-                      <Text style={styles.itemSubinfo}>
-                        cód. {item.codigoProduto} · {item.quantidadeVendida30d} vendidos em 30d
-                      </Text>
-                    </View>
                   </Pressable>
-                );
-              })}
+                  {mostrarCobertos && zeradosCobertos.map(renderItemZerado)}
+                </>
+              )}
             </>
           )
         )}
@@ -335,6 +379,9 @@ export function ComprasScreen() {
               {faltas.length} produto(s) reportado(s) em falta
               {faltas.some((f) => f.temSaldoEstoque)
                 ? ` · ${faltas.filter((f) => f.temSaldoEstoque).length} são ruptura de gôndola (não entra na compra)`
+                : ''}
+              {faltasComIrmao > 0
+                ? ` · ${faltasComIrmao} já têm o produto em estoque sob outro cadastro (coluna no relatório)`
                 : ''}
             </Text>
             <Pressable style={styles.botaoSecundario} onPress={gerarRelatorioFaltasEExportar} disabled={gerandoFaltas}>
@@ -610,6 +657,8 @@ const styles = StyleSheet.create({
   itemHeaderTexto: { flex: 1 },
   itemNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   itemSubinfo: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  itemCoberto: { fontSize: 12, color: colors.success, fontWeight: '600', marginTop: 2 },
+  itemCobertoParcial: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   linhaQuantidade: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
   itemLabel: { fontSize: 12, color: colors.textSecondary },
   inputQuantidade: {
