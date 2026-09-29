@@ -15,7 +15,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
-import { statusRecompra, textoConversao } from '../lib/recompra';
+import { proximasCompras, statusRecompra, textoConversao } from '../lib/recompra';
+import { ProximasCompras } from '../components/ProximasCompras';
 import { ClienteInatividade, ContatoCliente, ConversaoUsoContinuo, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PhoneCallButton } from '../components/PhoneCallButton';
@@ -359,6 +360,7 @@ export function ClientesScreen() {
 
               {aberto && (
                 <View style={styles.painel}>
+                  <ProximasCompras recompras={proximasCompras(produtos, item.codigo)} />
                   <Text style={styles.historicoTitulo}>Últimas compras</Text>
                   {carregandoHistorico ? (
                     <ActivityIndicator style={{ marginTop: 8 }} />
