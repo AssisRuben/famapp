@@ -36,6 +36,8 @@
 'use strict';
 
 const { Client } = require('pg');
+// Princípio ativo + chave de equivalência entre marcas (fase 2, 29/09/2026)
+const { chaveEquivalencia, normalizarPrincipioAtivo } = require('./chaveEquivalencia');
 
 const TRIER_TOKEN = process.env.TRIER_TOKEN;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -241,21 +243,13 @@ async function sincronizarClientes(client) {
 // ProdutoIntegracaoDto não tem campo "marca" — nomeLaboratorio é a
 // aproximação mais próxima (fabricante), não é exatamente a mesma
 // coisa. codigoBarras vem como int64 na API; nossa coluna é text.
-// Princípio ativo (29/09/2026, fase 2 de equivalentes): maiúsculo,
-// espaços colapsados, vazio vira null — mesma normalização do
-// sgf-produto-diario.n8n.json, pra chave de agrupamento bater.
-function normalizarPrincipioAtivo(valor) {
-  const texto = valor == null ? '' : String(valor).trim().toUpperCase().replace(/\s+/g, ' ');
-  return texto || null;
-}
-
 async function sincronizarProdutos(client) {
   const linhas = await buscarTudo('/produto/obter-todos-v1');
   // categoria = nomeCategoria (tipo de uso, ex. "Uso Adulto" — não é
   // categoria de produto de verdade); grupo = nomeGrupo (esse sim é
   // útil pra filtro, ex. "Analgésicos", "Fraldas") — campos separados
   // de propósito, achado 01/08/2026 que estavam sendo conflados.
-  const colunas = ['codigo', 'codigo_barras', 'nome', 'categoria', 'grupo', 'marca', 'preco_venda', 'custo_medio', 'estoque_atual', 'tipo_lista', 'principio_ativo'];
+  const colunas = ['codigo', 'codigo_barras', 'nome', 'categoria', 'grupo', 'marca', 'preco_venda', 'custo_medio', 'estoque_atual', 'tipo_lista', 'principio_ativo', 'chave_equivalencia'];
   const total = await upsertLote(client, {
     tabela: 'produto_catalogo',
     colunas,
@@ -271,6 +265,7 @@ async function sincronizarProdutos(client) {
       p.quantidadeEstoque ?? 0,
       p.tipoLista ?? null,
       normalizarPrincipioAtivo(p.nomePrincipioAtivo),
+      chaveEquivalencia(p.nome, p.nomePrincipioAtivo),
     ]),
     conflito: 'codigo',
     atualizarColunas: colunas.slice(1),
