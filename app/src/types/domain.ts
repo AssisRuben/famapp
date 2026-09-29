@@ -1120,6 +1120,9 @@ export interface IrmaoEmEstoque {
   // true = outra MARCA do mesmo medicamento (fase 2, chave de
   // equivalência); ausente = mesmo nome, outro cadastro (fase 1).
   outraMarca?: boolean;
+  // true = mesmo remédio, dose e forma em CAIXA de outro tamanho (só pra
+  // não controlado — ver outrasCaixasEmEstoque em lib/equivalentes.ts).
+  outraCaixa?: boolean;
 }
 
 // Outra marca da mesma apresentação que sai mais barata (custo médio

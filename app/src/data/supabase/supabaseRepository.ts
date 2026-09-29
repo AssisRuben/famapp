@@ -75,11 +75,13 @@ import { calcularSugestaoCompras, DemandaCompraInfo, DIAS_TENDENCIA, ExtrasCompr
 import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
 import {
   agruparPorChaveEquivalencia,
+  agruparPorChaveSemQuantidade,
   alternativaMaisBarata,
   calcularCobertura,
   equivalentesEmEstoque,
   IrmaosBrutos,
   mesclarCobertura,
+  outrasCaixasEmEstoque,
 } from '../../lib/equivalentes';
 import { codigosEmCampanhaValendo, sugerirCandidatos } from '../../lib/campanhas';
 import { LinhaRpcAfinidade, mapearSugestoesAfinidade, resolverCodigosSeed } from '../../lib/afinidadeKits';
@@ -2373,13 +2375,16 @@ class SupabaseRepository implements DataRepository {
     // apresentação também cobre — montado do catálogo já carregado.
     const irmaos = await this.buscarIrmaos(lista.map((item) => item.codigoProduto));
     const gruposEquivalencia = agruparPorChaveEquivalencia(catalogo);
+    const gruposSemQuantidade = agruparPorChaveSemQuantidade(catalogo);
     const produtoPorCodigo = new Map(catalogo.map((p) => [p.codigo, p]));
     const giroPorProduto = new Map([...vendaPorProduto].map(([codigo, v]) => [codigo, v.quantidadeVendida30d]));
     return lista.map((item) => {
       const produto = produtoPorCodigo.get(item.codigoProduto);
+      // mesmo nome (fase 1) + outra marca (fase 2) + outra caixa do mesmo
+      // remédio não controlado (29/09/2026)
       const brutos = mesclarCobertura(
-        irmaos.get(item.codigoProduto),
-        produto ? equivalentesEmEstoque(produto, gruposEquivalencia) : null
+        mesclarCobertura(irmaos.get(item.codigoProduto), produto ? equivalentesEmEstoque(produto, gruposEquivalencia) : null),
+        produto ? outrasCaixasEmEstoque(produto, gruposSemQuantidade) : null
       );
       return brutos && brutos.irmaos.length > 0 ? { ...item, cobertura: calcularCobertura(brutos, giroPorProduto) } : item;
     });

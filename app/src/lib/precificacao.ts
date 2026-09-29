@@ -92,6 +92,9 @@ export function calcularEstoqueZeradoGiroAlto(
     .filter((p) => p.estoqueAtual === 0)
     .filter((p) => macroGrupoDoProduto(p.grupo) !== 'outros_administrativo')
     .filter((p) => !p.nome.toUpperCase().includes('TAXA'))
+    // recarga de celular é serviço, não tem estoque (29/09/2026) — espelha
+    // o filtro 'RECARGA%' da query do WhatsApp das 08h
+    .filter((p) => !p.nome.toUpperCase().trim().startsWith('RECARGA'))
     .map((p) => ({
       codigoProduto: p.codigo,
       nomeProduto: p.nome,

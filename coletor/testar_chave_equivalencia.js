@@ -48,7 +48,19 @@ ok += 2;
 
 // --- sem chave (sem princípio ativo ou sem dose legível): nunca palpite ---
 semChave(['DES DOVE AER ORIG 150ML', null]);
-semChave(['DORILAX DT 12CP', 'PARACETAMOL+CAFEINA+CITRATO DE ORFENADRINA']); // sem dose no nome
+semChave(['DIPIRONA 1G', 'DIPIRONA']); // sem forma nem quantidade
+
+// --- sem a dose no nome: mesma composição + forma + tamanho (29/09/2026) ---
+const BETRI = 'CETOCONAZOL+SULFATO DE NEOMICINA+DIPROPIONATO DE BETAMETASONA';
+mesmo(['BETRICORT CR DERM 30G', BETRI], ['BETACORTAZOL CR DERM 30G', BETRI]);
+diferente(['BETRICORT CR DERM 30G', BETRI], ['BETACORTAZOL CR DERM 15G', BETRI]); // tamanho
+diferente(['DIPIRONA GTS 20ML', 'DIPIRONA'], ['DIPIRONA 500MG/ML GTS 20ML', 'DIPIRONA']); // um tem dose, o outro não
+const DIPROS = 'DIPROPIONATO DE BETAMETASONA+FOSFATO DISSODICO DE BETAMETASONA';
+mesmo(['DIPROSPAN AMP INJ 1ML', DIPROS], ['DUOFLAM SUS INJ AMP 1ML', DIPROS]); // injetável vence suspensão
+mesmo(['DIPROSPAN AMP INJ 1ML', DIPROS], ['BETAM+FOS BETAM INJ AMP 1ML', DIPROS]);
+const B = 'NITRATO DE TIAMINA+CLORIDRATO DE PIRIDOXINA+CIANOCOBALAMINA';
+diferente(['CITONEURIN TABS 5000 30CP REV', B], ['CITOBE 30CP REV', B]); // "5000" é dose sem unidade
+mesmo(['TERICIN AT CR VAG 10APL 45G', 'CLORIDRATO DE TETRACICLINA'], ['FUNGITRIN CR VAG 10APL 45G', 'CLORIDRATO DE TETRACICLINA']);
 semChave(['NOVALGINA 1G 10CP', '   ']);
 
 // --- a cópia dentro do nó do n8n é idêntica ao módulo ---
