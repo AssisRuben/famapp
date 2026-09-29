@@ -11,6 +11,7 @@ import {
   ClienteInatividade,
   ComissaoMensal,
   ContatoCliente,
+  ConversaoUsoContinuo,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
@@ -152,6 +153,8 @@ export interface DataRepository {
   // usada pelos mesmos filtros na tela "Cliente para resgate", que
   // mostra todo cliente pra qualquer vendedor agir (não só o próprio).
   getProdutosRecorrentesClientes(profile: Profile): Promise<ProdutoRecorrenteCliente[]>;
+  // Contatos de uso contínuo que viraram compra em até 7 dias (últimos 30 dias).
+  getConversaoUsoContinuo(profile: Profile): Promise<ConversaoUsoContinuo>;
   // Contagem agregada (total/inativos) pro tile do Painel — não sofre
   // do limite padrão de 1000 linhas por request que getClientesInatividade
   // tem quando usado só pra contar.

@@ -14,6 +14,7 @@ import {
   ClienteInatividade,
   ComissaoMensal,
   ContatoCliente,
+  ConversaoUsoContinuo,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
@@ -755,6 +756,10 @@ class MockRepository implements DataRepository {
     if (profile.codigoVendedor == null) return delay([]);
     const doVendedor = vendaItensDetalheSeed.filter((v) => v.codigoVendedor === profile.codigoVendedor);
     return delay(agregarProdutosRecorrentes(doVendedor));
+  }
+
+  async getConversaoUsoContinuo(_profile: Profile): Promise<ConversaoUsoContinuo> {
+    return delay({ contatos: 0, convertidos: 0 });
   }
 
   async getProdutosRecorrentesClientes(_profile: Profile): Promise<ProdutoRecorrenteCliente[]> {

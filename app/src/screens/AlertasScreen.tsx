@@ -557,7 +557,8 @@ export function AlertasScreen() {
     () =>
       produtosRecorrentes
         .filter((p) => p.atrasado && !foiContatadoRecentemente(contatos, p.codigoCliente, 'uso_continuo', p.codigoProduto))
-        .sort((a, b) => b.diasDesdeUltimaCompra - a.diasDesdeUltimaCompra),
+        // mais atrasado primeiro (dias_para_previsao mais negativo)
+        .sort((a, b) => (a.diasParaPrevisao ?? 0) - (b.diasParaPrevisao ?? 0)),
     [produtosRecorrentes, contatos]
   );
 
@@ -757,7 +758,7 @@ export function AlertasScreen() {
   }
 
   const cards: AlertaCardInfo[] = [
-    { chave: 'uso_continuo', emoji: '🔁', titulo: 'Uso contínuo atrasado', contagem: usoContinuoAtrasado.length, cor: '#9333ea' },
+    { chave: 'uso_continuo', emoji: '🔁', titulo: 'Hora de recomprar (uso contínuo)', contagem: usoContinuoAtrasado.length, cor: '#9333ea' },
     { chave: 'carteira_clientes', emoji: '👥', titulo: 'Carteira de clientes', contagem: carteiraStats.totalClientes, cor: '#0891b2' },
     { chave: 'meta_risco', emoji: '📉', titulo: 'Meta em risco', contagem: metasEmRisco.length, cor: colors.red },
     { chave: 'receita_pendente', emoji: '💊', titulo: 'Receita pendente há tempo', contagem: receitasPendentesAntigas.length, cor: colors.red },

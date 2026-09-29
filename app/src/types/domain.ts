@@ -233,7 +233,22 @@ export interface ProdutoRecorrenteCliente {
   intervaloMedioDias: number | null;
   diasDesdeUltimaCompra: number;
   recorrente: boolean;
+  // Desde 30/09/2026 (migracao_recompra_prevista.sql) = "hora de
+  // recomprar": da previsão -3 dias até a previsão +15 (antes: só depois
+  // de atrasado 25 dias). intervaloMedioDias agora é a MEDIANA, e o
+  // produto representa o remédio em qualquer marca equivalente.
   atrasado: boolean;
+  // Opcionais: o mock e views antigas não trazem.
+  previsaoProxima?: string | null; // data prevista da próxima compra
+  diasParaPrevisao?: number | null; // < 0 = já passou da data prevista
+  exigeReceita?: boolean; // receita/controlado: só lembrete, sem oferta
+}
+
+// Contatos de uso contínuo que viraram compra do mesmo remédio (qualquer
+// marca equivalente) em até 7 dias — vw_uso_continuo_conversao.
+export interface ConversaoUsoContinuo {
+  contatos: number;
+  convertidos: number;
 }
 
 // Espelha vw_ranking_vendedores_dia

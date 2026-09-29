@@ -16,6 +16,7 @@ import {
   ClienteInatividade,
   ComissaoMensal,
   ContatoCliente,
+  ConversaoUsoContinuo,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
@@ -641,6 +642,9 @@ class SupabaseRepository implements DataRepository {
       diasDesdeUltimaCompra: r.dias_desde_ultima_compra,
       recorrente: r.recorrente,
       atrasado: r.atrasado,
+      previsaoProxima: r.previsao_proxima ?? null,
+      diasParaPrevisao: r.dias_para_previsao ?? null,
+      exigeReceita: !!r.exige_receita,
     }));
   }
 
@@ -668,7 +672,24 @@ class SupabaseRepository implements DataRepository {
       diasDesdeUltimaCompra: r.dias_desde_ultima_compra,
       recorrente: r.recorrente,
       atrasado: r.atrasado,
+      previsaoProxima: r.previsao_proxima ?? null,
+      diasParaPrevisao: r.dias_para_previsao ?? null,
+      exigeReceita: !!r.exige_receita,
     }));
+  }
+
+  // Conversão do uso contínuo nos últimos 30 dias (vendedor: os contatos
+  // dele; gestor: todos). Opcional — se a view ainda não existir, zera.
+  async getConversaoUsoContinuo(profile: Profile): Promise<ConversaoUsoContinuo> {
+    const desde = new Date(Date.now() - 30 * 86400000).toISOString();
+    let query = supabase.from('vw_uso_continuo_conversao').select('converteu').gte('contatado_em', desde);
+    if (profile.role !== 'gestor' && profile.codigoVendedor != null) query = query.eq('codigo_vendedor', profile.codigoVendedor);
+    const { data, error } = await query;
+    if (error) {
+      console.warn('vw_uso_continuo_conversao indisponível.', error);
+      return { contatos: 0, convertidos: 0 };
+    }
+    return { contatos: data?.length ?? 0, convertidos: (data ?? []).filter((r: any) => r.converteu).length };
   }
 
   // vw_produtos_promocao_clientes também roda sem RLS de propósito —

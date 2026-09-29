@@ -16,7 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
-import { ClienteDoVendedor, ContatoCliente, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
+import { statusRecompra, textoConversao } from '../lib/recompra';
+import { ClienteDoVendedor, ContatoCliente, ConversaoUsoContinuo, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PhoneCallButton } from '../components/PhoneCallButton';
 import { LoadingFarmacia } from '../components/LoadingFarmacia';
@@ -45,6 +46,13 @@ export function ClientesVendedorScreen() {
   const [grupoSelecionado, setGrupoSelecionado] = useState<string | null>(null);
   const [menuGrupoAberto, setMenuGrupoAberto] = useState(false);
   const [apenasRecompra, setApenasRecompra] = useState(false);
+  const [conversao, setConversao] = useState<ConversaoUsoContinuo | null>(null);
+
+  // Conversão do uso contínuo — só busca quando o filtro está ligado.
+  useEffect(() => {
+    if (!apenasRecompra || !profile) return;
+    repository.getConversaoUsoContinuo(profile).then(setConversao).catch(() => setConversao(null));
+  }, [apenasRecompra, profile]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandido, setExpandido] = useState<number | null>(null);
@@ -253,6 +261,7 @@ export function ClientesVendedorScreen() {
           <Text style={[styles.chipTexto, apenasRecompra && styles.chipTextoAtivo]}>Uso contínuo</Text>
         </Pressable>
       </View>
+      {apenasRecompra && conversao ? <Text style={styles.conversaoTexto}>{textoConversao(conversao)}</Text> : null}
 
       <Modal visible={menuGrupoAberto} transparent animationType="fade" onRequestClose={() => setMenuGrupoAberto(false)}>
         <Pressable style={styles.menuFundo} onPress={() => setMenuGrupoAberto(false)}>
@@ -324,6 +333,7 @@ export function ClientesVendedorScreen() {
                               {p.nomeProduto}
                             </Text>
                             {' '}· a cada ~{Math.round(p.intervaloMedioDias ?? 0)}d, já são {p.diasDesdeUltimaCompra}d
+                            {statusRecompra(p)}
                           </Text>
                         ))
                     : null}
@@ -456,6 +466,7 @@ const styles = StyleSheet.create({
   nome: { fontSize: 15, fontWeight: '500', color: colors.textPrimary },
   detalhe: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   detalheDestaque: { fontSize: 12, color: colors.textPrimary, fontWeight: '600', marginTop: 4 },
+  conversaoTexto: { fontSize: 12, color: colors.textSecondary, marginTop: 6 },
   usoContinuoLinha: { fontSize: 11, color: colors.textSecondary, marginTop: 3 },
   usoContinuoNome: { fontWeight: '700', color: '#9333ea' },
   usoContinuoNomeAtrasado: { color: colors.red },
