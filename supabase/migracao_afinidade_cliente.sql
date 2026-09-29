@@ -19,6 +19,15 @@
 -- O lado "ele compra" pode ser qualquer coisa, inclusive remédio com
 -- receita (quem compra losartana -> medidor de pressão, por exemplo).
 --
+-- sugestao_regra (30/09/2026): regras da farmácia "quem compra X ->
+-- sugerir Y" (diabetes -> tiras/lancetas, pressão -> aparelho, verme ->
+-- vitaminas), porque remédio crônico quase sempre sai junto de OUTRO
+-- remédio e os dados de venda sozinhos não acham esses complementos.
+-- Regra vem antes dos pares de venda. Também fica fora da sugestão:
+-- seringa/agulha (sai junto no balcão) e outra variação da mesma família
+-- do que ele já compra (2 primeiras palavras do nome: outro sabor, outro
+-- tamanho da mesma fralda).
+--
 -- Idempotente. Rodar depois de migracao_chave_equivalencia.sql.
 -- ============================================================
 
@@ -113,6 +122,54 @@ begin
 end;
 $$;
 
+-- Regras definidas pela farmácia (30/09/2026): "quem compra X -> sugerir
+-- Y", pra onde os dados de venda não bastam (remédio crônico quase sempre
+-- sai junto de OUTRO remédio, e aparelho/tira sai pouco na mesma venda).
+--   padrao_compra:   regex sobre PRINCÍPIO ATIVO + NOME do que o cliente compra
+--   padrao_sugestao: regex sobre o NOME do produto a sugerir
+--   permite_medicamento: a sugestão pode estar em ETICO/GENERICO/SIMILAR
+--     (vitamina cadastrada como medicamento) — escolha explícita da
+--     farmácia; controlado/antimicrobiano/receita retida continuam fora.
+-- Editável no Supabase (Table Editor); "ativo = false" desliga.
+create table if not exists sugestao_regra (
+  id bigserial primary key,
+  nome text not null unique,
+  padrao_compra text not null,
+  padrao_sugestao text not null,
+  permite_medicamento boolean not null default false,
+  ativo boolean not null default true,
+  criado_em timestamptz not null default now()
+);
+
+alter table sugestao_regra enable row level security;
+
+drop policy if exists "sugestao_regra: usuarios autenticados leem" on sugestao_regra;
+create policy "sugestao_regra: usuarios autenticados leem"
+on sugestao_regra for select
+using (exists (select 1 from profiles p where p.id = auth.uid()));
+
+drop policy if exists "sugestao_regra: gestor edita" on sugestao_regra;
+create policy "sugestao_regra: gestor edita"
+on sugestao_regra for all
+using (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'))
+with check (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'));
+
+-- Regras iniciais (nomes conferidos no catálogo da Trier em 30/09/2026).
+-- "TIRA LEITE" (leite materno) e "TESTE GRAV ... TIRA" ficam de fora de
+-- propósito: só "TIRAS"/"LANCETAS"/"KIT ACCU-CHEK".
+insert into sugestao_regra (nome, padrao_compra, padrao_sugestao, permite_medicamento) values
+  ('Diabetes -> tiras e lancetas',
+   'METFORMINA|GLICLAZIDA|GLIBENCLAMIDA|GLIMEPIRIDA|INSULINA|DAPAGLIFLOZINA|EMPAGLIFLOZINA|SITAGLIPTINA|VILDAGLIPTINA|LINAGLIPTINA|PIOGLITAZONA',
+   '^(TIRAS |LANCETAS |AUTO LANCETA |KIT ACCU-CHEK )', false),
+  ('Pressão -> aparelho de pressão',
+   'LOSARTANA|VALSARTANA|OLMESARTANA|CANDESARTANA|TELMISARTANA|IRBESARTANA|ANLODIPINO|NIFEDIPINO|HIDROCLOROTIAZIDA|CLORTALIDONA|INDAPAMIDA|ENALAPRIL|CAPTOPRIL|RAMIPRIL|ATENOLOL|PROPRANOLOL|CARVEDILOL|METOPROLOL|NEBIVOLOL|ESPIRONOLACTONA|FUROSEMIDA',
+   '^(AP PRESSAO |APARELHO DE PRESSAO )', false),
+  ('Verme -> vitaminas',
+   'ALBENDAZOL|MEBENDAZOL|NITAZOXANIDA|IVERMECTINA|TIABENDAZOL|PIRANTEL|LEVAMISOL|PRAZIQUANTEL',
+   '^(DAYVIT|ZIRVIT|CENTRUM|LAVITAN|SUPRAVIT|VITERGAN|COMPLEXO B|APETISINA|APETIKIDS|VITAMINA )', true)
+on conflict (nome) do nothing;
+
+-- Mesma assinatura de antes — o app não muda.
 create or replace function fn_sugestoes_cliente(p_codigo_cliente integer, p_limite integer default 2)
 returns table (
   codigo_produto integer,
@@ -128,6 +185,9 @@ as $$
     select
       fn_grupo_produto(vi.codigo_produto, pc.chave_equivalencia) as grupo,
       pc.nome,
+      upper(coalesce(pc.principio_ativo, '') || ' ' || coalesce(pc.nome, '')) as busca,
+      -- "família" = 2 primeiras palavras do nome: SNICKERS CHOC, FR CONFORT...
+      split_part(upper(coalesce(pc.nome, '')), ' ', 1) || ' ' || split_part(upper(coalesce(pc.nome, '')), ' ', 2) as familia,
       v.data_emissao
     from vendas v
     join venda_itens vi on vi.venda_id = v.id
@@ -136,51 +196,78 @@ as $$
       and v.tipo_cancelamento is null
       and vi.quantidade_produtos > 0
   ),
-  -- tudo que ele já comprou (qualquer época) não é sugestão
+  -- o que ele já comprou (qualquer época) — nem o grupo nem outra variação
+  -- da mesma família viram sugestão (outro sabor de Snickers, outro
+  -- tamanho da mesma fralda)
   ja_comprou as (select distinct grupo from compras_cliente),
-  -- base da sugestão: o que ele comprou no último ano, com o nome mais recente
+  ja_familia as (select distinct familia from compras_cliente),
+  -- base: o que ele comprou no último ano, com o nome mais recente
   base as (
-    select distinct on (grupo) grupo, nome
+    select distinct on (grupo) grupo, nome, busca
     from compras_cliente
     where data_emissao >= current_date - 365
     order by grupo, data_emissao desc
   ),
+  -- produto que PODE ser sugerido (vale pros dois caminhos)
+  oferecivel as (
+    select
+      pc.codigo,
+      pc.nome,
+      pc.estoque_atual,
+      fn_grupo_produto(pc.codigo, pc.chave_equivalencia) as grupo,
+      upper(trim(coalesce(pc.grupo, ''))) ~ '^(ETICO|GENERICO|SIMILAR)' as eh_medicamento
+    from produto_catalogo pc
+    where pc.estoque_atual > 0
+      and nullif(trim(pc.tipo_lista), '') is null
+      and upper(coalesce(pc.grupo, '')) !~ 'CONTROLAD|ANTIMICROB'
+      and upper(pc.nome) !~ '(^|[^A-Z])(MAMAD|MAMADEIRA|CHUPETA|APTAMIL|NAN|NESTOGENO|ENFAMIL|MILNUTRI)([^A-Z]|$)|BICO MAM'
+      -- material de aplicação sai junto do injetável no balcão; não é
+      -- oportunidade de contato depois (30/09/2026)
+      and upper(pc.nome) !~ '(^|[^A-Z])(SERINGA|AGULHA|SCALP|CATETER)'
+      and not fn_produto_fora_de_afinidade(pc.nome, pc.grupo, pc.categoria)
+      and fn_grupo_produto(pc.codigo, pc.chave_equivalencia) not in (select grupo from ja_comprou)
+      and (split_part(upper(pc.nome), ' ', 1) || ' ' || split_part(upper(pc.nome), ' ', 2)) not in (select familia from ja_familia)
+  ),
+  -- 1) regras da farmácia: casa com o que ele compra -> produto de maior
+  --    estoque que casa com a sugestão
+  por_regra as (
+    select distinct on (r.id)
+      o.codigo, o.nome, b.nome as combina_com,
+      null::numeric as lift, null::integer as co_ocorrencias,
+      0 as ordem
+    from sugestao_regra r
+    join base b on b.busca ~ r.padrao_compra
+    join oferecivel o on upper(o.nome) ~ r.padrao_sugestao and (r.permite_medicamento or not o.eh_medicamento)
+    where r.ativo
+    order by r.id, o.estoque_atual desc, o.codigo
+  ),
+  -- 2) dados de venda: produto_afinidade, só não-medicamento
   candidatos as (
     select distinct on (af.grupo_b)
       af.grupo_b, af.lift, af.co_ocorrencias, b.nome as combina_com
     from produto_afinidade af
     join base b on b.grupo = af.grupo_a
-    where af.grupo_b not in (select grupo from ja_comprou)
     order by af.grupo_b, af.lift * af.confianca desc, af.co_ocorrencias desc
   ),
-  -- produto que representa o grupo sugerido: o de mais estoque, e só se
-  -- ele puder ser oferecido
-  representante as (
-    select distinct on (fn_grupo_produto(pc.codigo, pc.chave_equivalencia))
-      fn_grupo_produto(pc.codigo, pc.chave_equivalencia) as grupo,
-      pc.codigo,
-      pc.nome
-    from produto_catalogo pc
-    where pc.estoque_atual > 0
-      -- NENHUM medicamento como sugestão (30/09/2026): tipo_lista só marca
-      -- receita RETIDA — losartana/metformina/hidroclorotiazida (tarja
-      -- vermelha) passavam, e os pares mais fortes da farmácia são
-      -- justamente remédio crônico + remédio crônico. A Trier não diz o que
-      -- é MIP, então sugestão fica em não-medicamento (suplemento, higiene,
-      -- dermo, aparelho de pressão/glicemia...).
-      and upper(trim(coalesce(pc.grupo, ''))) !~ '^(ETICO|GENERICO|SIMILAR)'
-      and nullif(trim(pc.tipo_lista), '') is null
-      and upper(coalesce(pc.grupo, '')) !~ 'CONTROLAD|ANTIMICROB'
-      and upper(pc.nome) !~ '(^|[^A-Z])(MAMAD|MAMADEIRA|CHUPETA|APTAMIL|NAN|NESTOGENO|ENFAMIL|MILNUTRI)([^A-Z]|$)|BICO MAM'
-      and not fn_produto_fora_de_afinidade(pc.nome, pc.grupo, pc.categoria)
-    order by fn_grupo_produto(pc.codigo, pc.chave_equivalencia), pc.estoque_atual desc, pc.codigo
+  por_dados as (
+    select distinct on (o.grupo)
+      o.codigo, o.nome, c.combina_com, c.lift, c.co_ocorrencias,
+      1 as ordem
+    from candidatos c
+    join oferecivel o on o.grupo = c.grupo_b and not o.eh_medicamento
+    order by o.grupo, o.estoque_atual desc, o.codigo
+  ),
+  juntas as (
+    select distinct on (codigo) *
+    from (select * from por_regra union all select * from por_dados) t
+    order by codigo, ordem
   )
-  select r.codigo, r.nome, c.combina_com, c.lift, c.co_ocorrencias
-  from candidatos c
-  join representante r on r.grupo = c.grupo_b
-  order by c.lift desc, c.co_ocorrencias desc
+  select codigo, nome, combina_com, lift, co_ocorrencias
+  from juntas
+  -- regra da farmácia primeiro, depois os pares mais fortes
+  order by ordem, lift desc nulls last, co_ocorrencias desc nulls last
   limit p_limite;
 $$;
 
 comment on function fn_sugestoes_cliente(integer, integer) is
-  'Até N produtos que combinam com o que o cliente compra (produto_afinidade) e ele ainda não compra — só sem receita, fora da NBCAL, com estoque.';
+  'Até N produtos que combinam com o que o cliente compra e ele ainda não compra: regras da farmácia (sugestao_regra) primeiro, depois pares de venda (produto_afinidade, só não-medicamento). Sem controlado/receita retida, fora da NBCAL, sem seringa/agulha, sem outra variação da mesma família, com estoque.';
