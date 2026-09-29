@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { descreverIrmao } from './equivalentes';
+import { explicarQuantidade } from './doseCerta';
 import { SugestaoCompra } from '../types/domain';
 
 const CABECALHO_COMPLETO = [
@@ -21,6 +22,8 @@ const CABECALHO_COMPLETO = [
   'Outra marca mais barata',
   'Custo da outra marca',
   'Economia por unidade',
+  'Curva ABC',
+  'Por que essa quantidade',
 ];
 
 function linhaCompleta(item: SugestaoCompra): (string | number)[] {
@@ -43,6 +46,8 @@ function linhaCompleta(item: SugestaoCompra): (string | number)[] {
     item.alternativaMaisBarata?.nome ?? '',
     item.alternativaMaisBarata?.custoMedio ?? '',
     item.alternativaMaisBarata?.economiaUnitaria ?? '',
+    item.detalhe?.curvaAbc ?? '',
+    item.detalhe ? explicarQuantidade(item.detalhe) : '',
   ];
 }
 

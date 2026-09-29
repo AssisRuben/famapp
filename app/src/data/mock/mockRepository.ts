@@ -38,6 +38,7 @@ import {
   MotivoClassificacaoCompra,
   OfertaComplementarDia,
   ParametrosCompra,
+  PedidoPendenteCompra,
   Pendencia,
   Profile,
   ProdutoCatalogo,
@@ -1324,6 +1325,28 @@ class MockRepository implements DataRepository {
 
     const classificados = new Set((await getClassificacoesCompraStore()).map((c) => c.codigoProduto));
     return delay(sugestoes.filter((s) => !classificados.has(s.codigoProduto)));
+  }
+
+  // Mock guarda só em memória — some ao recarregar, igual a outros
+  // detalhes que o modo demonstração não persiste.
+  private pedidosPendentesCompra = new Map<number, PedidoPendenteCompra>();
+
+  async getPedidosPendentesCompra(): Promise<PedidoPendenteCompra[]> {
+    return delay([...this.pedidosPendentesCompra.values()]);
+  }
+
+  async marcarPedidoPendenteCompra(codigoProduto: number, quantidade: number, previsaoChegada: string): Promise<void> {
+    this.pedidosPendentesCompra.set(codigoProduto, {
+      codigoProduto,
+      nomeProduto: `Produto ${codigoProduto}`,
+      quantidade,
+      previsaoChegada,
+      pedidoEm: new Date().toISOString(),
+    });
+  }
+
+  async removerPedidoPendenteCompra(codigoProduto: number): Promise<void> {
+    this.pedidosPendentesCompra.delete(codigoProduto);
   }
 
   async classificarItensCompra(

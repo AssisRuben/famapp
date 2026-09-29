@@ -33,6 +33,7 @@ import {
   MotivoClassificacaoCompra,
   OfertaComplementarDia,
   ParametrosCompra,
+  PedidoPendenteCompra,
   Pendencia,
   Profile,
   ProdutoCatalogo,
@@ -313,6 +314,11 @@ export interface DataRepository {
   // fator de compra vêm da compra mais recente de cada produto
   // (vw_produto_fornecedor_recente no real), não de cadastro manual.
   gerarSugestaoCompras(profile: Profile, params: ParametrosCompra): Promise<SugestaoCompra[]>;
+  // "Já pedi" (29/09/2026) — pedido ao fornecedor que ainda não chegou;
+  // a fórmula inteligente desconta da sugestão.
+  getPedidosPendentesCompra(): Promise<PedidoPendenteCompra[]>;
+  marcarPedidoPendenteCompra(codigoProduto: number, quantidade: number, previsaoChegada: string): Promise<void>;
+  removerPedidoPendenteCompra(codigoProduto: number): Promise<void>;
   // Classificação em lote (18/08/2026) — "não vou comprar esse produto
   // porque já resolvi de outro jeito". gerarSugestaoCompras já filtra
   // fora quem está classificado; getClassificacoesCompra alimenta a

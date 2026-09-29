@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
-import { formatBRL, todayISO } from '../lib/format';
+import { formatBRL, formatDateBR, todayISO } from '../lib/format';
 import { gerarXlsxSugestaoCompras } from '../lib/comprasXlsx';
 import { gerarXlsxRelatorioFaltas } from '../lib/faltasXlsx';
 import { baixarArquivoBase64NoWeb } from '../lib/downloadWeb';
@@ -26,11 +26,14 @@ import { alertar, confirmar } from '../lib/alert';
 import { ORDEM_MACRO_GRUPOS, MACRO_GRUPO_LABEL, MacroGrupo } from '../lib/macroGrupo';
 import { MOTIVO_CLASSIFICACAO_LABEL, ORDEM_MOTIVOS_CLASSIFICACAO } from '../lib/comprasClassificacao';
 import { textoCobertura } from '../lib/equivalentes';
+import { explicarQuantidade } from '../lib/doseCerta';
 import {
+  FormulaCompra,
   ItemClassificacaoCompra,
   ItemEstoqueZeradoGiroAlto,
   ItemRelatorioFalta,
   MotivoClassificacaoCompra,
+  PedidoPendenteCompra,
   SugestaoCompra,
 } from '../types/domain';
 
@@ -44,6 +47,9 @@ export function ComprasScreen() {
   const [diasSeguranca, setDiasSeguranca] = useState('7');
   const [diasCobertura, setDiasCobertura] = useState('15');
   const [diasBaseVenda, setDiasBaseVenda] = useState('30');
+  const [formula, setFormula] = useState<FormulaCompra>('inteligente');
+  const [pedidosPendentes, setPedidosPendentes] = useState<PedidoPendenteCompra[]>([]);
+  const [mostrarPendentes, setMostrarPendentes] = useState(false);
   const [macroGruposSelecionados, setMacroGruposSelecionados] = useState<MacroGrupo[]>([]);
   const [itens, setItens] = useState<SugestaoCompra[] | null>(null);
   const [expandido, setExpandido] = useState<number | null>(null);
@@ -74,6 +80,14 @@ export function ComprasScreen() {
     }
   }, [profile]);
 
+  const carregarPedidosPendentes = useCallback(async () => {
+    try {
+      setPedidosPendentes(await repository.getPedidosPendentesCompra());
+    } catch {
+      setPedidosPendentes([]);
+    }
+  }, []);
+
   const carregarClassificacoes = useCallback(async () => {
     if (!profile) return;
     setCarregandoClassificacoes(true);
@@ -97,8 +111,9 @@ export function ComprasScreen() {
   useEffect(() => {
     carregarFaltas();
     carregarClassificacoes();
+    carregarPedidosPendentes();
     carregarEstoqueZeradoGiroAlto();
-  }, [carregarFaltas, carregarClassificacoes, carregarEstoqueZeradoGiroAlto]);
+  }, [carregarFaltas, carregarClassificacoes, carregarEstoqueZeradoGiroAlto, carregarPedidosPendentes]);
 
   // Toque pra marcar, toque de novo pra tirar — dá pra marcar mais de
   // um (mesma dinâmica do filtro de vendedor no Checklist).
@@ -115,6 +130,7 @@ export function ComprasScreen() {
         diasCobertura: Math.max(0, Number(diasCobertura.replace(/\D/g, '')) || 0),
         diasBaseVenda: Math.max(1, Number(diasBaseVenda.replace(/\D/g, '')) || 30),
         macroGrupos: macroGruposSelecionados,
+        formula,
       };
       const sugestoes = await repository.gerarSugestaoCompras(profile, params);
       setItens(sugestoes);
@@ -123,6 +139,38 @@ export function ComprasScreen() {
       alertar('Erro ao gerar sugestão', erro instanceof Error ? erro.message : 'Tente novamente.');
     } finally {
       setGerando(false);
+    }
+  };
+
+  // "Já pedi": registra o pedido feito ao fornecedor (fora do app) com a
+  // quantidade sugerida e previsão de 7 dias — a fórmula inteligente
+  // desconta até chegar. Some da lista atual na hora.
+  const marcarJaPedi = (item: SugestaoCompra) => {
+    const previsao = new Date();
+    previsao.setDate(previsao.getDate() + 7);
+    const previsaoIso = previsao.toISOString().slice(0, 10);
+    confirmar(
+      'Já pedi',
+      `Registrar ${item.quantidadeSugerida} un. de "${item.nomeProduto}" como já pedidas? Sai da sugestão até ${formatDateBR(previsaoIso)} (previsão de chegada).`,
+      async () => {
+        try {
+          await repository.marcarPedidoPendenteCompra(item.codigoProduto, item.quantidadeSugerida, previsaoIso);
+          setItens((atual) => atual?.filter((i) => i.codigoProduto !== item.codigoProduto) ?? null);
+          await carregarPedidosPendentes();
+        } catch (erro) {
+          alertar('Erro ao registrar pedido', erro instanceof Error ? erro.message : 'Tente novamente.');
+        }
+      },
+      { textoConfirmar: 'Registrar' }
+    );
+  };
+
+  const desfazerJaPedi = async (codigoProduto: number) => {
+    try {
+      await repository.removerPedidoPendenteCompra(codigoProduto);
+      await carregarPedidosPendentes();
+    } catch (erro) {
+      alertar('Erro ao desfazer', erro instanceof Error ? erro.message : 'Tente novamente.');
     }
   };
 
@@ -432,7 +480,52 @@ export function ComprasScreen() {
       </Card>
 
       <Card>
+        <Pressable style={styles.itemHeaderRow} onPress={() => setMostrarPendentes((v) => !v)}>
+          <Text style={[styles.cardTitulo, styles.flex1]}>Já pedidos, aguardando chegada ({pedidosPendentes.length})</Text>
+          <Ionicons name={mostrarPendentes ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+        </Pressable>
+        {mostrarPendentes &&
+          (pedidosPendentes.length === 0 ? (
+            <Text style={[styles.empty, styles.espacadoCima]}>
+              Nenhum. Na sugestão, abra o item e toque em "Já pedi" pra ele não ser sugerido de novo até chegar.
+            </Text>
+          ) : (
+            pedidosPendentes.map((p) => (
+              <View key={p.codigoProduto} style={styles.linhaClassificado}>
+                <View style={styles.flex1}>
+                  <Text style={styles.itemNome} numberOfLines={1}>{p.nomeProduto}</Text>
+                  <Text style={styles.itemSubinfo}>
+                    {p.quantidade} un. · previsão {formatDateBR(p.previsaoChegada)}
+                  </Text>
+                </View>
+                <Pressable onPress={() => desfazerJaPedi(p.codigoProduto)} hitSlop={8}>
+                  <Text style={styles.linkAcao}>Desfazer</Text>
+                </Pressable>
+              </View>
+            ))
+          ))}
+      </Card>
+
+      <Card>
         <Text style={styles.cardTitulo}>Parâmetros</Text>
+        <Text style={styles.campoLabel}>Fórmula</Text>
+        <View style={styles.grupoGrid}>
+          {(
+            [
+              ['inteligente', 'Inteligente (recomendada)'],
+              ['simples', 'Simples'],
+            ] as [FormulaCompra, string][]
+          ).map(([valor, rotulo]) => (
+            <Pressable key={valor} style={[styles.chip, formula === valor && styles.chipAtivo]} onPress={() => setFormula(valor)}>
+              <Text style={[styles.chipTexto, formula === valor && styles.chipTextoAtivo]}>{rotulo}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={styles.explicacaoParametro}>
+          {formula === 'inteligente'
+            ? 'Parte da mesma conta da simples e ajusta produto a produto: colchão maior pra quem vende de forma irregular (mais ainda na curva A), tendência das últimas 2 semanas, +20% pra produto em campanha aprovada e desconta o que você marcou como "já pedi".'
+            : 'Venda média do período × (segurança + cobertura) − estoque atual, igual pra todo produto.'}
+        </Text>
         <View style={styles.linhaDoisCampos}>
           <View style={styles.campoMetade}>
             <Text style={styles.campoLabel}>Estoque de segurança (dias)</Text>
@@ -561,6 +654,9 @@ export function ComprasScreen() {
                         {textoCobertura(item.cobertura)}
                       </Text>
                     )}
+                    {item.detalhe && explicarQuantidade(item.detalhe) !== '' && (
+                      <Text style={styles.itemPorque}>Por quê: {explicarQuantidade(item.detalhe)}</Text>
+                    )}
                     {item.alternativaMaisBarata && (
                       <Text style={styles.itemAlternativa}>
                         Outra marca mais barata: {item.alternativaMaisBarata.nome} ·{' '}
@@ -615,6 +711,11 @@ export function ComprasScreen() {
                         <Text style={styles.campoSomenteLeitura}>{formatBRL(item.precoVenda)}</Text>
                       </View>
                     </View>
+
+                    <Pressable style={styles.botaoJaPedi} onPress={() => marcarJaPedi(item)}>
+                      <Ionicons name="checkmark-done-outline" size={16} color={colors.navy} />
+                      <Text style={styles.botaoSecundarioTexto}>Já pedi {item.quantidadeSugerida} un.</Text>
+                    </Pressable>
 
                     {item.fornecedorMaisBarato && item.precoMaisBarato !== null && (
                       <>
@@ -675,6 +776,19 @@ const styles = StyleSheet.create({
   itemNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   itemSubinfo: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   itemCoberto: { fontSize: 12, color: colors.success, fontWeight: '600', marginTop: 2 },
+  itemPorque: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  botaoJaPedi: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    marginTop: 10,
+  },
   itemAlternativa: { fontSize: 12, color: colors.navy, fontWeight: '600', marginTop: 2 },
   itemCobertoParcial: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   linhaQuantidade: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },

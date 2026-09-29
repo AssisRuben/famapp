@@ -40,6 +40,7 @@ import {
   MotivoClassificacaoCompra,
   OfertaComplementarDia,
   ParametrosCompra,
+  PedidoPendenteCompra,
   Pendencia,
   Profile,
   ProdutoCatalogo,
@@ -70,7 +71,7 @@ import {
   VendaVendaAdicional,
   VendedorAtivo,
 } from '../../types/domain';
-import { calcularSugestaoCompras } from '../../lib/doseCerta';
+import { calcularSugestaoCompras, DemandaCompraInfo, DIAS_TENDENCIA, ExtrasCompra } from '../../lib/doseCerta';
 import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
 import {
   agruparPorChaveEquivalencia,
@@ -2112,12 +2113,7 @@ class SupabaseRepository implements DataRepository {
       this.buscarPaginado((inicio, fim) =>
         this.queryProdutoCatalogo('*').order('codigo', { ascending: true }).range(inicio, fim)
       ),
-      this.buscarPaginado((inicio, fim) =>
-        supabase
-          .rpc('fn_venda_periodo_produto', { dias: diasBase })
-          .order('codigo_produto', { ascending: true })
-          .range(inicio, fim)
-      ),
+      this.buscarDemandaCompras(diasBase, params.formula === 'inteligente'),
       this.buscarPaginado((inicio, fim) =>
         supabase.from('vw_produto_fornecedor_recente').select('*').order('codigo_produto', { ascending: true }).range(inicio, fim)
       ),
@@ -2137,9 +2133,10 @@ class SupabaseRepository implements DataRepository {
     ]);
 
     const catalogo = catalogoLinhas.map((r: any) => mapearProdutoCatalogo(r));
-    const demandaPorProduto = new Map(
-      vendaLinhas.map((r: any) => [r.codigo_produto, { quantidadeVendidaPeriodo: Number(r.quantidade_vendida) }])
-    );
+    const { demandaPorProduto, inteligenteDisponivel } = vendaLinhas;
+    const formula = params.formula === 'inteligente' && inteligenteDisponivel ? 'inteligente' : 'simples';
+    const extras: ExtrasCompra =
+      formula === 'inteligente' ? await this.buscarExtrasCompra(params.diasSeguranca + params.diasCobertura) : {};
     const fornecedorPorProduto = new Map(
       fornecedorLinhas.map((r: any) => [
         r.codigo_produto,
@@ -2159,7 +2156,8 @@ class SupabaseRepository implements DataRepository {
       demandaPorProduto,
       fornecedorPorProduto,
       fornecedorMaisBaratoPorProduto,
-      params
+      { ...params, formula },
+      extras
     ).filter((s) => !codigosClassificados.has(s.codigoProduto));
 
     // Fase 2 de equivalentes (29/09/2026): em cada item, quanto outro
@@ -2183,6 +2181,124 @@ class SupabaseRepository implements DataRepository {
         alternativaMaisBarata: alternativaMaisBarata(produto, gruposEquivalencia),
       };
     });
+  }
+
+  // Demanda da sugestão de compras. Fórmula inteligente usa
+  // fn_estatistica_venda_produto (tendência, variação, faturamento pra
+  // curva ABC); se a função ainda não existir no banco (migração
+  // migracao_compras_formula_inteligente.sql não rodada), cai pra
+  // fórmula simples em vez de derrubar a tela.
+  private async buscarDemandaCompras(
+    diasBase: number,
+    inteligente: boolean
+  ): Promise<{ demandaPorProduto: Map<number, DemandaCompraInfo>; inteligenteDisponivel: boolean }> {
+    if (inteligente) {
+      try {
+        const linhas = await this.buscarPaginado((inicio, fim) =>
+          supabase
+            .rpc('fn_estatistica_venda_produto', { dias: diasBase, dias_recentes: DIAS_TENDENCIA })
+            .order('codigo_produto', { ascending: true })
+            .range(inicio, fim)
+        );
+        return {
+          inteligenteDisponivel: true,
+          demandaPorProduto: new Map(
+            linhas.map((r: any) => [
+              r.codigo_produto,
+              {
+                quantidadeVendidaPeriodo: Number(r.quantidade_periodo),
+                quantidadeRecente: Number(r.quantidade_recente),
+                somaQuadradosDiaria: Number(r.soma_quadrados_diaria),
+                faturamentoPeriodo: Number(r.faturamento_periodo),
+              },
+            ])
+          ),
+        };
+      } catch (erro) {
+        console.warn('fn_estatistica_venda_produto indisponível — usando a fórmula simples.', erro);
+      }
+    }
+    const linhas = await this.buscarPaginado((inicio, fim) =>
+      supabase.rpc('fn_venda_periodo_produto', { dias: diasBase }).order('codigo_produto', { ascending: true }).range(inicio, fim)
+    );
+    return {
+      inteligenteDisponivel: false,
+      demandaPorProduto: new Map(linhas.map((r: any) => [r.codigo_produto, { quantidadeVendidaPeriodo: Number(r.quantidade_vendida) }])),
+    };
+  }
+
+  // Campanha aprovada valendo em algum dia da janela de compra (hoje até
+  // hoje + segurança + cobertura) e pedidos "já pedi" ainda no prazo.
+  private async buscarExtrasCompra(diasJanela: number): Promise<ExtrasCompra> {
+    const hoje = todayISO();
+    const fimJanela = new Date(`${hoje}T00:00:00`);
+    fimJanela.setDate(fimJanela.getDate() + diasJanela);
+    const fimJanelaIso = fimJanela.toISOString().slice(0, 10);
+
+    const [campanhaResp, pendentes] = await Promise.all([
+      supabase
+        .from('campanha_produtos')
+        .select('codigo_produto, braco, data_inicio, data_fim, campanhas!inner(status, data_inicio, data_fim)')
+        .eq('campanhas.status', 'aprovada')
+        .gte('campanhas.data_fim', hoje),
+      this.getPedidosPendentesCompra(),
+    ]);
+    const codigosEmCampanha = new Set<number>();
+    if (campanhaResp.error) {
+      console.warn('Campanhas indisponíveis pra sugestão de compras — seguindo sem.', campanhaResp.error);
+    } else {
+      for (const r of (campanhaResp.data ?? []) as any[]) {
+        if (r.braco === 'controle') continue;
+        const inicio = r.data_inicio ?? r.campanhas.data_inicio;
+        const fim = r.data_fim ?? r.campanhas.data_fim;
+        if (fim >= hoje && inicio <= fimJanelaIso) codigosEmCampanha.add(r.codigo_produto);
+      }
+    }
+    return {
+      codigosEmCampanha,
+      pendentes: new Map(pendentes.map((p) => [p.codigoProduto, { quantidade: p.quantidade, previsaoChegada: p.previsaoChegada }])),
+    };
+  }
+
+  // "Já pedi" (29/09/2026): vale até previsão de chegada + 2 dias.
+  async getPedidosPendentesCompra(): Promise<PedidoPendenteCompra[]> {
+    const limite = new Date(`${todayISO()}T00:00:00`);
+    limite.setDate(limite.getDate() - 2);
+    const { data, error } = await supabase
+      .from('compras_pedidos_pendentes')
+      .select('codigo_produto, quantidade, pedido_em, previsao_chegada, produto_catalogo(nome)')
+      .gte('previsao_chegada', limite.toISOString().slice(0, 10));
+    if (error) {
+      console.warn('compras_pedidos_pendentes indisponível — seguindo sem "já pedi".', error);
+      return [];
+    }
+    return (data ?? []).map((r: any) => ({
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.produto_catalogo?.nome ?? `Produto ${r.codigo_produto}`,
+      quantidade: Number(r.quantidade),
+      pedidoEm: r.pedido_em,
+      previsaoChegada: r.previsao_chegada,
+    }));
+  }
+
+  async marcarPedidoPendenteCompra(codigoProduto: number, quantidade: number, previsaoChegada: string): Promise<void> {
+    const { data: auth } = await supabase.auth.getUser();
+    const { error } = await supabase.from('compras_pedidos_pendentes').upsert(
+      {
+        codigo_produto: codigoProduto,
+        quantidade,
+        previsao_chegada: previsaoChegada,
+        pedido_em: new Date().toISOString(),
+        criado_por: auth.user?.id ?? null,
+      },
+      { onConflict: 'codigo_produto' }
+    );
+    if (error) throw error;
+  }
+
+  async removerPedidoPendenteCompra(codigoProduto: number): Promise<void> {
+    const { error } = await supabase.from('compras_pedidos_pendentes').delete().eq('codigo_produto', codigoProduto);
+    if (error) throw error;
   }
 
   async classificarItensCompra(

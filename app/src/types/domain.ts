@@ -1053,6 +1053,37 @@ export interface ParametrosCompra {
   // bruto do catálogo — dá pra marcar mais de um (ex.: só genérico, ou
   // genérico + similar). Vazio/undefined = todos os grupos.
   macroGrupos?: string[];
+  // 'simples' = demanda média × (segurança + cobertura) − estoque (a
+  // conta de sempre). 'inteligente' (29/09/2026) = a mesma base + colchão
+  // pela variação da venda (curva ABC), tendência das últimas 2 semanas,
+  // campanha aprovada e "já pedi". Ausente = 'simples'.
+  formula?: FormulaCompra;
+}
+
+export type FormulaCompra = 'simples' | 'inteligente';
+
+// "Já pedi" da aba Compras — quantidade pedida ao fornecedor que ainda
+// não chegou (compras_pedidos_pendentes). Descontada da sugestão até a
+// previsão de chegada + 2 dias.
+export interface PedidoPendenteCompra {
+  codigoProduto: number;
+  nomeProduto: string;
+  quantidade: number;
+  pedidoEm: string;
+  previsaoChegada: string;
+}
+export type CurvaAbc = 'A' | 'B' | 'C';
+
+// "Por que essa quantidade" — só na fórmula inteligente.
+export interface DetalheFormulaCompra {
+  demandaBase: number; // média diária pura do período
+  fatorTendencia: number; // 1 = estável; >1 subindo; <1 caindo
+  fatorCampanha: number; // 1 ou FATOR_CAMPANHA
+  curvaAbc: CurvaAbc | null; // null = não faturou no período
+  desvioDiario: number;
+  estoqueSeguranca: number; // unidades somadas pela variação
+  quantidadePendente: number; // "já pedi" descontado
+  pendenteAte: string | null;
 }
 
 // ============================================================
@@ -1163,4 +1194,5 @@ export interface SugestaoCompra {
   // outro cadastro/marca com estoque ou mais barato.
   cobertura?: CoberturaPorIrmaos;
   alternativaMaisBarata?: AlternativaCompra | null;
+  detalhe?: DetalheFormulaCompra;
 }
