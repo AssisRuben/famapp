@@ -289,11 +289,14 @@ export function ComprasScreen() {
     );
   };
 
-  // Zerado que já tem o mesmo produto em outro cadastro (outro
-  // laboratório) com estoque pro giro não é falta de verdade — vai pra um
-  // grupo à parte em vez de sumir, pro comprador conferir.
-  const zeradosAComprar = estoqueZeradoGiroAlto.filter((i) => !i.cobertura?.coberto);
-  const zeradosCobertos = estoqueZeradoGiroAlto.filter((i) => i.cobertura?.coberto);
+  // Só é "a comprar" o que não tem NENHUMA unidade na farmácia: qualquer
+  // estoque em outro cadastro do mesmo nome ou em outra marca equivalente
+  // já tira da lista (pedido do gestor em 29/09/2026 — antes precisava
+  // cobrir 7 dias de giro). Espelha o WhatsApp das 08h
+  // (coletor/whatsapp_estoque_giro_alto_zerado.n8n.json, nó "Montar mensagem").
+  const temEmOutroCadastro = (i: ItemEstoqueZeradoGiroAlto) => (i.cobertura?.estoqueIrmaos ?? 0) > 0;
+  const zeradosAComprar = estoqueZeradoGiroAlto.filter((i) => !temEmOutroCadastro(i));
+  const zeradosCobertos = estoqueZeradoGiroAlto.filter(temEmOutroCadastro);
   const faltasComIrmao = faltas.filter((f) => !f.temSaldoEstoque && f.irmaosEmEstoque.length > 0).length;
 
   const renderItemZerado = (item: ItemEstoqueZeradoGiroAlto) => {
@@ -348,7 +351,7 @@ export function ComprasScreen() {
         </Pressable>
         <Text style={styles.itemSubinfo}>
           Mesma lista que sai no WhatsApp da farmácia todo dia às 08h: produtos entre os que mais vendem, zerados agora.
-          Os que já têm o mesmo produto em outro cadastro, com estoque pro giro, ficam num grupo à parte.
+          Os que têm o produto em outro cadastro ou outra marca equivalente, com qualquer estoque, ficam num grupo à parte.
         </Text>
         {mostrarEstoqueZeradoGiroAlto && (
           carregandoEstoqueZeradoGiroAlto ? (
@@ -361,7 +364,7 @@ export function ComprasScreen() {
                 Toque pra selecionar e classificar quem não vai ser reposto.
               </Text>
               {zeradosAComprar.length === 0 ? (
-                <Text style={styles.empty}>Todos os zerados já têm cobertura em outro cadastro.</Text>
+                <Text style={styles.empty}>Todos os zerados têm o produto em outro cadastro ou marca equivalente.</Text>
               ) : (
                 zeradosAComprar.map(renderItemZerado)
               )}
@@ -372,7 +375,7 @@ export function ComprasScreen() {
                     onPress={() => setMostrarCobertos((v) => !v)}
                   >
                     <Text style={[styles.cardTitulo, styles.flex1]}>
-                      Cobertos por outro cadastro ({zeradosCobertos.length})
+                      Têm em outro cadastro ou marca ({zeradosCobertos.length})
                     </Text>
                     <Ionicons
                       name={mostrarCobertos ? 'chevron-up' : 'chevron-down'}
