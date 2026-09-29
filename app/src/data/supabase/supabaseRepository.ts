@@ -72,7 +72,14 @@ import {
 } from '../../types/domain';
 import { calcularSugestaoCompras } from '../../lib/doseCerta';
 import { calcularEstoqueZeradoGiroAlto, calcularRelatorioPrecificacao } from '../../lib/precificacao';
-import { calcularCobertura, IrmaosBrutos } from '../../lib/equivalentes';
+import {
+  agruparPorChaveEquivalencia,
+  alternativaMaisBarata,
+  calcularCobertura,
+  equivalentesEmEstoque,
+  IrmaosBrutos,
+  mesclarCobertura,
+} from '../../lib/equivalentes';
 import { codigosEmCampanhaValendo, sugerirCandidatos } from '../../lib/campanhas';
 import { LinhaRpcAfinidade, mapearSugestoesAfinidade, resolverCodigosSeed } from '../../lib/afinidadeKits';
 import { rotuloSemana } from '../../lib/metas';
@@ -112,6 +119,7 @@ function mapearProdutoCatalogo(r: any, mapaPrecoPraticado?: Map<number, number>)
     custoMedio: Number(r.custo_medio),
     estoqueAtual: r.estoque_atual,
     tipoLista: r.tipo_lista ?? null,
+    chaveEquivalencia: r.chave_equivalencia ?? null,
   };
 }
 
@@ -2146,8 +2154,35 @@ class SupabaseRepository implements DataRepository {
     );
     const codigosClassificados = new Set(classificacoesLinhas.map((r: any) => r.codigo_produto));
 
-    const sugestoes = calcularSugestaoCompras(catalogo, demandaPorProduto, fornecedorPorProduto, fornecedorMaisBaratoPorProduto, params);
-    return sugestoes.filter((s) => !codigosClassificados.has(s.codigoProduto));
+    const sugestoes = calcularSugestaoCompras(
+      catalogo,
+      demandaPorProduto,
+      fornecedorPorProduto,
+      fornecedorMaisBaratoPorProduto,
+      params
+    ).filter((s) => !codigosClassificados.has(s.codigoProduto));
+
+    // Fase 2 de equivalentes (29/09/2026): em cada item, quanto outro
+    // cadastro/marca já tem em estoque (pode não precisar comprar) e a
+    // marca mais barata da mesma apresentação. Só INFORMA — não mexe na
+    // quantidade sugerida nem tira item da lista; a decisão é do comprador.
+    const irmaos = await this.buscarIrmaos(sugestoes.map((s) => s.codigoProduto));
+    const gruposEquivalencia = agruparPorChaveEquivalencia(catalogo);
+    const produtoPorCodigo = new Map(catalogo.map((p) => [p.codigo, p]));
+    // calcularCobertura trabalha com giro de 30 dias
+    const giro30dPorProduto = new Map(
+      [...demandaPorProduto].map(([codigo, d]) => [codigo, (d.quantidadeVendidaPeriodo / diasBase) * 30])
+    );
+    return sugestoes.map((s) => {
+      const produto = produtoPorCodigo.get(s.codigoProduto);
+      if (!produto) return s;
+      const brutos = mesclarCobertura(irmaos.get(s.codigoProduto), equivalentesEmEstoque(produto, gruposEquivalencia));
+      return {
+        ...s,
+        cobertura: brutos && brutos.irmaos.length > 0 ? calcularCobertura(brutos, giro30dPorProduto) : undefined,
+        alternativaMaisBarata: alternativaMaisBarata(produto, gruposEquivalencia),
+      };
+    });
   }
 
   async classificarItensCompra(
@@ -2218,11 +2253,18 @@ class SupabaseRepository implements DataRepository {
     // nome) — o código antigo fica zerado mas o produto está no balcão.
     // Marca quem já tem cobertura em outro cadastro, em vez de tratar
     // tudo como falta (achado 28/09/2026).
+    // Fase 2 (29/09/2026): outra MARCA do mesmo medicamento e
+    // apresentação também cobre — montado do catálogo já carregado.
     const irmaos = await this.buscarIrmaos(lista.map((item) => item.codigoProduto));
-    if (irmaos.size === 0) return lista;
+    const gruposEquivalencia = agruparPorChaveEquivalencia(catalogo);
+    const produtoPorCodigo = new Map(catalogo.map((p) => [p.codigo, p]));
     const giroPorProduto = new Map([...vendaPorProduto].map(([codigo, v]) => [codigo, v.quantidadeVendida30d]));
     return lista.map((item) => {
-      const brutos = irmaos.get(item.codigoProduto);
+      const produto = produtoPorCodigo.get(item.codigoProduto);
+      const brutos = mesclarCobertura(
+        irmaos.get(item.codigoProduto),
+        produto ? equivalentesEmEstoque(produto, gruposEquivalencia) : null
+      );
       return brutos && brutos.irmaos.length > 0 ? { ...item, cobertura: calcularCobertura(brutos, giroPorProduto) } : item;
     });
   }
@@ -2267,11 +2309,56 @@ class SupabaseRepository implements DataRepository {
     return mapa;
   }
 
+  // Outra MARCA do mesmo medicamento e apresentação (fase 2, 29/09/2026)
+  // — ver vw_produto_equivalentes. Mesmo contrato de buscarIrmaos:
+  // opcional, falhou = segue sem. Troca restrita (faixa terapêutica
+  // estreita) não conta como cobertura.
+  private async buscarEquivalentes(codigos: number[]): Promise<Map<number, IrmaosBrutos>> {
+    const mapa = new Map<number, IrmaosBrutos>();
+    const unicos = [...new Set(codigos)];
+    if (unicos.length === 0) return mapa;
+
+    const TAMANHO_BLOCO = 150;
+    const blocos: number[][] = [];
+    for (let i = 0; i < unicos.length; i += TAMANHO_BLOCO) blocos.push(unicos.slice(i, i + TAMANHO_BLOCO));
+
+    try {
+      const respostas = await Promise.all(
+        blocos.map((bloco) =>
+          supabase
+            .from('vw_produto_equivalentes')
+            .select('codigo, codigos_grupo, cadastros_com_estoque, troca_restrita')
+            .in('codigo', bloco)
+        )
+      );
+      for (const { data, error } of respostas) {
+        if (error) throw error;
+        for (const r of data ?? []) {
+          if (r.troca_restrita) continue;
+          const irmaos = ((r.cadastros_com_estoque ?? []) as IrmaoEmEstoque[])
+            .filter((c) => c.codigo !== r.codigo)
+            .map((c) => ({ codigo: c.codigo, nome: c.nome, estoque: Number(c.estoque), outraMarca: true }));
+          if (irmaos.length === 0) continue;
+          mapa.set(r.codigo, {
+            estoqueIrmaos: irmaos.reduce((soma, i) => soma + i.estoque, 0),
+            codigosGrupo: (r.codigos_grupo ?? []) as number[],
+            irmaos,
+          });
+        }
+      }
+    } catch (erro) {
+      console.warn('vw_produto_equivalentes indisponível — seguindo sem outras marcas.', erro);
+      return new Map();
+    }
+    return mapa;
+  }
+
   async getIrmaosEmEstoque(codigos: number[]): Promise<Record<number, IrmaoEmEstoque[]>> {
-    const mapa = await this.buscarIrmaos(codigos);
+    const [irmaos, equivalentes] = await Promise.all([this.buscarIrmaos(codigos), this.buscarEquivalentes(codigos)]);
     const resultado: Record<number, IrmaoEmEstoque[]> = {};
-    for (const [codigo, brutos] of mapa) {
-      if (brutos.irmaos.length > 0) resultado[codigo] = brutos.irmaos;
+    for (const codigo of new Set([...irmaos.keys(), ...equivalentes.keys()])) {
+      const brutos = mesclarCobertura(irmaos.get(codigo), equivalentes.get(codigo));
+      if (brutos && brutos.irmaos.length > 0) resultado[codigo] = brutos.irmaos;
     }
     return resultado;
   }

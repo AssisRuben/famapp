@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { descreverIrmao } from './equivalentes';
 import { ItemRelatorioFalta } from '../types/domain';
 import { formatDateBR } from './format';
 
@@ -24,7 +25,7 @@ function linha(item: ItemRelatorioFalta): (string | number)[] {
     item.nomeRegistradoPor ?? '',
     // O mesmo produto sob outro código (outro laboratório) com estoque —
     // confira antes de comprar de novo.
-    item.irmaosEmEstoque.map((i) => `${i.nome} (${i.estoque} un.)`).join('; '),
+    item.irmaosEmEstoque.map(descreverIrmao).join('; '),
   ];
 }
 

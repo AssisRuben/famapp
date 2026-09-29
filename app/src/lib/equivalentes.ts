@@ -1,4 +1,4 @@
-import { CoberturaPorIrmaos, IrmaoEmEstoque } from '../types/domain';
+import { AlternativaCompra, CoberturaPorIrmaos, IrmaoEmEstoque, ProdutoCatalogo } from '../types/domain';
 
 // Quantos dias de giro o estoque dos OUTROS cadastros do mesmo produto
 // precisa aguentar pra o item zerado deixar de ser tratado como falta.
@@ -33,11 +33,112 @@ export function calcularCobertura(
   };
 }
 
+// "NOME (N un.)", com "[outra marca]" quando é equivalente de fase 2 —
+// um formato só pra tela de faltas, relatório e planilhas.
+export function descreverIrmao(irmao: IrmaoEmEstoque): string {
+  return `${irmao.nome}${irmao.outraMarca ? ' [outra marca]' : ''} (${irmao.estoque} un.)`;
+}
+
 export function textoCobertura(cobertura: CoberturaPorIrmaos): string {
   const principal = cobertura.irmaos[0];
   if (!principal) return '';
   const resto = cobertura.irmaos.length - 1;
-  const nome = `${principal.nome} (${principal.estoque} un.)${resto > 0 ? ` +${resto}` : ''}`;
+  const nome = `${principal.nome}${principal.outraMarca ? ' [outra marca]' : ''} (${principal.estoque} un.)${resto > 0 ? ` +${resto}` : ''}`;
   const dias = cobertura.coberturaDias != null ? ` · dá ~${Math.floor(cobertura.coberturaDias)} dias de giro` : '';
   return `${nome}${dias}`;
+}
+
+// ============================================================
+// Fase 2 (29/09/2026): OUTRA MARCA do mesmo medicamento e apresentação
+// (mesma produto_catalogo.chave_equivalencia — calculada no coletor,
+// ver coletor/chaveEquivalencia.js). Complementa os irmãos de nome
+// idêntico acima: os dois contam como cobertura e somam no mesmo
+// IrmaosBrutos.
+// ============================================================
+
+// Faixa terapêutica estreita: trocar de marca/laboratório exige
+// acompanhamento médico — outra marca NÃO conta como cobertura nem entra
+// na alternativa de compra. Espelha troca_restrita de
+// vw_produto_equivalentes (supabase/migracao_chave_equivalencia.sql) —
+// mudar aqui exige mudar lá.
+const TROCA_RESTRITA =
+  /LEVOTIROXINA|VARFARINA|FENITOINA|CARBAMAZEPINA|CARBONATO DE LITIO|DIGOXINA|CICLOSPORINA|TACROLIMO|VALPRO|DIVALPROEX|LAMOTRIGINA|TEOFILINA|FENOBARBITAL/;
+
+export function ehTrocaRestrita(chave: string | null | undefined): boolean {
+  return !!chave && TROCA_RESTRITA.test(chave.split('|')[0]);
+}
+
+export function agruparPorChaveEquivalencia(catalogo: ProdutoCatalogo[]): Map<string, ProdutoCatalogo[]> {
+  const grupos = new Map<string, ProdutoCatalogo[]>();
+  for (const produto of catalogo) {
+    if (!produto.chaveEquivalencia) continue;
+    const lista = grupos.get(produto.chaveEquivalencia);
+    if (lista) lista.push(produto);
+    else grupos.set(produto.chaveEquivalencia, [produto]);
+  }
+  return grupos;
+}
+
+function outrasMarcas(produto: ProdutoCatalogo, grupos: Map<string, ProdutoCatalogo[]>): ProdutoCatalogo[] {
+  if (!produto.chaveEquivalencia || ehTrocaRestrita(produto.chaveEquivalencia)) return [];
+  return (grupos.get(produto.chaveEquivalencia) ?? []).filter((p) => p.codigo !== produto.codigo);
+}
+
+// Outras marcas COM estoque, no mesmo formato dos irmãos de nome
+// (null quando não há nenhuma) — pra somar com mesclarCobertura.
+export function equivalentesEmEstoque(
+  produto: ProdutoCatalogo,
+  grupos: Map<string, ProdutoCatalogo[]>
+): IrmaosBrutos | null {
+  const outras = outrasMarcas(produto, grupos);
+  const comEstoque = outras.filter((p) => p.estoqueAtual > 0).sort((a, b) => b.estoqueAtual - a.estoqueAtual);
+  if (comEstoque.length === 0) return null;
+  return {
+    estoqueIrmaos: comEstoque.reduce((soma, p) => soma + p.estoqueAtual, 0),
+    codigosGrupo: [produto.codigo, ...outras.map((p) => p.codigo)],
+    irmaos: comEstoque.map((p) => ({ codigo: p.codigo, nome: p.nome, estoque: p.estoqueAtual, outraMarca: true })),
+  };
+}
+
+// Junta irmãos de nome (fase 1) e outras marcas (fase 2) sem contar o
+// mesmo cadastro duas vezes (um irmão de nome idêntico também tem a
+// mesma chave de equivalência).
+export function mesclarCobertura(a: IrmaosBrutos | null | undefined, b: IrmaosBrutos | null | undefined): IrmaosBrutos | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const porCodigo = new Map<number, IrmaoEmEstoque>();
+  for (const irmao of [...a.irmaos, ...b.irmaos]) if (!porCodigo.has(irmao.codigo)) porCodigo.set(irmao.codigo, irmao);
+  const irmaos = [...porCodigo.values()].sort((x, y) => y.estoque - x.estoque);
+  return {
+    estoqueIrmaos: irmaos.reduce((soma, i) => soma + i.estoque, 0),
+    codigosGrupo: [...new Set([...a.codigosGrupo, ...b.codigosGrupo])],
+    irmaos,
+  };
+}
+
+// Só vale mostrar como alternativa se sai pelo menos isso mais barato
+// por unidade — diferença de centavos não compensa trocar de fornecedor.
+const ECONOMIA_MINIMA_PCT = 5;
+
+// Outra marca da mesma apresentação com custo médio menor (a mais
+// barata), pra sugerir na compra. Custo médio é o que a farmácia pagou
+// de fato — não é cotação atual (a API da Trier não expõe cotação).
+export function alternativaMaisBarata(
+  produto: ProdutoCatalogo,
+  grupos: Map<string, ProdutoCatalogo[]>
+): AlternativaCompra | null {
+  if (!(produto.custoMedio > 0)) return null;
+  const candidata = outrasMarcas(produto, grupos)
+    .filter((p) => p.custoMedio > 0)
+    .sort((a, b) => a.custoMedio - b.custoMedio)[0];
+  if (!candidata) return null;
+  const economiaUnitaria = produto.custoMedio - candidata.custoMedio;
+  if ((economiaUnitaria / produto.custoMedio) * 100 < ECONOMIA_MINIMA_PCT) return null;
+  return {
+    codigo: candidata.codigo,
+    nome: candidata.nome,
+    grupo: candidata.grupo ?? '',
+    custoMedio: candidata.custoMedio,
+    economiaUnitaria: Math.round(economiaUnitaria * 100) / 100,
+  };
 }

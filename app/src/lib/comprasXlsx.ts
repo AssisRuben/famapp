@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { descreverIrmao } from './equivalentes';
 import { SugestaoCompra } from '../types/domain';
 
 const CABECALHO_COMPLETO = [
@@ -16,6 +17,10 @@ const CABECALHO_COMPLETO = [
   'Fornecedor mais barato (12 meses)',
   'Preço mais barato (12 meses)',
   'Quantidade a comprar',
+  'Outro cadastro/marca em estoque',
+  'Outra marca mais barata',
+  'Custo da outra marca',
+  'Economia por unidade',
 ];
 
 function linhaCompleta(item: SugestaoCompra): (string | number)[] {
@@ -34,6 +39,10 @@ function linhaCompleta(item: SugestaoCompra): (string | number)[] {
     item.fornecedorMaisBarato ?? '',
     item.precoMaisBarato ?? '',
     item.quantidadeSugerida,
+    item.cobertura ? item.cobertura.irmaos.map(descreverIrmao).join('; ') : '',
+    item.alternativaMaisBarata?.nome ?? '',
+    item.alternativaMaisBarata?.custoMedio ?? '',
+    item.alternativaMaisBarata?.economiaUnitaria ?? '',
   ];
 }
 

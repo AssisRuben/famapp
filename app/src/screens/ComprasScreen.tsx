@@ -555,6 +555,23 @@ export function ComprasScreen() {
                       Estoque {item.estoqueAtual} · demanda {item.demandaMediaDiaria.toFixed(2)}/dia
                       {item.fornecedorSugerido ? ` · ${item.fornecedorSugerido}` : ''}
                     </Text>
+                    {item.cobertura && (
+                      <Text style={item.cobertura.coberto ? styles.itemCoberto : styles.itemCobertoParcial}>
+                        {item.cobertura.coberto ? 'Já coberto por outro cadastro: ' : 'Outro cadastro em estoque, mas pouco: '}
+                        {textoCobertura(item.cobertura)}
+                      </Text>
+                    )}
+                    {item.alternativaMaisBarata && (
+                      <Text style={styles.itemAlternativa}>
+                        Outra marca mais barata: {item.alternativaMaisBarata.nome} ·{' '}
+                        {formatBRL(item.alternativaMaisBarata.custoMedio)} (
+                        {formatBRL(item.alternativaMaisBarata.economiaUnitaria)} a menos por un.
+                        {item.quantidadeSugerida > 0
+                          ? `, ${formatBRL(item.alternativaMaisBarata.economiaUnitaria * item.quantidadeSugerida)} nesta compra`
+                          : ''}
+                        )
+                      </Text>
+                    )}
                   </View>
                 </Pressable>
 
@@ -658,6 +675,7 @@ const styles = StyleSheet.create({
   itemNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   itemSubinfo: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   itemCoberto: { fontSize: 12, color: colors.success, fontWeight: '600', marginTop: 2 },
+  itemAlternativa: { fontSize: 12, color: colors.navy, fontWeight: '600', marginTop: 2 },
   itemCobertoParcial: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   linhaQuantidade: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
   itemLabel: { fontSize: 12, color: colors.textSecondary },

@@ -540,6 +540,10 @@ export interface ProdutoCatalogo {
   // Usado pra aproximar "MIPS" no modelo de campanha (18/08/2026):
   // medicamento (éticos/genéricos/similares) que NÃO exige receita.
   tipoLista?: string | null;
+  // principio_ativo|concentração|forma|modificadores|quantidade (29/09/2026,
+  // coletor/chaveEquivalencia.js) — mesma chave = outra marca do mesmo
+  // medicamento e apresentação. null = sem equivalente confiável.
+  chaveEquivalencia?: string | null;
 }
 
 export interface ProdutoElegibilidade {
@@ -1082,6 +1086,19 @@ export interface IrmaoEmEstoque {
   codigo: number;
   nome: string;
   estoque: number;
+  // true = outra MARCA do mesmo medicamento (fase 2, chave de
+  // equivalência); ausente = mesmo nome, outro cadastro (fase 1).
+  outraMarca?: boolean;
+}
+
+// Outra marca da mesma apresentação que sai mais barata (custo médio
+// pago), sugerida na compra — ver alternativaMaisBarata em lib/equivalentes.ts.
+export interface AlternativaCompra {
+  codigo: number;
+  nome: string;
+  grupo: string;
+  custoMedio: number;
+  economiaUnitaria: number;
 }
 
 // Quanto os outros cadastros do mesmo produto cobrem a demanda do item
@@ -1142,4 +1159,8 @@ export interface SugestaoCompra {
   fornecedorMaisBarato: string | null;
   precoMaisBarato: number | null;
   quantidadeSugerida: number;
+  // Fase 2 de equivalentes (29/09/2026) — opcionais: só vêm quando há
+  // outro cadastro/marca com estoque ou mais barato.
+  cobertura?: CoberturaPorIrmaos;
+  alternativaMaisBarata?: AlternativaCompra | null;
 }

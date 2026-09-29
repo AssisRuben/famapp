@@ -18,6 +18,7 @@ import { colors } from '../theme/colors';
 import { formatDateBR, todayISO } from '../lib/format';
 import { alertar, confirmar } from '../lib/alert';
 import { IrmaoEmEstoque, ProdutoBusca, ProdutoEmFalta } from '../types/domain';
+import { descreverIrmao } from '../lib/equivalentes';
 
 export function ProdutoEmFaltaScreen() {
   const { profile } = useAuth();
@@ -239,7 +240,7 @@ export function ProdutoEmFaltaScreen() {
             {item.codigoProduto != null && (irmaos[item.codigoProduto] ?? []).length > 0 && (
               <Text style={styles.itemIrmao}>
                 Já tem em outro cadastro:{' '}
-                {irmaos[item.codigoProduto].map((i) => `${i.nome} (${i.estoque} un.)`).join('; ')}
+                {irmaos[item.codigoProduto].map(descreverIrmao).join('; ')}
               </Text>
             )}
           </Card>
