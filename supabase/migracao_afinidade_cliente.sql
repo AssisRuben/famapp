@@ -11,7 +11,8 @@
 --
 -- fn_sugestoes_cliente(cliente): até N produtos que COMBINAM com o que o
 -- cliente compra e que ele AINDA NÃO compra. O lado sugerido só pode ser:
---   - sem receita (sem tipo_lista, fora de controlado/antimicrobiano);
+--   - NÃO-medicamento (fora de ETICO/GENERICO/SIMILAR — ver comentário
+--     em "representante": tipo_lista não pega tarja vermelha comum);
 --   - fora da NBCAL (fórmula infantil, mamadeira, bico, chupeta);
 --   - produto de verdade (sem taxa/entrega/sacola/recarga/serviço/admin);
 --   - com estoque (não adianta sugerir o que não tem).
@@ -161,6 +162,13 @@ as $$
       pc.nome
     from produto_catalogo pc
     where pc.estoque_atual > 0
+      -- NENHUM medicamento como sugestão (30/09/2026): tipo_lista só marca
+      -- receita RETIDA — losartana/metformina/hidroclorotiazida (tarja
+      -- vermelha) passavam, e os pares mais fortes da farmácia são
+      -- justamente remédio crônico + remédio crônico. A Trier não diz o que
+      -- é MIP, então sugestão fica em não-medicamento (suplemento, higiene,
+      -- dermo, aparelho de pressão/glicemia...).
+      and upper(trim(coalesce(pc.grupo, ''))) !~ '^(ETICO|GENERICO|SIMILAR)'
       and nullif(trim(pc.tipo_lista), '') is null
       and upper(coalesce(pc.grupo, '')) !~ 'CONTROLAD|ANTIMICROB'
       and upper(pc.nome) !~ '(^|[^A-Z])(MAMAD|MAMADEIRA|CHUPETA|APTAMIL|NAN|NESTOGENO|ENFAMIL|MILNUTRI)([^A-Z]|$)|BICO MAM'
