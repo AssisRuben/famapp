@@ -2,19 +2,21 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme/colors';
 import { quandoPrevisto } from '../lib/recompra';
-import { ProdutoRecorrenteCliente } from '../types/domain';
+import { ProdutoRecorrenteCliente, SugestaoCliente } from '../types/domain';
 
 interface Props {
   // já filtrado/ordenado por proximasCompras (lib/recompra.ts)
   recompras: ProdutoRecorrenteCliente[];
+  // Fase B: o que combina com o que ele compra (fn_sugestoes_cliente)
+  sugestoes?: SugestaoCliente[];
 }
 
 // Seção "Próximas compras prováveis" no painel aberto do cliente (Meus
 // clientes / Clientes), acima de "Últimas compras" — o vendedor vê o que
 // oferecer antes de ligar (30/09/2026). Não mostra nada se o cliente não
 // tem uso contínuo com previsão.
-export function ProximasCompras({ recompras }: Props) {
-  if (recompras.length === 0) return null;
+export function ProximasCompras({ recompras, sugestoes = [] }: Props) {
+  if (recompras.length === 0 && sugestoes.length === 0) return null;
   return (
     <View style={styles.bloco}>
       <Text style={styles.titulo}>Próximas compras prováveis</Text>
@@ -32,6 +34,14 @@ export function ProximasCompras({ recompras }: Props) {
           </View>
         );
       })}
+      {sugestoes.map((s) => (
+        <View key={`s${s.codigoProduto}`} style={styles.linha}>
+          <Text style={styles.produto} numberOfLines={2}>
+            💡 {s.nomeProduto}
+            <Text style={styles.motivo}> · combina com {s.combinaCom}</Text>
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -43,4 +53,5 @@ const styles = StyleSheet.create({
   produto: { fontSize: 12, color: colors.textPrimary, flex: 1 },
   quando: { fontSize: 12, color: colors.textSecondary },
   quandoAgora: { color: colors.red, fontWeight: '600' },
+  motivo: { fontSize: 11, color: colors.textSecondary },
 });

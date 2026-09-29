@@ -17,6 +17,7 @@ import {
   ComissaoMensal,
   ContatoCliente,
   ConversaoUsoContinuo,
+  SugestaoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
@@ -675,6 +676,22 @@ class SupabaseRepository implements DataRepository {
       previsaoProxima: r.previsao_proxima ?? null,
       diasParaPrevisao: r.dias_para_previsao ?? null,
       exigeReceita: !!r.exige_receita,
+    }));
+  }
+
+  // Fase B — opcional: sem a migração (ou sem afinidade calculada ainda),
+  // devolve vazio e o painel do cliente segue só com a recompra.
+  async getSugestoesCliente(codigoCliente: number): Promise<SugestaoCliente[]> {
+    const { data, error } = await supabase.rpc('fn_sugestoes_cliente', { p_codigo_cliente: codigoCliente, p_limite: 2 });
+    if (error) {
+      console.warn('fn_sugestoes_cliente indisponível.', error);
+      return [];
+    }
+    return (data ?? []).map((r: any) => ({
+      codigoProduto: r.codigo_produto,
+      nomeProduto: r.nome_produto,
+      combinaCom: r.combina_com ?? '',
+      lift: Number(r.lift),
     }));
   }
 

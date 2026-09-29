@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { proximasCompras, statusRecompra, textoConversao } from '../lib/recompra';
 import { ProximasCompras } from '../components/ProximasCompras';
-import { ClienteInatividade, ContatoCliente, ConversaoUsoContinuo, HistoricoCompraCliente, ProdutoRecorrenteCliente } from '../types/domain';
+import { ClienteInatividade, ContatoCliente, ConversaoUsoContinuo, HistoricoCompraCliente, ProdutoRecorrenteCliente, SugestaoCliente } from '../types/domain';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { PhoneCallButton } from '../components/PhoneCallButton';
 import { LoadingFarmacia } from '../components/LoadingFarmacia';
@@ -68,6 +68,9 @@ export function ClientesScreen() {
   const [expandido, setExpandido] = useState<number | null>(null);
   const [historico, setHistorico] = useState<HistoricoCompraCliente[]>([]);
   const [carregandoHistorico, setCarregandoHistorico] = useState(false);
+  const [sugestoes, setSugestoes] = useState<SugestaoCliente[]>([]);
+  // cliente aberto agora — resposta de sugestão de outro cliente (toque rápido) é descartada
+  const clienteAbertoRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -137,11 +140,21 @@ export function ClientesScreen() {
   const alternarExpandido = async (codigo: number) => {
     if (expandido === codigo) {
       setExpandido(null);
+      clienteAbertoRef.current = null;
       return;
     }
     setExpandido(codigo);
     setHistorico([]);
+    setSugestoes([]);
+    clienteAbertoRef.current = codigo;
     if (!profile) return;
+    // Fase B: carrega em paralelo, sem segurar o histórico
+    repository
+      .getSugestoesCliente(codigo)
+      .then((lista) => {
+        if (clienteAbertoRef.current === codigo) setSugestoes(lista);
+      })
+      .catch(() => undefined);
     setCarregandoHistorico(true);
     try {
       setHistorico(await repository.getHistoricoComprasCliente(profile, codigo, LIMITE_HISTORICO));
@@ -360,7 +373,7 @@ export function ClientesScreen() {
 
               {aberto && (
                 <View style={styles.painel}>
-                  <ProximasCompras recompras={proximasCompras(produtos, item.codigo)} />
+                  <ProximasCompras recompras={proximasCompras(produtos, item.codigo)} sugestoes={sugestoes} />
                   <Text style={styles.historicoTitulo}>Últimas compras</Text>
                   {carregandoHistorico ? (
                     <ActivityIndicator style={{ marginTop: 8 }} />

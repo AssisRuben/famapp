@@ -12,6 +12,7 @@ import {
   ComissaoMensal,
   ContatoCliente,
   ConversaoUsoContinuo,
+  SugestaoCliente,
   DesempenhoVendedorDiario,
   DesempenhoVendedorMensal,
   DesempenhoVendedorPeriodo,
@@ -155,6 +156,8 @@ export interface DataRepository {
   getProdutosRecorrentesClientes(profile: Profile): Promise<ProdutoRecorrenteCliente[]>;
   // Contatos de uso contínuo que viraram compra em até 7 dias (últimos 30 dias).
   getConversaoUsoContinuo(profile: Profile): Promise<ConversaoUsoContinuo>;
+  // Fase B: o que combina com o que o cliente compra (até 2, sem receita, com estoque).
+  getSugestoesCliente(codigoCliente: number): Promise<SugestaoCliente[]>;
   // Contagem agregada (total/inativos) pro tile do Painel — não sofre
   // do limite padrão de 1000 linhas por request que getClientesInatividade
   // tem quando usado só pra contar.

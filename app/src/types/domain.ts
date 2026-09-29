@@ -246,6 +246,16 @@ export interface ProdutoRecorrenteCliente {
 
 // Contatos de uso contínuo que viraram compra do mesmo remédio (qualquer
 // marca equivalente) em até 7 dias — vw_uso_continuo_conversao.
+// "Combina com o que ele compra" (Fase B, 30/09/2026) — fn_sugestoes_cliente:
+// produto sem receita, com estoque, que clientes levam junto com algo que
+// esse cliente compra e que ele ainda não compra.
+export interface SugestaoCliente {
+  codigoProduto: number;
+  nomeProduto: string;
+  combinaCom: string; // o produto dele que puxou a sugestão
+  lift: number;
+}
+
 export interface ConversaoUsoContinuo {
   contatos: number;
   convertidos: number;

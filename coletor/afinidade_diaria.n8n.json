@@ -1,0 +1,61 @@
+{
+  "name": "Afinidade de produtos - recalculo diario",
+  "nodes": [
+    {
+      "id": "nota-afinidade",
+      "name": "Leia antes de importar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-360, 200],
+      "parameters": {
+        "content": "## Afinidade de produtos (Fase B, 30/09/2026)\nRecalcula produto_afinidade (pares comprados juntos, por remédio equivalente) 1x por dia. O app usa via fn_sugestoes_cliente() no painel do cliente (\"Combina com o que ele compra\").\n\nAntes de ativar: rodar supabase/migracao_afinidade_cliente.sql e selecionar a credencial Postgres do farmapp (a mesma do workflow incremental).",
+        "height": 220,
+        "width": 420
+      }
+    },
+    {
+      "id": "trigger-afinidade",
+      "name": "Todo dia as 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-320, 480],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 6,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "recalcular-afinidade",
+      "name": "Recalcular afinidade",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-40, 480],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select fn_recalcular_afinidade() as pares_gravados;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Todo dia as 06:30": {
+      "main": [[{ "node": "Recalcular afinidade", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  }
+}
