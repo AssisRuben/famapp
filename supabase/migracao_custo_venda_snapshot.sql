@@ -26,8 +26,7 @@
 --    custo sozinho a cada INSERT — sem mexer no n8n.
 -- 3) produto_custo_manual: custo corrigido à mão por produto, a partir de
 --    uma data (quando o cadastro da Trier está errado). O gatilho usa essa
---    tabela antes do cadastro. Começa com o Ozivy (26204) = R$208 desde
---    01/09 — o custo médio dele na Trier (R$323,11) está errado.
+--    tabela antes do cadastro. Começa vazia.
 -- 4) Painel (vw_metricas_vendedor_diario/mensal/semanal e
 --    fn_metricas_vendedor_periodo) e Metas/Comissão (vw_metas_progresso):
 --    a partir de 01/09/2026 usam valor_total_custo (a foto); antes disso,
@@ -58,10 +57,10 @@ on produto_custo_manual for all
 using (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'))
 with check (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'gestor'));
 
-insert into produto_custo_manual (codigo_produto, custo_unitario, valido_desde, motivo)
-values (26204, 208, date '2026-09-01', 'Ozivy: custo médio na Trier (R$323,11) errado; real R$208 (gestor, 30/09/2026)')
-on conflict (codigo_produto) do update
-  set custo_unitario = excluded.custo_unitario, valido_desde = excluded.valido_desde, motivo = excluded.motivo;
+-- (começa vazia — o Ozivy entrou aqui e foi retirado a pedido do gestor em
+-- 30/09/2026; se a linha já existir de uma execução anterior, sai agora e
+-- as vendas dele voltam pro custo médio do cadastro no preenchimento abaixo)
+delete from produto_custo_manual where codigo_produto = 26204;
 
 -- Custo unitário a usar pra um produto numa data: manual (se houver e
 -- valer na data) > custo médio do cadastro (se > 0) > null (fica o da API).
