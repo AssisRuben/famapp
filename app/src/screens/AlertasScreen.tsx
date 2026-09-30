@@ -420,6 +420,7 @@ export function AlertasScreen() {
   const [carteiraClientes, setCarteiraClientes] = useState<ClienteCarteira[]>([]);
   const [donosCarteira, setDonosCarteira] = useState<DonoCarteira[]>([]);
   const [loading, setLoading] = useState(true);
+  const [falhas, setFalhas] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -451,29 +452,42 @@ export function AlertasScreen() {
   const load = useCallback(async () => {
     if (!profile) return;
     const hoje = new Date();
+    // Cada consulta falha sozinha: antes, um Promise.all sem catch fazia
+    // UMA consulta com erro (ex.: timeout de vw_clientes_produtos_vendedor
+    // depois da recompra prevista) zerar TODOS os cards — achado
+    // 29/09/2026, Alertas da Wanessa inteiro em 0. Quem falha mantém o
+    // valor anterior (cache) e entra no aviso do topo.
+    const anterior = cacheGet<AlertasDados>(`alertas:${profile.id}`);
+    const falhou: string[] = [];
+    const tentar = <T,>(nome: string, p: Promise<T>, reserva: T): Promise<T> =>
+      p.catch((e) => {
+        console.warn(`Alertas: falha ao carregar ${nome}`, e);
+        falhou.push(nome);
+        return reserva;
+      });
     const [promocao, cli, valorGeral, prod, rec, antim, ident, met, cont, carteira, donos, todasCampanhasVA] = await Promise.all([
-      repository.getProdutosEmPromocao(profile),
-      repository.getClientesDoVendedor(profile),
-      repository.getClientesValorGeral(profile),
-      repository.getProdutosRecorrentesDoVendedor(profile),
-      repository.getVendasComReceita(profile),
-      repository.getVendasAntimicrobianoRecente(profile),
-      repository.getIdentificacaoCompradorPorVendedor(profile),
-      repository.getMetas(profile, hoje.getFullYear(), hoje.getMonth() + 1),
-      repository.getContatosRecentes(profile),
+      tentar('promoção', repository.getProdutosEmPromocao(profile), anterior?.alertasPromocao ?? []),
+      tentar('clientes', repository.getClientesDoVendedor(profile), anterior?.clientes ?? []),
+      tentar('clientes de alto valor', repository.getClientesValorGeral(profile), anterior?.clientesValorGeral ?? []),
+      tentar('uso contínuo', repository.getProdutosRecorrentesDoVendedor(profile), anterior?.produtosRecorrentes ?? []),
+      tentar('receitas', repository.getVendasComReceita(profile), anterior?.receitas ?? []),
+      tentar('antibióticos', repository.getVendasAntimicrobianoRecente(profile), anterior?.antimicrobianos ?? []),
+      tentar('venda sem comprador', repository.getIdentificacaoCompradorPorVendedor(profile), anterior?.identificacaoComprador ?? []),
+      tentar('metas', repository.getMetas(profile, hoje.getFullYear(), hoje.getMonth() + 1), anterior?.metas ?? []),
+      tentar('contatos', repository.getContatosRecentes(profile), anterior?.contatos ?? []),
       // Sem codigoVendedor: vendedor traz a própria carteira, gestor
       // traz a de todo mundo somada (card de Alertas é um resumo geral
       // — o detalhe por vendedor fica na aba "Carteira de clientes").
-      repository.getCarteiraClientes(profile),
+      tentar('carteira', repository.getCarteiraClientes(profile), anterior?.carteiraClientes ?? []),
       // Quem é dono de cada cliente em QUALQUER carteira (não só a do
       // vendedor logado) — usado no card "Cliente de alto valor
       // sumindo" pra avisar se o cliente já é acompanhado por alguém.
-      repository.getDonosCarteira(profile),
+      tentar('donos da carteira', repository.getDonosCarteira(profile), anterior?.donosCarteira ?? []),
       // Venda adicional: só as campanhas ativas hoje interessam pro
       // card de Alertas. Não depende de nenhuma das chamadas acima —
       // estava rodando depois deste Promise.all inteiro terminar, sem
       // motivo (achado 23/09/2026, auditoria de performance).
-      repository.getCampanhasVendaAdicional(profile),
+      tentar('venda adicional', repository.getCampanhasVendaAdicional(profile), []),
     ]);
 
     // Busca as vendas de cada campanha ativa já aqui (não é lazy como o
@@ -484,7 +498,11 @@ export function AlertasScreen() {
     const vendasPorCampanhaVA: Record<string, VendaVendaAdicional[]> = {};
     await Promise.all(
       ativasVA.map(async (c) => {
-        vendasPorCampanhaVA[c.id] = await repository.getVendasVendaAdicional(profile, c.id);
+        vendasPorCampanhaVA[c.id] = await tentar(
+          'venda adicional',
+          repository.getVendasVendaAdicional(profile, c.id),
+          anterior?.vendasVendaAdicionalPorCampanha[c.id] ?? []
+        );
       })
     );
 
@@ -504,7 +522,10 @@ export function AlertasScreen() {
       vendasVendaAdicionalPorCampanha: vendasPorCampanhaVA,
     };
     aplicarDados(dados);
-    cacheSet(`alertas:${profile.id}`, dados);
+    setFalhas([...new Set(falhou)]);
+    // Com falha, não grava no cache — a próxima abertura tenta de novo
+    // sem congelar uma lista vazia como se fosse o resultado real.
+    if (falhou.length === 0) cacheSet(`alertas:${profile.id}`, dados);
   }, [profile, aplicarDados]);
 
   // Registra a tentativa de contato e já suprime da lista na hora
@@ -830,6 +851,11 @@ export function AlertasScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.subtitle}>Oportunidades de contato e pontos de atenção, atualizados a cada dado novo.</Text>
+      {falhas.length > 0 && (
+        <Text style={styles.avisoFalha}>
+          Não carregou: {falhas.join(', ')}. Puxe a tela pra baixo pra tentar de novo.
+        </Text>
+      )}
 
       <View style={styles.grid}>
         {cards.map((c) => (
@@ -1231,6 +1257,7 @@ const styles = StyleSheet.create({
   },
   fabTexto: { color: colors.white, fontWeight: '700', fontSize: 13 },
   subtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: 16, lineHeight: 18 },
+  avisoFalha: { fontSize: 12, color: colors.red, marginTop: -8, marginBottom: 12, lineHeight: 17 },
   empty: { color: colors.textSecondary },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   cardAlerta: {

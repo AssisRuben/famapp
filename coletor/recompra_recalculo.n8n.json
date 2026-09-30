@@ -1,0 +1,60 @@
+{
+  "name": "Recompra prevista - recalculo a cada 30 min",
+  "nodes": [
+    {
+      "id": "nota-recompra",
+      "name": "Leia antes de importar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-360, 200],
+      "parameters": {
+        "content": "## Recompra pré-calculada (29/09/2026)\nRefaz cliente_produto_habito e cliente_produto_vendedor (hábito de compra por cliente x remédio equivalente). É o que alimenta \"Hora de recomprar\" em Alertas, Clientes e Meus clientes — antes esse cálculo rodava a cada abertura de tela e deixava tudo lento.\n\nAntes de ativar: rodar supabase/migracao_recompra_pre_calculada.sql e selecionar a credencial Postgres do farmapp (a mesma do workflow incremental).",
+        "height": 240,
+        "width": 420
+      }
+    },
+    {
+      "id": "trigger-recompra",
+      "name": "A cada 30 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-320, 500],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "recalcular-recompra",
+      "name": "Recalcular recompra",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-40, 500],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select fn_recalcular_clientes_produtos() as linhas_gravadas;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "name": "Supabase Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "A cada 30 min": {
+      "main": [[{ "node": "Recalcular recompra", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  }
+}
