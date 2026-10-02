@@ -1,9 +1,9 @@
 {
-  "name": "WhatsApp - Ranking Vendas Complementares (noturno)",
+  "name": "WhatsApp - Vendas Complementares (14:20 e 21:50)",
   "nodes": [
     {
       "id": "trigger-2220",
-      "name": "Todo dia às 22:20",
+      "name": "14:20 e 21:50",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -16,8 +16,14 @@
             {
               "field": "days",
               "daysInterval": 1,
-              "triggerAtHour": 22,
+              "triggerAtHour": 14,
               "triggerAtMinute": 20
+            },
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 21,
+              "triggerAtMinute": 50
             }
           ]
         }
@@ -25,7 +31,7 @@
     },
     {
       "id": "buscar-ranking",
-      "name": "Buscar ranking do dia",
+      "name": "Buscar resumo do dia",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
@@ -34,7 +40,7 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "with campanha as (\n  select *\n  from campanhas_complementares\n  order by (\n      data_inicio <= (now() at time zone 'America/Sao_Paulo')::date\n      and data_fim >= (now() at time zone 'America/Sao_Paulo')::date\n    ) desc,\n    data_inicio desc\n  limit 1\n),\nmarcadas as (\n  select\n    vic.codigo_vendedor,\n    vd.nome as nome_vendedor,\n    vi.valor_total_liquido as valor\n  from venda_item_complementar vic\n  join venda_itens vi on vi.id = vic.venda_item_id\n  join vendas v on v.id = vi.venda_id\n  join campanha c on v.data_emissao between c.data_inicio and c.data_fim\n  left join vendedores vd on vd.codigo = vic.codigo_vendedor\n),\nagregado as (\n  select codigo_vendedor, nome_vendedor, sum(valor) as valor_total, count(*) as quantidade_total\n  from marcadas\n  group by codigo_vendedor, nome_vendedor\n),\nranking as (\n  select a.*, row_number() over (order by a.valor_total desc) as posicao\n  from agregado a, campanha c\n  where a.valor_total >= coalesce(c.valor_minimo, 0)\n    and a.quantidade_total >= coalesce(c.quantidade_minima, 0)\n)\nselect\n  c.data_inicio,\n  c.data_fim,\n  c.valor_minimo,\n  c.quantidade_minima,\n  r.nome_vendedor,\n  r.valor_total,\n  r.quantidade_total,\n  r.posicao,\n  (\n    select (elem->>'valor')::numeric\n    from jsonb_array_elements(c.premiacao_ranking) elem\n    where (elem->>'posicao')::int = r.posicao\n  ) as premio\nfrom campanha c\nleft join ranking r on true\norder by r.posicao nulls last;"
+        "query": "-- Vendas Complementares: resumo pro grupo, 14:20 e 21:50 (01/10/2026).\n-- Uma linha por vendedor que trabalhou no período, registrou oferta ou\n-- tem item marcado na campanha vigente. Sem campanha vigente hoje = sem\n-- linha = não manda nada.\nwith hoje as (\n  select (now() at time zone 'America/Sao_Paulo')::date as d\n),\ncampanha as (\n  select c.*\n  from campanhas_complementares c, hoje\n  where c.data_inicio <= hoje.d and c.data_fim >= hoje.d\n  order by c.data_inicio desc\n  limit 1\n),\nmarcadas as (\n  -- mesma base da aba Vendas Complementares (vw_venda_complementar_marcada)\n  select vic.codigo_vendedor, v.data_emissao, vi.valor_total_liquido as valor\n  from venda_item_complementar vic\n  join venda_itens vi on vi.id = vic.venda_item_id\n  join vendas v on v.id = vi.venda_id\n  join campanha c on v.data_emissao between c.data_inicio and c.data_fim\n),\ntrabalharam as (\n  -- só quem tem login de vendedor no app (tira CAIXA, SUPORTE etc.)\n  select distinct v.codigo_vendedor\n  from vendas v, hoje\n  where v.data_emissao = hoje.d\n    and v.tipo_cancelamento is null\n    and v.codigo_vendedor in (\n      select codigo_vendedor from profiles\n      where role = 'vendedor' and codigo_vendedor is not null\n    )\n),\ntrabalharam_semana as (\n  -- quem vendeu em algum dia do período até hoje (entra na cobrança das\n  -- 60 ofertas mesmo se estiver de folga hoje)\n  select distinct v.codigo_vendedor\n  from vendas v\n  join campanha c on v.data_emissao between c.data_inicio and c.data_fim\n  where v.tipo_cancelamento is null\n    and v.codigo_vendedor in (\n      select codigo_vendedor from profiles\n      where role = 'vendedor' and codigo_vendedor is not null\n    )\n),\nofertas as (\n  select o.codigo_vendedor, o.clientes_ofertados\n  from venda_complementar_oferta_diaria o, hoje\n  where o.data = hoje.d\n),\nofertas_semana as (\n  select o.codigo_vendedor, sum(o.clientes_ofertados) as total\n  from venda_complementar_oferta_diaria o\n  join campanha c on o.data between c.data_inicio and c.data_fim\n  group by 1\n),\nvend as (\n  select codigo_vendedor from trabalharam\n  union select codigo_vendedor from trabalharam_semana\n  union select codigo_vendedor from ofertas_semana\n  union select codigo_vendedor from marcadas\n)\nselect\n  to_char(c.data_inicio, 'DD/MM') as inicio_txt,\n  to_char(c.data_fim, 'DD/MM') as fim_txt,\n  to_char(h.d, 'DD/MM') as hoje_txt,\n  (h.d - c.data_inicio + 1) as dia_atual,\n  (c.data_fim - c.data_inicio + 1) as total_dias,\n  (c.data_fim - h.d) as dias_restantes,\n  c.valor_minimo,\n  c.quantidade_minima,\n  c.meta_clientes_ofertados_dia,\n  c.premiacao_ranking,\n  vd.codigo as codigo_vendedor,\n  split_part(initcap(trim(vd.nome)), ' ', 1) as nome,\n  (vd.codigo in (select codigo_vendedor from trabalharam)) as trabalhou_hoje,\n  o.clientes_ofertados as ofertados_hoje,\n  coalesce(os.total, 0) as ofertados_semana,\n  (select count(*) from marcadas m\n    where m.codigo_vendedor = vd.codigo and m.data_emissao = h.d) as itens_hoje,\n  coalesce((select sum(m.valor) from marcadas m where m.codigo_vendedor = vd.codigo), 0) as valor_periodo,\n  (select count(*) from marcadas m where m.codigo_vendedor = vd.codigo) as itens_periodo\nfrom campanha c\ncross join hoje h\ncross join vend\njoin vendedores vd on vd.codigo = vend.codigo_vendedor\nleft join ofertas o on o.codigo_vendedor = vd.codigo\nleft join ofertas_semana os on os.codigo_vendedor = vd.codigo\norder by valor_periodo desc;\n"
       },
       "credentials": {
         "postgres": {
@@ -54,7 +60,7 @@
       "parameters": {
         "language": "javaScript",
         "mode": "runOnceForAllItems",
-        "jsCode": "const linhas = $input.all().map((i) => i.json);\n\n// campanhas_complementares vazia -> a query nem devolve linha (nem o\n// \"cabeçalho\" da campanha) -- sem período configurado, não tem o que\n// mandar.\nif (linhas.length === 0) {\n  return [];\n}\n\nconst campanha = linhas[0];\nconst ranking = linhas.filter((l) => l.nome_vendedor != null);\n\nconst hojeLabel = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\nconst MEDALHAS = { 1: '🥇', 2: '🥈', 3: '🥉' };\n\nfunction fmtBRL(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });\n}\n// O nó Postgres pode devolver coluna \"date\" como objeto Date do JS OU\n// como string ISO completa (com hora/timezone), não como \"YYYY-MM-DD\"\n// puro — grudar \"T00:00:00\" na string quebrava o parse (\"Invalid\n// Date\"/\"NaN\"). new Date(valor) lida com objeto Date, string curta ou\n// ISO completa igual; os getters UTC evitam rolar pro dia anterior por\n// fuso, já que \"date\" não tem hora nenhuma.\nfunction fmtData(valor) {\n  const data = new Date(valor);\n  const dia = String(data.getUTCDate()).padStart(2, '0');\n  const mes = String(data.getUTCMonth() + 1).padStart(2, '0');\n  return `${dia}/${mes}/${data.getUTCFullYear()}`;\n}\n\nconst partes = [`🏆 *Ranking Vendas Complementares*`, `📅 ${hojeLabel}`, ''];\n\nif (ranking.length === 0) {\n  partes.push('Ninguém bateu a meta ainda hoje.');\n} else {\n  for (const item of ranking) {\n    const rotulo = MEDALHAS[item.posicao] ?? `${item.posicao}º`;\n    const qtdTexto = `${item.quantidade_total} ${Number(item.quantidade_total) === 1 ? 'item' : 'itens'}`;\n    if (item.premio != null) {\n      partes.push(`${rotulo} ${item.nome_vendedor} — ${fmtBRL(item.valor_total)} · ${qtdTexto} (prêmio ${fmtBRL(item.premio)})`);\n    } else {\n      partes.push(`${rotulo} ${item.nome_vendedor} — ${fmtBRL(item.valor_total)} · ${qtdTexto} ✅ bateu a meta`);\n    }\n  }\n}\n\nconst metas = [];\nif (campanha.valor_minimo) metas.push(fmtBRL(campanha.valor_minimo));\nif (campanha.quantidade_minima) metas.push(`${campanha.quantidade_minima} itens`);\npartes.push('');\npartes.push(`Meta pra concorrer: ${metas.length > 0 ? metas.join(' e ') : 'sem piso mínimo'}`);\npartes.push(`Período: ${fmtData(campanha.data_inicio)} a ${fmtData(campanha.data_fim)}`);\n\nreturn [{ json: { mensagem: partes.join('\\n') } }];"
+        "jsCode": "const linhas = $input.all().map((i) => i.json);\n\n// Sem campanha vigente hoje a query não devolve linha nenhuma.\nif (linhas.length === 0) {\n  return [];\n}\n\n// Regra da farmácia (01/10/2026): menos de 60 clientes ofertados na\n// semana da campanha = perde 1% da comissão da semana.\nconst META_OFERTAS_SEMANA = 60;\n\n// Disparo das 14:20 é parcial do dia; o das 21:50 fecha o dia.\nconst horaSP = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));\nconst parcial = horaSP < 18;\n\nconst c = linhas[0];\nconst metaOferta = Number(c.meta_clientes_ofertados_dia) || 0;\nconst valorMin = Number(c.valor_minimo) || 0;\nconst qtdMin = Number(c.quantidade_minima) || 0;\n\nlet premios = c.premiacao_ranking;\nif (typeof premios === 'string') premios = JSON.parse(premios);\npremios = (premios || []).map((p) => ({ posicao: Number(p.posicao), valor: Number(p.valor) }));\npremios.sort((a, b) => a.posicao - b.posicao);\nconst premioDe = (posicao) => premios.find((p) => p.posicao === posicao)?.valor;\n\nfunction brl(v) {\n  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });\n}\nconst plural = (n, um, varios) => `${n} ${Number(n) === 1 ? um : varios}`;\nconst MEDALHAS = { 1: '🥇', 2: '🥈', 3: '🥉' };\n\nconst vendedores = linhas.map((l) => ({\n  nome: l.nome,\n  trabalhou: l.trabalhou_hoje === true || l.trabalhou_hoje === 't',\n  ofertados: l.ofertados_hoje == null ? null : Number(l.ofertados_hoje),\n  ofertadosSemana: Number(l.ofertados_semana) || 0,\n  itensHoje: Number(l.itens_hoje) || 0,\n  valor: Number(l.valor_periodo) || 0,\n  itens: Number(l.itens_periodo) || 0,\n}));\n\n// Ranking = quem bateu os dois pisos (valor e itens), por valor.\nconst classificados = vendedores\n  .filter((v) => v.valor >= valorMin && v.itens >= qtdMin)\n  .sort((a, b) => b.valor - a.valor);\nclassificados.forEach((v, i) => { v.posicao = i + 1; });\n\nconst partes = [];\npartes.push('🛒 *Vendas Complementares*');\npartes.push(`📅 ${c.hoje_txt}${parcial ? ' · parcial das 14h' : ''} · dia ${c.dia_atual} de ${c.total_dias} (${c.inicio_txt} a ${c.fim_txt})`);\n\n// 1) Oferecimentos de hoje — foco principal\nconst doDia = vendedores\n  .filter((v) => v.trabalhou || v.ofertados != null)\n  .sort((a, b) => (b.ofertados ?? -1) - (a.ofertados ?? -1));\nif (doDia.length > 0) {\n  partes.push('');\n  const titulo = parcial ? 'Clientes ofertados hoje (até agora)' : 'Clientes ofertados hoje';\n  partes.push(metaOferta > 0 ? `📣 *${titulo}* (meta: ${metaOferta} por dia)` : `📣 *${titulo}*`);\n  let totalOfertas = 0;\n  for (const v of doDia) {\n    const semana = ` · semana ${v.ofertadosSemana}/${META_OFERTAS_SEMANA}`;\n    const vendeu = v.itensHoje > 0 ? ` · vendeu ${plural(v.itensHoje, 'item', 'itens')}` : '';\n    if (v.ofertados == null || v.ofertados === 0) {\n      partes.push(`❌ ${v.nome} — não registrou${semana}${vendeu}`);\n      continue;\n    }\n    totalOfertas += v.ofertados;\n    const icone = metaOferta > 0 && v.ofertados >= metaOferta ? '✅' : '⚠️';\n    partes.push(`${icone} ${v.nome} — hoje ${v.ofertados}${semana}${vendeu}`);\n  }\n  const bateram = doDia.filter((v) => metaOferta > 0 && (v.ofertados ?? 0) >= metaOferta).length;\n  partes.push(metaOferta > 0\n    ? `Time: ${totalOfertas} ofertas · ${bateram} de ${doDia.length} bateram a meta`\n    : `Time: ${totalOfertas} ofertas`);\n}\n\n// 1b) Regra das 60 ofertas na semana — todo mundo que trabalhou no período\nconst abaixo60 = vendedores\n  .filter((v) => v.ofertadosSemana < META_OFERTAS_SEMANA)\n  .sort((a, b) => a.ofertadosSemana - b.ofertadosSemana);\npartes.push('');\npartes.push(`🎯 *Meta da semana: ${META_OFERTAS_SEMANA} clientes ofertados*`);\npartes.push(`Quem não chegar a ${META_OFERTAS_SEMANA} até ${c.fim_txt} perde *1% da comissão da semana*.`);\nif (abaixo60.length === 0) {\n  partes.push('Todo mundo já cumpriu! 💪');\n} else {\n  partes.push(`Ainda faltam: ${abaixo60.map((v) => `${v.nome} (${META_OFERTAS_SEMANA - v.ofertadosSemana})`).join(' · ')}`);\n}\n\n// 2) Parabéns pra quem passou do valor mínimo\n// classificados primeiro (pela posição), depois quem passou do valor mas falta item\nconst acimaDoMinimo = vendedores\n  .filter((v) => valorMin > 0 && v.valor >= valorMin)\n  .sort((a, b) => (a.posicao ?? 99) - (b.posicao ?? 99) || b.valor - a.valor);\npartes.push('');\nif (acimaDoMinimo.length > 0) {\n  partes.push(`👏 *Parabéns! Já passaram de ${brl(valorMin)}*`);\n  for (const v of acimaDoMinimo) {\n    if (v.posicao != null) {\n      const premio = premioDe(v.posicao);\n      const rotulo = MEDALHAS[v.posicao] ?? `${v.posicao}º`;\n      partes.push(`${rotulo} ${v.nome} — ${brl(v.valor)}${premio ? ` → hoje leva ${brl(premio)}` : ''}`);\n    } else {\n      partes.push(`• ${v.nome} — ${brl(v.valor)} (faltam ${plural(qtdMin - v.itens, 'item', 'itens')} pra entrar no ranking)`);\n    }\n  }\n} else if (valorMin > 0) {\n  partes.push(`Ninguém passou de ${brl(valorMin)} ainda — o 1º lugar está em aberto!`);\n}\n\n// 3) Quem está perto (60% do mínimo pra cima)\nconst perto = vendedores\n  .filter((v) => valorMin > 0 && v.valor < valorMin && v.valor >= valorMin * 0.6)\n  .sort((a, b) => b.valor - a.valor);\nif (perto.length > 0) {\n  partes.push('');\n  partes.push('🔥 *Quase lá*');\n  for (const v of perto) {\n    partes.push(`${v.nome} — ${brl(v.valor)} (faltam ${brl(valorMin - v.valor)})`);\n  }\n}\n\n// 4) Prêmio e regra\npartes.push('');\nconst linhaPremios = premios.map((p) => `${p.posicao}º ${brl(p.valor)}`).join(' · ');\nif (linhaPremios) partes.push(`🏆 Prêmios: ${linhaPremios}`);\nconst regra = [];\nif (valorMin > 0) regra.push(brl(valorMin));\nif (qtdMin > 0) regra.push(plural(qtdMin, 'item', 'itens'));\nif (regra.length > 0) partes.push(`Pra concorrer: ${regra.join(' e ')} até ${c.fim_txt}`);\nconst restantes = Number(c.dias_restantes);\npartes.push(restantes > 0 ? `⏳ ${plural(restantes, 'dia', 'dias')} pra virar o jogo!` : '⏳ Último dia!');\n\nreturn [{ json: { mensagem: partes.join('\\n') } }];\n"
       }
     },
     {
@@ -71,18 +77,18 @@
     }
   ],
   "connections": {
-    "Todo dia às 22:20": {
+    "Montar mensagem": {
       "main": [
         [
           {
-            "node": "Buscar ranking do dia",
+            "node": "➡️ Enviar via Evolution API (troque por aqui)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Buscar ranking do dia": {
+    "Buscar resumo do dia": {
       "main": [
         [
           {
@@ -93,11 +99,11 @@
         ]
       ]
     },
-    "Montar mensagem": {
+    "14:20 e 21:50": {
       "main": [
         [
           {
-            "node": "➡️ Enviar via Evolution API (troque por aqui)",
+            "node": "Buscar resumo do dia",
             "type": "main",
             "index": 0
           }
