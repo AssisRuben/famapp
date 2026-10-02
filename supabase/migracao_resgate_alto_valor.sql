@@ -52,6 +52,9 @@ select distinct on (h.codigo_cliente)
   h.qtd_compras
 from cliente_produto_habito h
 where not h.exige_receita
+  -- só cita produto que é HÁBITO (2+ compras); compra isolada não vira
+  -- "faz tempo que você não leva o seu X" (ajuste de 02/10/2026)
+  and h.qtd_compras >= 2
   and upper(coalesce(h.grupo, '')) !~ '^USO OU CONSUMO'
   and coalesce(h.nome_produto, '') !~* 'SACOLA|TAXA|ENTREGA|RECARGA|CHIP'
 order by h.codigo_cliente, h.qtd_compras desc, h.ultima_compra desc, h.codigo_produto;
