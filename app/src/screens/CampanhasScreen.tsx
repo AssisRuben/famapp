@@ -559,6 +559,7 @@ export function CampanhasScreen() {
           visible={calendarioAberto}
           onClose={() => setCalendarioAberto(false)}
           permitirDatasFuturas
+          periodoInicial={editandoId ? { dataInicio, dataFim } : undefined}
           onConfirmar={(inicio, fim) => {
             setDataInicio(inicio);
             setDataFim(fim);

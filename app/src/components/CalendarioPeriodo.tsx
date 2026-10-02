@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GestureResponderEvent, Modal, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
@@ -12,6 +12,8 @@ interface CalendarioPeriodoProps {
   // campanhas/ranking são majoritariamente pra frente — esse flag
   // troca o calendário pro segundo caso sem duplicar o componente.
   permitirDatasFuturas?: boolean;
+  // Período já salvo (edição) — abre com ele marcado, no mês do início.
+  periodoInicial?: { dataInicio: string; dataFim: string };
 }
 
 const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
@@ -49,12 +51,33 @@ function montarGrade(ano: number, mes: number, hojeIso: string, permitirDatasFut
   return celulas;
 }
 
-export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatasFuturas = false }: CalendarioPeriodoProps) {
+export function CalendarioPeriodo({
+  visible,
+  onClose,
+  onConfirmar,
+  permitirDatasFuturas = false,
+  periodoInicial,
+}: CalendarioPeriodoProps) {
   const hoje = new Date();
   const [mesVisivel, setMesVisivel] = useState({ ano: hoje.getFullYear(), mes: hoje.getMonth() });
   const [ancora, setAncora] = useState<string | null>(null);
   const [foco, setFoco] = useState<string | null>(null);
+  // true depois de um toque simples: o próximo toque fecha o período,
+  // mesmo que seja em outro mês (antes cada toque começava uma seleção
+  // nova, então não dava pra ir de 26/09 a 02/10 — 01/10/2026).
+  const [aguardandoFim, setAguardandoFim] = useState(false);
   const [larguraGrade, setLarguraGrade] = useState(0);
+
+  useEffect(() => {
+    if (!visible || !periodoInicial) return;
+    const [ano, mes] = periodoInicial.dataInicio.split('-').map(Number);
+    setMesVisivel({ ano, mes: mes - 1 });
+    setAncora(periodoInicial.dataInicio);
+    setFoco(periodoInicial.dataFim);
+    setAguardandoFim(false);
+    // só ao abrir — o objeto do pai muda de identidade a cada render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const hojeIso = todayISO();
   const grade = useMemo(
@@ -73,6 +96,14 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatas
   gradeRef.current = grade;
   const larguraGradeRef = useRef(larguraGrade);
   larguraGradeRef.current = larguraGrade;
+  const ancoraRef = useRef(ancora);
+  ancoraRef.current = ancora;
+  const focoRef = useRef(foco);
+  focoRef.current = foco;
+  const aguardandoFimRef = useRef(aguardandoFim);
+  aguardandoFimRef.current = aguardandoFim;
+  // o gesto atual começou uma seleção nova (true) ou está fechando uma (false)
+  const gestoNovoRef = useRef(true);
 
   const diaNaPosicao = (x: number, y: number): string | null => {
     const largura = larguraGradeRef.current;
@@ -83,16 +114,22 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatas
     return gradeRef.current[row * COLUNAS_GRADE + col] ?? null;
   };
 
-  // Um toque simples (sem arrastar) = dia único; pressionar e arrastar
-  // pelos dias = período (o dia inicial fica "ancorado" e o final segue
-  // o dedo, igual seleção de texto).
+  // Toque simples = primeiro dia (já vale como dia único se aplicar
+  // assim); o próximo toque, em qualquer mês, fecha o período. Pressionar
+  // e arrastar pelos dias também faz o período de uma vez (o dia inicial
+  // fica "ancorado" e o final segue o dedo, igual seleção de texto).
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt: GestureResponderEvent) => {
         const dia = diaNaPosicao(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
-        if (dia) {
+        if (!dia) return;
+        if (aguardandoFimRef.current && ancoraRef.current) {
+          gestoNovoRef.current = false;
+          setFoco(dia);
+        } else {
+          gestoNovoRef.current = true;
           setAncora(dia);
           setFoco(dia);
         }
@@ -100,6 +137,10 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatas
       onPanResponderMove: (evt: GestureResponderEvent) => {
         const dia = diaNaPosicao(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
         if (dia) setFoco(dia);
+      },
+      onPanResponderRelease: () => {
+        // começou seleção nova e não arrastou: espera o dia final
+        setAguardandoFim(gestoNovoRef.current && focoRef.current === ancoraRef.current);
       },
     })
   ).current;
@@ -114,6 +155,7 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatas
   const limpar = () => {
     setAncora(null);
     setFoco(null);
+    setAguardandoFim(false);
   };
 
   const confirmar = () => {
@@ -133,7 +175,9 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatas
       <Pressable style={styles.fundo} onPress={fechar}>
         <Pressable style={styles.cartao} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.titulo}>Escolher período</Text>
-          <Text style={styles.dica}>Toque um dia, ou arraste pelos dias pra escolher um período.</Text>
+          <Text style={styles.dica}>
+            Toque o primeiro e o último dia (pode trocar de mês entre um e outro), ou arraste pelos dias.
+          </Text>
 
           <View style={styles.navegacaoMes}>
             <Pressable onPress={() => trocarMes(-1)} hitSlop={8}>
@@ -189,6 +233,7 @@ export function CalendarioPeriodo({ visible, onClose, onConfirmar, permitirDatas
                 ? `Dia ${formatDateBR(inicio)}`
                 : `${formatDateBR(inicio)} até ${formatDateBR(fim)}`
               : 'Nenhum dia escolhido ainda'}
+            {aguardandoFim ? ' — toque o último dia' : ''}
           </Text>
 
           <View style={styles.botoesRow}>
