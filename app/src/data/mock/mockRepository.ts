@@ -1760,6 +1760,10 @@ class MockRepository implements DataRepository {
     return delay({});
   }
 
+  async getProdutoPreferidoClientes(_codigosClientes: number[]): Promise<Record<number, string>> {
+    return delay({});
+  }
+
   async limparProdutosEmFalta(ids: string[]): Promise<void> {
     const itens = await getProdutosEmFaltaStore();
     await salvarProdutosEmFaltaStore(itens.filter((i) => !ids.includes(i.id)));

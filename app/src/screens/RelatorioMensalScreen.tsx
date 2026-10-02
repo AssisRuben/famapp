@@ -79,14 +79,17 @@ function LinhaMetricaSimples({
   titulo: string;
   atual: number;
   anterior: number;
-  formato: 'numero' | 'moeda';
+  formato: 'numero' | 'moeda' | 'percentual';
 }) {
+  const texto =
+    formato === 'moeda' ? formatBRL(atual) : formato === 'percentual' ? `${atual.toLocaleString('pt-BR')}%` : atual;
   return (
     <View style={styles.metricaLinha}>
       <Text style={styles.metricaTitulo}>{titulo}</Text>
       <View style={styles.metricaValorLinha}>
-        <Text style={styles.metricaValor}>{formato === 'moeda' ? formatBRL(atual) : atual}</Text>
-        <DeltaBadge delta={deltaPercentual(atual, anterior)} />
+        <Text style={styles.metricaValor}>{texto}</Text>
+        {/* variação % de um percentual confunde — só pra número/moeda */}
+        {formato !== 'percentual' && <DeltaBadge delta={deltaPercentual(atual, anterior)} />}
       </View>
     </View>
   );
@@ -312,7 +315,9 @@ export function RelatorioMensalScreen() {
         <>
           <Card>
             <Text style={styles.sectionTitulo}>Farmácia</Text>
-            {METRICAS_FARMACIA.map((def) => (
+            {METRICAS_FARMACIA.filter(
+              (def) => !def.opcional || metricas.some((m) => m.codigoVendedor === null && m.chave === def.chave)
+            ).map((def) => (
               <LinhaMetricaSimples
                 key={def.chave}
                 titulo={def.titulo}

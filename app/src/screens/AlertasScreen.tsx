@@ -13,6 +13,14 @@ import { formatBRL, formatDateBR, nomeCurto, todayISO } from '../lib/format';
 import { existeRegistroContato, foiContatadoRecentemente } from '../lib/contatos';
 import { cacheGet, cacheSet } from '../lib/cache';
 import {
+  CLIENTE_SUMIU_DIAS,
+  CLIENTE_SUMIU_MAX_DIAS,
+  MIN_COMPRAS_RESGATE,
+  mensagemResgate,
+  noGrupoControleResgate,
+  nomeProdutoLegivel,
+} from '../lib/resgate';
+import {
   agruparPorVendedor,
   campanhaAtiva,
   calcularMetaIndividualVendaAdicional,
@@ -361,7 +369,6 @@ function calcularStatsCarteira(clientes: ClienteCarteira[], contatos: ContatoCli
 }
 
 const RECEITA_PENDENTE_DIAS = 7;
-const CLIENTE_SUMIU_DIAS = 60;
 const ANTIBIOTICO_DIAS = 7;
 // Depois da janela de exibição, ainda dá mais esse tanto de dias de
 // tolerância antes de marcar como "não contatado" — só existe pra não
@@ -669,17 +676,41 @@ export function AlertasScreen() {
   const clientesAltoValorSumindo = useMemo(() => {
     const comValor = clientesValorGeral.filter((c) => c.valorTotal > 0).sort((a, b) => b.valorTotal - a.valorTotal);
     const corteTop25 = comValor[Math.floor(comValor.length * 0.25)]?.valorTotal ?? 0;
+    // [01/10/2026] teto de 180 dias, 2+ compras e grupo de controle — ver
+    // lib/resgate.ts (o contato antigo não trazia cliente de volta).
     return comValor
-      .filter(
-        (c) =>
-          c.valorTotal >= corteTop25 &&
-          c.ultimaCompra &&
-          diasDesde(c.ultimaCompra, hoje) >= CLIENTE_SUMIU_DIAS &&
+      .filter((c) => {
+        if (c.valorTotal < corteTop25 || !c.ultimaCompra) return false;
+        const dias = diasDesde(c.ultimaCompra, hoje);
+        return (
+          dias >= CLIENTE_SUMIU_DIAS &&
+          dias <= CLIENTE_SUMIU_MAX_DIAS &&
+          (c.qtdCompras ?? MIN_COMPRAS_RESGATE) >= MIN_COMPRAS_RESGATE &&
+          !noGrupoControleResgate(c.codigo, hoje) &&
           !foiContatadoRecentemente(contatos, c.codigo, 'alto_valor_sumindo')
-      )
+        );
+      })
       .sort((a, b) => b.valorTotal - a.valorTotal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientesValorGeral, contatos]);
+
+  // Produto que cada cliente da lista mais comprava (sem receita) — vai
+  // na mensagem do WhatsApp. Só busca quando a lista muda de verdade.
+  const [produtoPreferido, setProdutoPreferido] = useState<Record<number, string>>({});
+  const codigosAltoValor = clientesAltoValorSumindo.map((c) => c.codigo).join(',');
+  useEffect(() => {
+    if (!codigosAltoValor) return;
+    let cancelado = false;
+    repository
+      .getProdutoPreferidoClientes(codigosAltoValor.split(',').map(Number))
+      .then((mapa) => {
+        if (!cancelado) setProdutoPreferido(mapa);
+      })
+      .catch(() => {});
+    return () => {
+      cancelado = true;
+    };
+  }, [codigosAltoValor]);
 
   // Mesma lista de alertasPromocao, só tirando quem já foi contatado
   // sobre ESSE produto especificamente — contatar sobre um produto não
@@ -999,7 +1030,13 @@ export function AlertasScreen() {
 
       {expandido === 'alto_valor_sumindo' && (
         <Card>
-          <Text style={styles.listaTitulo}>Clientes de alto valor sem comprar há {CLIENTE_SUMIU_DIAS}+ dias</Text>
+          <Text style={styles.listaTitulo}>
+            Clientes de alto valor sem comprar há {CLIENTE_SUMIU_DIAS} a {CLIENTE_SUMIU_MAX_DIAS} dias
+          </Text>
+          <Text style={styles.listaSubtitulo}>
+            Só quem comprou mais de uma vez. 1 em cada 5 clientes fica fora da lista este mês (grupo de controle),
+            pra medir se o contato traz o cliente de volta.
+          </Text>
           {clientesAltoValorSumindo.length === 0 ? (
             <Text style={styles.empty}>Nenhum cliente de alto valor sumiu recentemente.</Text>
           ) : (
@@ -1009,9 +1046,11 @@ export function AlertasScreen() {
                 codigoCliente={c.codigo}
                 nome={c.nome}
                 telefone={c.telefone}
-                detalhe={`${formatBRL(c.valorTotal)} no total${c.ultimaCompra ? ` · última compra em ${formatDateBR(c.ultimaCompra)}` : ''}`}
+                detalhe={`${formatBRL(c.valorTotal)} no total${c.ultimaCompra ? ` · última compra em ${formatDateBR(c.ultimaCompra)}` : ''}${
+                  produtoPreferido[c.codigo] ? ` · costumava levar ${nomeProdutoLegivel(produtoPreferido[c.codigo])}` : ''
+                }`}
                 donoCarteira={donoPorCliente.get(c.codigo)}
-                mensagemWhatsapp={`Olá, ${nomeCurto(c.nome)}! Aqui é ${nomeCurto(profile?.nome ?? '')} da Farmácia Conviva Parquelândia 💊 Sentimos sua falta — podemos ajudar em algo?`}
+                mensagemWhatsapp={mensagemResgate(nomeCurto(c.nome), nomeCurto(profile?.nome ?? ''), produtoPreferido[c.codigo] ?? null)}
                 onContato={(tipo) => registrarContatoAlerta('alto_valor_sumindo', c.codigo, tipo)}
               />
             ))

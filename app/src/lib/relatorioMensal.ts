@@ -8,7 +8,10 @@ import { MetricaMensal } from '../types/domain';
 export interface DefinicaoMetricaSimples {
   chave: string;
   titulo: string;
-  formato: 'numero' | 'moeda';
+  formato: 'numero' | 'moeda' | 'percentual';
+  // Só mostra a linha se a chave existir no mês (ex.: teste do resgate,
+  // que só existe a partir de outubro/2026) — "0%" ali seria mentira.
+  opcional?: boolean;
 }
 
 // Farmácia inteira (codigoVendedor null) — só quantidade, sem quebrar
@@ -17,6 +20,12 @@ export interface DefinicaoMetricaSimples {
 export const METRICAS_FARMACIA: DefinicaoMetricaSimples[] = [
   { chave: 'produtos_em_falta_reportados', titulo: 'Produtos em falta reportados', formato: 'numero' },
   { chave: 'pendencias_dadas_baixa', titulo: 'Pendências dadas baixa', formato: 'numero' },
+  // Teste do card "Cliente de alto valor sumindo" (01/10/2026): % dos
+  // clientes elegíveis no dia 1 que comprou no mês, quem apareceu na
+  // lista x grupo de controle (ficou de fora). Lista acima do controle =
+  // o contato traz cliente de volta.
+  { chave: 'resgate_teste_lista_pct', titulo: 'Alto valor sumido que voltou — lista do card', formato: 'percentual', opcional: true },
+  { chave: 'resgate_teste_controle_pct', titulo: 'Alto valor sumido que voltou — controle (sem contato)', formato: 'percentual', opcional: true },
 ];
 
 // Por vendedor, valor único (sem quantidade/valor/margem separados).
@@ -43,7 +52,14 @@ export const METRICAS_VENDEDOR_VENDA: DefinicaoMetricaVenda[] = [
   { chave: 'venda_adicional', titulo: 'Venda adicional', unidadeQuantidade: 'venda' },
   { chave: 'venda_complementar', titulo: 'Venda complementar', unidadeQuantidade: 'venda' },
   { chave: 'venda_campanha', titulo: 'Venda de campanha', unidadeQuantidade: 'venda' },
-  { chave: 'cliente_alto_valor_recuperado', titulo: 'Cliente de alto valor recuperado', unidadeQuantidade: 'cliente' },
+  // Qualquer volta depois de 60+ dias, creditada a quem ATENDEU — com ou
+  // sem contato (medição de setembro/2026: quase tudo volta natural).
+  { chave: 'cliente_alto_valor_recuperado', titulo: 'Cliente de alto valor que voltou (atendido)', unidadeQuantidade: 'cliente' },
+  // Comprou até 30 dias depois do contato pelo card, creditado a quem FEZ
+  // o contato; valor/margem só da 1ª compra depois do contato — as
+  // seguintes são ciclo normal (01/10/2026, ver
+  // migracao_relatorio_resgate_contato.sql).
+  { chave: 'cliente_resgatado_contato', titulo: 'Clientes resgatados pelo contato', unidadeQuantidade: 'cliente' },
   { chave: 'produto_promocao', titulo: 'Produto em promoção comercializado', unidadeQuantidade: 'venda' },
   // Atribuída ao DONO da carteira, não a quem bateu a venda (mesmo
   // critério de vw_carteira_clientes) — de propósito NÃO entra na

@@ -496,7 +496,31 @@ class SupabaseRepository implements DataRepository {
       dataNascimento: r.data_nascimento,
       valorTotal: Number(r.valor_total),
       ultimaCompra: r.ultima_compra,
+      qtdCompras: r.qtd_compras == null ? undefined : Number(r.qtd_compras),
     }));
+  }
+
+  // Enriquecimento opcional (migracao_resgate_alto_valor.sql): sem a view,
+  // a mensagem cai no texto genérico em vez de quebrar o card.
+  async getProdutoPreferidoClientes(codigosClientes: number[]): Promise<Record<number, string>> {
+    const resultado: Record<number, string> = {};
+    const unicos = [...new Set(codigosClientes)];
+    try {
+      for (let i = 0; i < unicos.length; i += 150) {
+        const bloco = unicos.slice(i, i + 150);
+        const { data, error } = await supabase
+          .from('vw_cliente_produto_preferido')
+          .select('codigo_cliente, nome_produto')
+          .in('codigo_cliente', bloco);
+        if (error) throw error;
+        for (const r of data ?? []) {
+          if (r.nome_produto) resultado[r.codigo_cliente] = r.nome_produto;
+        }
+      }
+    } catch (erro) {
+      console.warn('getProdutoPreferidoClientes: sem produto preferido', erro);
+    }
+    return resultado;
   }
 
   async getCarteiraClientes(profile: Profile, codigoVendedor?: number): Promise<ClienteCarteira[]> {

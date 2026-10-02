@@ -151,6 +151,9 @@ export interface ClienteDoVendedor {
   dataNascimento: string | null;
   valorTotal: number;
   ultimaCompra: string | null;
+  // Notas no histórico — só vem de getClientesValorGeral (card "alto
+  // valor sumindo" tira quem comprou uma vez só, ver lib/resgate.ts).
+  qtdCompras?: number;
 }
 
 // ============================================================

@@ -116,6 +116,9 @@ export interface DataRepository {
   // por vendedor; reaproveitar getClientesDoVendedor ali fazia cliente
   // que comprou recente com OUTRO vendedor entrar como "sumindo").
   getClientesValorGeral(profile: Profile): Promise<ClienteDoVendedor[]>;
+  // Produto que cada cliente mais comprou, sem receita/sacola/taxa (card
+  // "Cliente de alto valor sumindo") — codigoCliente -> nome do produto.
+  getProdutoPreferidoClientes(codigosClientes: number[]): Promise<Record<number, string>>;
 
   // Carteira de clientes: lista curada manualmente (aba "Carteira de
   // clientes" + card em Alertas). Sem codigoVendedor: vendedor logado
