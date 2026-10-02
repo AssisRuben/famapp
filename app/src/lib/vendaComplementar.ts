@@ -76,7 +76,12 @@ export function calcularRankingComplementar(
         ...item,
         posicao,
         premio: concorre ? premios.find((p) => p.posicao === posicao)?.valor ?? null : null,
-        faltaParaPremio: concorre ? null : falta.join(' e '),
+        // "R$ 120, 3 itens e 12 ofertas"
+        faltaParaPremio: concorre
+          ? null
+          : falta.length === 1
+            ? falta[0]
+            : `${falta.slice(0, -1).join(', ')} e ${falta[falta.length - 1]}`,
       };
     });
 }
