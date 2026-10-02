@@ -920,6 +920,9 @@ export interface CampanhaComplementar {
   // vendedor) de quantos clientes ele deve oferecer o complementar por
   // dia — pedido explícito do usuário ("pelo menos 10"). Null = sem meta.
   metaClientesOfertadosDia: number | null;
+  // Terceiro piso pra receber PRÊMIO (02/10/2026): soma de clientes
+  // ofertados no período (autodeclarado). Null = sem piso.
+  ofertasMinimasPeriodo: number | null;
   premiacaoRanking: PremiacaoRankingItem[];
 }
 
@@ -930,6 +933,7 @@ export interface SalvarCampanhaComplementarInput {
   valorMinimo: number | null;
   quantidadeMinima: number | null;
   metaClientesOfertadosDia: number | null;
+  ofertasMinimasPeriodo: number | null;
   premiacaoRanking: PremiacaoRankingItem[];
 }
 

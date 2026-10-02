@@ -1617,10 +1617,12 @@ class MockRepository implements DataRepository {
       existente.valorMinimo = input.valorMinimo;
       existente.quantidadeMinima = input.quantidadeMinima;
       existente.metaClientesOfertadosDia = input.metaClientesOfertadosDia;
+      existente.ofertasMinimasPeriodo = input.ofertasMinimasPeriodo;
       existente.premiacaoRanking = input.premiacaoRanking;
     } else {
       campanhas.push({
         id: `complementar-${Date.now()}`,
+        ofertasMinimasPeriodo: input.ofertasMinimasPeriodo,
         dataInicio: input.dataInicio,
         dataFim: input.dataFim,
         valorMinimo: input.valorMinimo,

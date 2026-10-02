@@ -504,7 +504,11 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
       .finally(() => setLoading(false));
   }, [profile, campanha.id, campanha.dataInicio, campanha.dataFim]);
 
-  const ranking = useMemo(() => calcularRankingComplementar(vendas, campanha), [vendas, campanha]);
+  const ranking = useMemo(() => calcularRankingComplementar(vendas, campanha, ofertas), [vendas, campanha, ofertas]);
+  const posicoesComPremio = useMemo(
+    () => new Set((campanha.premiacaoRanking ?? []).map((p) => p.posicao)),
+    [campanha.premiacaoRanking]
+  );
   const resultadoPorDia = useMemo(
     () => agruparResultadoComplementarPorDia(vendas, ofertas, vendedores),
     [vendas, ofertas, vendedores]
@@ -523,7 +527,7 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
         ranking: {(campanha.premiacaoRanking ?? []).map((p) => `${p.posicao}º ${formatBRL(p.valor)}`).join(', ')}
         {campanha.valorMinimo != null ? ` · mínimo ${formatBRL(campanha.valorMinimo)}` : ''}
         {campanha.quantidadeMinima != null ? ` · mín. ${campanha.quantidadeMinima} itens` : ''}
-        {campanha.metaClientesOfertadosDia != null ? ` · meta ${campanha.metaClientesOfertadosDia} clientes/dia` : ''}
+        {campanha.metaClientesOfertadosDia != null ? ` · meta ${campanha.metaClientesOfertadosDia} clientes/dia` : ''}{campanha.ofertasMinimasPeriodo != null ? ` · mín. ${campanha.ofertasMinimasPeriodo} ofertas no período` : ''}
       </Text>
 
       {loading ? (
@@ -540,11 +544,15 @@ function CardResumoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
               </Text>
               <Metricas
                 itens={[
+                  { rotulo: 'Ofertados', valor: String(item.ofertadosTotal) },
                   { rotulo: 'Itens', valor: String(item.quantidadeTotal) },
                   { rotulo: 'Valor', valor: formatBRL(item.valorTotal) },
                   ...(item.premio != null ? [{ rotulo: 'Prêmio', valor: formatBRL(item.premio) }] : []),
                 ]}
               />
+              {item.faltaParaPremio && posicoesComPremio.has(item.posicao) && (
+                <Text style={styles.semPremio}>Sem prêmio — faltam {item.faltaParaPremio}</Text>
+              )}
             </View>
           ))}
         </View>
@@ -834,7 +842,7 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
           ) : vendas.length === 0 ? (
             <Text style={styles.empty}>Nenhuma venda complementar marcada nesse período ainda.</Text>
           ) : (
-            calcularRankingComplementar(vendas, campanha).map((item) => {
+            calcularRankingComplementar(vendas, campanha, ofertas).map((item) => {
               const diasDoVendedor = agruparVendasPorDiaDoVendedor(vendas, item.codigoVendedor);
               const ofertados = ofertadosPorVendedor.get(item.codigoVendedor) ?? null;
               const vendedorEstaAberto = vendedorAberto === item.codigoVendedor;
@@ -865,6 +873,10 @@ function AndamentoCampanha({ campanha }: { campanha: CampanhaComplementar }) {
                         ...(item.premio != null ? [{ rotulo: 'Prêmio', valor: formatBRL(item.premio) }] : []),
                       ]}
                     />
+                    {item.faltaParaPremio &&
+                      (campanha.premiacaoRanking ?? []).some((p) => p.posicao === item.posicao) && (
+                        <Text style={styles.semPremio}>Sem prêmio — faltam {item.faltaParaPremio}</Text>
+                      )}
                   </Pressable>
                   {vendedorEstaAberto &&
                     diasDoVendedor.map((dia) => {
@@ -919,6 +931,7 @@ function TelaRankingGestor() {
   const [valorMinimo, setValorMinimo] = useState('');
   const [quantidadeMinima, setQuantidadeMinima] = useState('');
   const [metaClientesOfertadosDia, setMetaClientesOfertadosDia] = useState('10');
+  const [ofertasMinimasPeriodo, setOfertasMinimasPeriodo] = useState('');
   const [premios, setPremios] = useState([200, 100, 50].map(moedaParaTexto));
   const [salvando, setSalvando] = useState(false);
 
@@ -944,6 +957,7 @@ function TelaRankingGestor() {
     setValorMinimo('');
     setQuantidadeMinima('');
     setMetaClientesOfertadosDia('10');
+    setOfertasMinimasPeriodo('');
     setPremios([200, 100, 50].map(moedaParaTexto));
   };
 
@@ -960,6 +974,7 @@ function TelaRankingGestor() {
     setValorMinimo(campanha.valorMinimo != null ? moedaParaTexto(campanha.valorMinimo) : '');
     setQuantidadeMinima(campanha.quantidadeMinima != null ? String(campanha.quantidadeMinima) : '');
     setMetaClientesOfertadosDia(campanha.metaClientesOfertadosDia != null ? String(campanha.metaClientesOfertadosDia) : '');
+    setOfertasMinimasPeriodo(campanha.ofertasMinimasPeriodo != null ? String(campanha.ofertasMinimasPeriodo) : '');
     const porPosicao = new Map((campanha.premiacaoRanking ?? []).map((p) => [p.posicao, p.valor]));
     setPremios([1, 2, 3].map((posicao) => {
       const valor = porPosicao.get(posicao);
@@ -1003,6 +1018,15 @@ function TelaRankingGestor() {
         return;
       }
     }
+    const ofertasMinimasTexto = ofertasMinimasPeriodo.trim();
+    let ofertasMinimasInput: number | null = null;
+    if (ofertasMinimasTexto) {
+      ofertasMinimasInput = Math.trunc(Number(ofertasMinimasTexto)) || 0;
+      if (ofertasMinimasInput <= 0) {
+        alertar('Mínimo de ofertas inválido', 'O mínimo de clientes ofertados no período precisa ser maior que 0 (ou deixe em branco pra não ter piso).');
+        return;
+      }
+    }
 
     setSalvando(true);
     try {
@@ -1013,6 +1037,7 @@ function TelaRankingGestor() {
         valorMinimo: valorMinimoInput,
         quantidadeMinima: quantidadeMinimaInput,
         metaClientesOfertadosDia: metaClientesInput,
+        ofertasMinimasPeriodo: ofertasMinimasInput,
         premiacaoRanking,
       });
       setModo('lista');
@@ -1114,6 +1139,19 @@ function TelaRankingGestor() {
             onChangeText={setMetaClientesOfertadosDia}
             placeholder="10"
           />
+
+          <Text style={[styles.rotulo, styles.espacado]}>Mínimo de clientes ofertados no período pra receber prêmio (opcional)</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={ofertasMinimasPeriodo}
+            onChangeText={setOfertasMinimasPeriodo}
+            placeholder="60"
+          />
+          <Text style={styles.hint}>
+            Soma do que o vendedor informou nos dias da campanha. Quem ofertar menos que isso fica na posição do ranking,
+            mas sem prêmio (o prêmio não passa pro próximo).
+          </Text>
         </Card>
 
         <Pressable style={styles.botaoSalvar} onPress={salvar} disabled={salvando}>
@@ -1171,7 +1209,7 @@ function TelaRankingGestor() {
               ranking: {(campanha.premiacaoRanking ?? []).map((p) => `${p.posicao}º ${formatBRL(p.valor)}`).join(', ')}
               {campanha.valorMinimo != null ? ` · mínimo ${formatBRL(campanha.valorMinimo)}` : ''}
               {campanha.quantidadeMinima != null ? ` · mín. ${campanha.quantidadeMinima} itens` : ''}
-              {campanha.metaClientesOfertadosDia != null ? ` · meta ${campanha.metaClientesOfertadosDia} clientes/dia` : ''}
+              {campanha.metaClientesOfertadosDia != null ? ` · meta ${campanha.metaClientesOfertadosDia} clientes/dia` : ''}{campanha.ofertasMinimasPeriodo != null ? ` · mín. ${campanha.ofertasMinimasPeriodo} ofertas no período` : ''}
             </Text>
             <AndamentoCampanha campanha={campanha} />
           </Card>
@@ -1391,4 +1429,5 @@ const styles = StyleSheet.create({
   },
   resultadoDiaData: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
   resultadoTotalTitulo: { fontSize: 11, fontWeight: '700', color: colors.textMuted, marginTop: 8, marginBottom: 2 },
+  semPremio: { fontSize: 12, color: colors.red, marginTop: 2 },
 });

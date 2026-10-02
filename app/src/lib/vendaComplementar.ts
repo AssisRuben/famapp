@@ -1,12 +1,19 @@
 import { CampanhaComplementar, OfertaComplementarDia, VendaComplementarMarcada, VendedorAtivo } from '../types/domain';
+import { formatBRL } from './format';
 
 export interface RankingComplementarItem {
   codigoVendedor: number;
   nomeVendedor: string;
   valorTotal: number;
   quantidadeTotal: number;
+  // Soma de clientes ofertados no período (autodeclarado) — terceiro
+  // piso pro prêmio desde 02/10/2026 (ofertasMinimasPeriodo).
+  ofertadosTotal: number;
   posicao: number;
   premio: number | null;
+  // O que falta pra bater os pisos ("3 itens e 12 ofertas") — null se já
+  // bateu tudo. Mostrado quando a posição dá prêmio mas ele não leva.
+  faltaParaPremio: string | null;
 }
 
 // Mesmo padrão de calcularRankingVendaAdicional: soma por vendedor,
@@ -18,14 +25,24 @@ export interface RankingComplementarItem {
 // vazia mesmo com venda marcada, parecendo quebrada). Os pisos
 // (valorMinimo em R$ e quantidadeMinima em nº de itens — independentes,
 // quem tem os dois configurados precisa bater ambos) continuam
-// decidindo só quem GANHA o prêmio.
+// decidindo só quem GANHA o prêmio. [02/10/2026] Terceiro piso: clientes
+// ofertados no período (ofertasMinimasPeriodo) — mesma regra, quem não
+// bate fica na posição sem prêmio (o prêmio não passa pro próximo).
 export function calcularRankingComplementar(
   vendas: VendaComplementarMarcada[],
-  campanha: CampanhaComplementar
+  campanha: CampanhaComplementar,
+  ofertas: OfertaComplementarDia[] = []
 ): RankingComplementarItem[] {
   const premios = campanha.premiacaoRanking ?? [];
   const valorMinimo = campanha.valorMinimo ?? 0;
   const quantidadeMinima = campanha.quantidadeMinima ?? 0;
+  const ofertasMinimas = campanha.ofertasMinimasPeriodo ?? 0;
+
+  const ofertadosPorVendedor = new Map<number, number>();
+  for (const o of ofertas) {
+    if (o.data < campanha.dataInicio || o.data > campanha.dataFim) continue;
+    ofertadosPorVendedor.set(o.codigoVendedor, (ofertadosPorVendedor.get(o.codigoVendedor) ?? 0) + o.clientesOfertados);
+  }
 
   const porVendedor = new Map<number, { nomeVendedor: string; valorTotal: number; quantidadeTotal: number }>();
   for (const v of vendas) {
@@ -36,12 +53,31 @@ export function calcularRankingComplementar(
   }
 
   return Array.from(porVendedor.entries())
-    .map(([codigoVendedor, item]) => ({ codigoVendedor, ...item }))
+    .map(([codigoVendedor, item]) => ({
+      codigoVendedor,
+      ...item,
+      ofertadosTotal: ofertadosPorVendedor.get(codigoVendedor) ?? 0,
+    }))
     .sort((a, b) => b.valorTotal - a.valorTotal)
     .map((item, index) => {
       const posicao = index + 1;
-      const concorre = item.valorTotal >= valorMinimo && item.quantidadeTotal >= quantidadeMinima;
-      return { ...item, posicao, premio: concorre ? premios.find((p) => p.posicao === posicao)?.valor ?? null : null };
+      const falta: string[] = [];
+      if (item.valorTotal < valorMinimo) falta.push(formatBRL(valorMinimo - item.valorTotal));
+      if (item.quantidadeTotal < quantidadeMinima) {
+        const n = quantidadeMinima - item.quantidadeTotal;
+        falta.push(`${n} ${n === 1 ? 'item' : 'itens'}`);
+      }
+      if (item.ofertadosTotal < ofertasMinimas) {
+        const n = ofertasMinimas - item.ofertadosTotal;
+        falta.push(`${n} ${n === 1 ? 'oferta' : 'ofertas'}`);
+      }
+      const concorre = falta.length === 0;
+      return {
+        ...item,
+        posicao,
+        premio: concorre ? premios.find((p) => p.posicao === posicao)?.valor ?? null : null,
+        faltaParaPremio: concorre ? null : falta.join(' e '),
+      };
     });
 }
 

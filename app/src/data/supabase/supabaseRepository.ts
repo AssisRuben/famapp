@@ -1873,7 +1873,7 @@ class SupabaseRepository implements DataRepository {
   async getCampanhasComplementares(_profile: Profile): Promise<CampanhaComplementar[]> {
     const { data, error } = await supabase
       .from('campanhas_complementares')
-      .select('id, data_inicio, data_fim, valor_minimo, quantidade_minima, meta_clientes_ofertados_dia, premiacao_ranking')
+      .select('id, data_inicio, data_fim, valor_minimo, quantidade_minima, meta_clientes_ofertados_dia, ofertas_minimas_periodo, premiacao_ranking')
       .order('data_inicio', { ascending: false });
     if (error) throw error;
 
@@ -1884,6 +1884,7 @@ class SupabaseRepository implements DataRepository {
       valorMinimo: c.valor_minimo != null ? Number(c.valor_minimo) : null,
       quantidadeMinima: c.quantidade_minima != null ? Number(c.quantidade_minima) : null,
       metaClientesOfertadosDia: c.meta_clientes_ofertados_dia != null ? Number(c.meta_clientes_ofertados_dia) : null,
+      ofertasMinimasPeriodo: c.ofertas_minimas_periodo != null ? Number(c.ofertas_minimas_periodo) : null,
       premiacaoRanking: c.premiacao_ranking ?? [],
     }));
   }
@@ -1895,6 +1896,7 @@ class SupabaseRepository implements DataRepository {
       valor_minimo: input.valorMinimo,
       quantidade_minima: input.quantidadeMinima,
       meta_clientes_ofertados_dia: input.metaClientesOfertadosDia,
+      ofertas_minimas_periodo: input.ofertasMinimasPeriodo,
       premiacao_ranking: input.premiacaoRanking,
     };
 
