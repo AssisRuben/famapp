@@ -10,7 +10,7 @@ import { PeriodoMeta, PeriodoMetaSelector } from '../components/PeriodoMetaSelec
 import { CalendarioPeriodo } from '../components/CalendarioPeriodo';
 import { LoadingFarmacia } from '../components/LoadingFarmacia';
 import { formatBRLSemCentavos, formatDateHoraBR, todayISO } from '../lib/format';
-import { diasDecorridosNaSemana, faixaComissaoPara, metaDiaria, semanaDoDia, valoresDaMeta } from '../lib/metas';
+import { diasDecorridosNaSemana, faixaComissaoPara, metaDiaria, metaDoPeriodo, semanaDoDia, valoresDaMeta } from '../lib/metas';
 import {
   ComissaoMensal,
   DesempenhoVendedorDiario,
@@ -37,6 +37,31 @@ function diasNoIntervalo(dataInicio: string, dataFim: string): number {
   return Math.max(1, Math.round((fim.getTime() - inicio.getTime()) / 86_400_000) + 1);
 }
 
+// Meses (ano, mes) que um intervalo do calendário toca — pra buscar as
+// metas de cada um (05/10/2026).
+function mesesNoIntervalo(dataInicio: string, dataFim: string): { ano: number; mes: number }[] {
+  const [ai, mi] = dataInicio.split('-').map(Number);
+  const [af, mf] = dataFim.split('-').map(Number);
+  const meses: { ano: number; mes: number }[] = [];
+  let ano = ai;
+  let mes = mi;
+  while (ano < af || (ano === af && mes <= mf)) {
+    meses.push({ ano, mes });
+    if (mes === 12) {
+      mes = 1;
+      ano += 1;
+    } else {
+      mes += 1;
+    }
+  }
+  return meses;
+}
+
+function rotuloDataCurta(iso: string): string {
+  const [, mes, dia] = iso.split('-');
+  return `${dia}/${mes}`;
+}
+
 export function DashboardScreen() {
   const { profile } = useAuth();
   const [metricas, setMetricas] = useState<MetricasVendedorDiario[]>([]);
@@ -56,6 +81,8 @@ export function DashboardScreen() {
   const [periodoCustom, setPeriodoCustom] = useState<{ inicio: string; fim: string } | null>(null);
   const [calendarioAberto, setCalendarioAberto] = useState(false);
   const [metricasPeriodo, setMetricasPeriodo] = useState<MetricasVendedorPeriodo[]>([]);
+  // metas de TODOS os meses que o período do calendário toca
+  const [metasPeriodo, setMetasPeriodo] = useState<MetaVendedor[]>([]);
   const [desempenhoPeriodo, setDesempenhoPeriodo] = useState<DesempenhoVendedorPeriodo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -81,7 +108,7 @@ export function DashboardScreen() {
     if (!profile) return;
     const ano = hoje.getFullYear();
     const mes = hoje.getMonth() + 1;
-    const [m, d, mm, dm, ms, ds, mt, cm, fx, ss, ci, ic, mp, dp] = await Promise.all([
+    const [m, d, mm, dm, ms, ds, mt, cm, fx, ss, ci, ic, mp, dp, mtp] = await Promise.all([
       repository.getMetricasVendedorDiario(profile, data),
       repository.getDesempenhoVendedorDiario(profile, data),
       repository.getMetricasVendedorMensal(profile, ano, mes),
@@ -105,6 +132,11 @@ export function DashboardScreen() {
       periodoCustom
         ? repository.getDesempenhoVendedorPeriodo(profile, periodoCustom.inicio, periodoCustom.fim)
         : Promise.resolve([] as DesempenhoVendedorPeriodo[]),
+      periodoCustom
+        ? Promise.all(
+            mesesNoIntervalo(periodoCustom.inicio, periodoCustom.fim).map((p) => repository.getMetas(profile, p.ano, p.mes))
+          ).then((porMes) => porMes.flat())
+        : Promise.resolve([] as MetaVendedor[]),
     ]);
     setMetricas(m);
     setDesempenho(d);
@@ -120,6 +152,7 @@ export function DashboardScreen() {
     setIdentificacaoComprador(ic);
     setMetricasPeriodo(mp);
     setDesempenhoPeriodo(dp);
+    setMetasPeriodo(mtp);
   }, [profile, data, semanaAtual, periodoCustom]);
 
   useEffect(() => {
@@ -345,10 +378,41 @@ export function DashboardScreen() {
   // tinha seletor próprio (periodoMeta), o que exigia trocar dois
   // controles separados pra ver a mesma janela de tempo em telas
   // diferentes do dashboard (pedido explícito 26/08/2026: um seletor
-  // só, tudo ajusta junto). "Período" customizado (calendário) não tem
-  // um bucket de semana/mês fixo equivalente pra Metas — cai pra "mês"
-  // nesse caso, a aproximação mais razoável disponível.
+  // só, tudo ajusta junto). "Período" customizado (calendário): realizado
+  // = margem do período (mesma fonte do card Desempenho) e meta =
+  // metaDoPeriodo (semanas proporcionais aos dias) — antes caía pro mês
+  // (corrigido 05/10/2026).
   const periodoParaMetas: PeriodoMeta = periodoDesempenho === 'periodo' ? 'mes' : periodoDesempenho;
+  const usaPeriodoCustom = periodoDesempenho === 'periodo' && periodoCustom != null;
+  const metricasPorVendedorPeriodo = new Map(metricasPeriodo.map((m) => [m.codigoVendedor, m]));
+  const realizadoPeriodo = (codigoVendedor: number) => {
+    const m = metricasPorVendedorPeriodo.get(codigoVendedor);
+    return m ? m.faturamentoLiquido - m.totalCusto : 0;
+  };
+  // uma linha por vendedor com meta em algum mês do período
+  const vendedoresPeriodo = Array.from(new Map(metasPeriodo.map((m) => [m.codigoVendedor, m.nomeVendedor])).entries()).map(
+    ([codigoVendedor, nomeVendedor]) => ({ codigoVendedor, nomeVendedor })
+  );
+  const listaMetas: { codigoVendedor: number; nomeVendedor: string; valorRealizado: number; valorMeta: number }[] =
+    usaPeriodoCustom && periodoCustom
+      ? vendedoresPeriodo.map((v) => ({
+          ...v,
+          valorRealizado: realizadoPeriodo(v.codigoVendedor),
+          valorMeta: metaDoPeriodo(
+            metasPeriodo.filter((m) => m.codigoVendedor === v.codigoVendedor),
+            periodoCustom.inicio,
+            periodoCustom.fim
+          ),
+        }))
+      : metas.map((meta) => {
+          const valores = valoresDaMeta(meta, periodoParaMetas, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual);
+          return {
+            codigoVendedor: meta.codigoVendedor,
+            nomeVendedor: meta.nomeVendedor,
+            valorRealizado: valores.valorRealizado,
+            valorMeta: valores.valorMeta,
+          };
+        });
 
   // Pro dia, usa metricas (faturamentoLiquido - totalCusto, critério
   // documentado em MetricasVendedorDiario). Pra semana/mês, usa a MESMA
@@ -364,7 +428,11 @@ export function DashboardScreen() {
   // simplesmente não gera linha nenhuma pra agrupar — não é filtro, é
   // ausência de dado pra somar.
   const metricasPorVendedorHoje = new Map(metricas.map((m) => [m.codigoVendedor, m]));
-  const rankingAtual = metas
+  const rankingAtual = usaPeriodoCustom
+    ? vendedoresPeriodo
+        .map((v) => ({ ...v, valor: realizadoPeriodo(v.codigoVendedor) }))
+        .sort((a, b) => b.valor - a.valor)
+    : metas
     .map((meta) => {
       let valor = 0;
       if (periodoParaMetas === 'dia') {
@@ -453,24 +521,27 @@ export function DashboardScreen() {
 
       <Card>
         <Text style={styles.sectionTitle}>🎯 Metas</Text>
-        {metas.length === 0 ? (
-          <Text style={styles.empty}>Nenhuma meta cadastrada pra este mês ainda.</Text>
+        {usaPeriodoCustom && periodoCustom && (
+          <Text style={styles.rankingPeriodo}>
+            {rotuloDataCurta(periodoCustom.inicio)} a {rotuloDataCurta(periodoCustom.fim)} · meta proporcional aos dias do período
+          </Text>
+        )}
+        {listaMetas.length === 0 ? (
+          <Text style={styles.empty}>
+            {usaPeriodoCustom ? 'Nenhuma meta cadastrada pros meses desse período.' : 'Nenhuma meta cadastrada pra este mês ainda.'}
+          </Text>
         ) : (
           // Ranking completo pra todo mundo (gestor e vendedor) — "ver
           // o resultado dos outros" (01/08/2026), não só o próprio.
-          metas
+          listaMetas
             .slice()
-            .map((meta) => ({
-              meta,
-              valores: valoresDaMeta(meta, periodoParaMetas, realizadoHojePorVendedor.get(meta.codigoVendedor) ?? 0, semanaAtual),
-            }))
-            .sort((a, b) => b.valores.valorRealizado / (b.valores.valorMeta || 1) - a.valores.valorRealizado / (a.valores.valorMeta || 1))
-            .map(({ meta, valores }) => (
+            .sort((a, b) => b.valorRealizado / (b.valorMeta || 1) - a.valorRealizado / (a.valorMeta || 1))
+            .map((item) => (
               <MetaProgressBar
-                key={meta.codigoVendedor}
-                label={meta.nomeVendedor}
-                valorRealizado={valores.valorRealizado}
-                valorMeta={valores.valorMeta}
+                key={item.codigoVendedor}
+                label={item.nomeVendedor}
+                valorRealizado={item.valorRealizado}
+                valorMeta={item.valorMeta}
               />
             ))
         )}
@@ -479,7 +550,13 @@ export function DashboardScreen() {
       <Card>
         <Text style={styles.sectionTitle}>🏆 Ranking</Text>
         <Text style={styles.rankingPeriodo}>
-          {periodoParaMetas === 'dia' ? 'Hoje' : periodoParaMetas === 'semana' ? 'Esta semana' : 'Este mês'}
+          {usaPeriodoCustom && periodoCustom
+            ? `${rotuloDataCurta(periodoCustom.inicio)} a ${rotuloDataCurta(periodoCustom.fim)}`
+            : periodoParaMetas === 'dia'
+              ? 'Hoje'
+              : periodoParaMetas === 'semana'
+                ? 'Esta semana'
+                : 'Este mês'}
           {' · segue o período escolhido em "Desempenho" acima'}
         </Text>
         <CorridaDeVendas ranking={rankingAtual} meuCodigoVendedor={profile?.codigoVendedor} />

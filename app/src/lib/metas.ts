@@ -107,6 +107,32 @@ export function diasNoBucketSemana(semana: 1 | 2 | 3 | 4, ano: number, mes: numb
   return fim - inicio + 1;
 }
 
+// Meta de margem de um intervalo livre (calendário do Dashboard,
+// 05/10/2026): cada dia vale a meta da semana dele dividida pelos dias
+// corridos do bucket — o mês inteiro selecionado dá exatamente a meta
+// mensal, uma semana inteira dá a meta da semana. `metasDoVendedor` traz
+// uma MetaVendedor por mês do intervalo (mês sem meta conta 0).
+export function metaDoPeriodo(metasDoVendedor: MetaVendedor[], inicio: string, fim: string): number {
+  const porMes = new Map(metasDoVendedor.map((m) => [`${m.ano}-${m.mes}`, m]));
+  const [ai, mi, di] = inicio.split('-').map(Number);
+  const [af, mf, df] = fim.split('-').map(Number);
+  const dia = new Date(Date.UTC(ai, mi - 1, di));
+  const ultimo = new Date(Date.UTC(af, mf - 1, df));
+  let total = 0;
+  while (dia <= ultimo) {
+    const ano = dia.getUTCFullYear();
+    const mes = dia.getUTCMonth() + 1;
+    const meta = porMes.get(`${ano}-${mes}`);
+    if (meta) {
+      const semana = semanaDoDia(dia.getUTCDate());
+      const metaSemana = meta.semanas.find((s) => s.semana === semana)?.valorMeta ?? 0;
+      total += metaSemana / diasNoBucketSemana(semana, ano, mes);
+    }
+    dia.setUTCDate(dia.getUTCDate() + 1);
+  }
+  return total;
+}
+
 // Acha a faixa de comissão pelo % da meta batido (>=100→10%, >=90→8%,
 // >=80→7%, >=70→5%, <70→3% — ver faixas_comissao no banco). `faixas`
 // precisa vir ordenado por percentualMetaMin desc (getFaixasComissao já
