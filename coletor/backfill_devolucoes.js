@@ -103,21 +103,25 @@ async function main() {
   const client = new Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
   await client.connect();
 
-  let marcados = 0;
+  // 05/10/2026: fn_registrar_devolucao (migracao_devolucao_mes_seguinte.sql)
+  // faz igual à Trier — mesmo mês marca 'D'; outro mês lança a devolução
+  // negativa no mês dela. Idempotente.
+  const resultados = {};
   let naoEncontrados = 0;
   for (const d of totais) {
-    const { rowCount } = await client.query(
-      `update vendas set tipo_cancelamento = 'D', updated_at = now()
-       where numero_nota = $1 and cod_filial = $2 and tipo_cancelamento is distinct from 'D'`,
-      [d.numeroNotaOrigem, COD_FILIAL]
+    const { rows } = await client.query(
+      'select fn_registrar_devolucao($1, $2, $3::date, $4, $5, $6) as r',
+      [d.numeroNotaOrigem, d.numeroNotaDevolucao, d.dataEmissaoDevolucao, d.totalNotaDevolucao, d.totalNotaOrigem, COD_FILIAL]
     );
-    if (rowCount > 0) marcados += 1;
-    else naoEncontrados += 1;
+    const r = rows[0].r.replace(/ em \d{4}-\d{2}-\d{2}$/, '');
+    resultados[r] = (resultados[r] ?? 0) + 1;
+    if (r === 'venda original nao encontrada') naoEncontrados += 1;
   }
 
   await client.end();
 
-  console.log(`\nVendas marcadas como devolução (tipo_cancelamento='D'): ${marcados}`);
+  console.log('\nResultado por devolução:');
+  for (const [r, n] of Object.entries(resultados)) console.log(`  ${r}: ${n}`);
   console.log(`Devoluções sem venda correspondente no banco: ${naoEncontrados}`);
   if (naoEncontrados > 0) {
     console.log('  (normal se a venda original nunca sincronizou, ou se é de antes do período do backfill de vendas)');
