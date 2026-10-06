@@ -35,6 +35,7 @@ import {
   MetaSemana,
   MetaVendedor,
   MetricaMensal,
+  ResgateContato,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
@@ -2575,6 +2576,23 @@ class SupabaseRepository implements DataRepository {
     const codigosComDescontoAtivo = codigosEmCampanhaValendo(campanhas, hojeIso);
 
     return calcularRelatorioPrecificacao(catalogo, vendaPorProduto, codigosComDescontoAtivo);
+  }
+
+  async getResgatesContatoMes(_profile: Profile, mesReferencia: string): Promise<ResgateContato[]> {
+    const { data, error } = await supabase.rpc('fn_resgates_contato_mes', { mes_ref: mesReferencia });
+    if (error) throw error;
+    return (data ?? []).map((r: any) => ({
+      codigoVendedor: r.codigo_vendedor,
+      nomeVendedor: r.nome_vendedor,
+      codigoCliente: r.codigo_cliente,
+      nomeCliente: r.nome_cliente,
+      contatadoEm: r.contatado_em,
+      tipoContato: r.tipo_contato,
+      dataCompra: r.data_compra,
+      atendidoPor: r.atendido_por ?? null,
+      valor: Number(r.valor),
+      margem: Number(r.margem),
+    }));
   }
 
   async getMetricasMensais(_profile: Profile, mesReferencia: string, ateData?: string): Promise<MetricaMensal[]> {

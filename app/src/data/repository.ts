@@ -28,6 +28,7 @@ import {
   ItemVendaComplementar,
   MetaVendedor,
   MetricaMensal,
+  ResgateContato,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
@@ -363,4 +364,6 @@ export interface DataRepository {
   // o "mesmo período" do mês anterior (dia 1 até hoje dos dois lados),
   // em vez de mês parcial vs mês fechado inteiro (comparação injusta).
   getMetricasMensais(profile: Profile, mesReferencia: string, ateData?: string): Promise<MetricaMensal[]>;
+  // Lista dos resgates pelo contato no mês (base da bonificação) — só gestor.
+  getResgatesContatoMes(profile: Profile, mesReferencia: string): Promise<ResgateContato[]>;
 }

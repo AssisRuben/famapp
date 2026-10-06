@@ -1031,6 +1031,23 @@ export interface MetricaMensal {
   valor: number;
 }
 
+// Um resgate de cliente de alto valor pelo contato (06/10/2026) — base da
+// bonificação: quem contatou pelo card de Alertas e o cliente voltou a
+// comprar em até 30 dias (1ª compra depois do contato). Ver
+// fn_resgates_contato_mes em migracao_relatorio_resgates_lista.sql.
+export interface ResgateContato {
+  codigoVendedor: number;
+  nomeVendedor: string;
+  codigoCliente: number;
+  nomeCliente: string;
+  contatadoEm: string;
+  tipoContato: string;
+  dataCompra: string;
+  atendidoPor: string | null;
+  valor: number;
+  margem: number;
+}
+
 // ============================================================
 // PENDÊNCIAS (06/08/2026) — vendedor separa/reserva produto(s) pra um
 // cliente buscar depois: foto de comprovante, produtos (texto livre),

@@ -33,6 +33,7 @@ import {
   MetaSemana,
   MetaVendedor,
   MetricaMensal,
+  ResgateContato,
   MetricasVendedorDiario,
   MetricasVendedorMensal,
   MetricasVendedorPeriodo,
@@ -1418,6 +1419,10 @@ class MockRepository implements DataRepository {
     const catalogoComEstoque = catalogoProdutosSeed.filter((p) => p.estoqueAtual > 0);
     const relatorio = calcularRelatorioPrecificacao(catalogoComEstoque, vendaPorProduto, codigosComDescontoAtivo);
     return delay(relatorio);
+  }
+
+  async getResgatesContatoMes(_profile: Profile, _mesReferencia: string): Promise<ResgateContato[]> {
+    return delay([]);
   }
 
   async getMetricasMensais(_profile: Profile, mesReferencia: string, _ateData?: string): Promise<MetricaMensal[]> {

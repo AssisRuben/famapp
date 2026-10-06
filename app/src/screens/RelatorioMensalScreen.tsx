@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { repository } from '../data';
 import { Card } from '../components/Card';
 import { colors } from '../theme/colors';
-import { formatBRL } from '../lib/format';
+import { formatBRL, formatDateBR } from '../lib/format';
 import { mesAnoLabel } from '../lib/metas';
 import { alertar } from '../lib/alert';
 import {
@@ -19,7 +19,7 @@ import {
   metricaVenda,
   valorMetrica,
 } from '../lib/relatorioMensal';
-import { ComissaoMensal, MetricaMensal, VendedorAtivo } from '../types/domain';
+import { ComissaoMensal, MetricaMensal, ResgateContato, VendedorAtivo } from '../types/domain';
 
 // Erro do Supabase/PostgREST (ex.: PostgrestError de uma chamada RPC)
 // não é instanceof Error — é um objeto plano com .message. Mesmo
@@ -136,6 +136,7 @@ function CardVendedor({
   metricas,
   metricasAnterior,
   comissao,
+  resgates,
   destaque,
   aberto,
   onToggle,
@@ -144,6 +145,7 @@ function CardVendedor({
   metricas: MetricaMensal[];
   metricasAnterior: MetricaMensal[];
   comissao: ComissaoMensal | undefined;
+  resgates: ResgateContato[];
   destaque: boolean;
   aberto: boolean;
   onToggle: () => void;
@@ -190,6 +192,24 @@ function CardVendedor({
               anterior={metricaVenda(metricasAnterior, vendedor.codigo, def.chave)}
             />
           ))}
+          {resgates.length > 0 && (
+            <View style={styles.resgatesBloco}>
+              <Text style={styles.metricaTitulo}>
+                Resgates pelo contato ({resgates.length}) — base da bonificação
+              </Text>
+              {resgates.map((r) => (
+                <View key={`${r.codigoCliente}-${r.dataCompra}`} style={styles.resgateLinha}>
+                  <Text style={styles.resgateCliente} numberOfLines={1}>{r.nomeCliente}</Text>
+                  <Text style={styles.resgateDetalhe}>
+                    {r.tipoContato === 'ligacao' ? 'Ligação' : 'WhatsApp'} em {formatDateBR(r.contatadoEm.slice(0, 10))} · voltou{' '}
+                    {formatDateBR(r.dataCompra)}
+                    {r.atendidoPor ? ` · atendido por ${r.atendidoPor.split(' ')[0]}` : ''} · {formatBRL(r.valor)} (margem{' '}
+                    {formatBRL(r.margem)})
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       )}
     </Card>
@@ -203,6 +223,7 @@ export function RelatorioMensalScreen() {
   const [metricas, setMetricas] = useState<MetricaMensal[]>([]);
   const [metricasAnterior, setMetricasAnterior] = useState<MetricaMensal[]>([]);
   const [comissoes, setComissoes] = useState<ComissaoMensal[]>([]);
+  const [resgates, setResgates] = useState<ResgateContato[]>([]);
   const [loading, setLoading] = useState(true);
   const [vendedorAberto, setVendedorAberto] = useState<number | null>(null);
 
@@ -226,6 +247,11 @@ export function RelatorioMensalScreen() {
         repository.getMetricasMensais(profile, mesReferenciaISO(anteriorAnoMes.ano, anteriorAnoMes.mes), ateDataAnterior),
         repository.getComissoesMensal(profile, ano, mes),
       ]);
+      // lista da bonificação de resgate — opcional (sem a migração, fica vazia)
+      repository
+        .getResgatesContatoMes(profile, mesReferenciaISO(ano, mes))
+        .then(setResgates)
+        .catch(() => setResgates([]));
       setMetricas(atual);
       setMetricasAnterior(anterior);
       setComissoes(comissoesDoMes);
@@ -341,6 +367,7 @@ export function RelatorioMensalScreen() {
                 metricas={metricas}
                 metricasAnterior={metricasAnterior}
                 comissao={comissoes.find((c) => c.codigoVendedor === v.codigo)}
+                resgates={resgates.filter((r) => r.codigoVendedor === v.codigo)}
                 destaque={v.codigo === destaqueDoMes}
                 aberto={vendedorAberto === v.codigo}
                 onToggle={() => setVendedorAberto((atual) => (atual === v.codigo ? null : v.codigo))}
@@ -389,5 +416,9 @@ const styles = StyleSheet.create({
   vendedorNome: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
   vendedorMargemValor: { fontSize: 13, color: colors.textSecondary },
   vendedorComissaoValor: { fontSize: 12, color: colors.success, fontWeight: '700', marginTop: 2 },
+  resgatesBloco: { paddingVertical: 6 },
+  resgateLinha: { paddingVertical: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  resgateCliente: { fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+  resgateDetalhe: { fontSize: 12, color: colors.textSecondary, marginTop: 1 },
   vendedorDetalhe: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
 });
