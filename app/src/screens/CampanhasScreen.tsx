@@ -520,10 +520,20 @@ export function CampanhasScreen() {
                   </Text>
                 )}
                 <View style={styles.itemHeader}>
-                  <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
+                  <View style={styles.itemNomeBloco}>
+                    <Text style={styles.itemNome} numberOfLines={2}>{item.nomeProduto}</Text>
+                    {/* código reduzido da Trier — pra conferir o item lá (15/10/2026) */}
+                    <Text style={styles.itemCodigo}>Cód. reduzido {item.codigoProduto}</Text>
+                  </View>
                   <Pressable onPress={() => removerItem(item.codigoProduto)} hitSlop={8}>
                     <Ionicons name="trash-outline" size={18} color={colors.red} />
                   </Pressable>
+                </View>
+                <View style={styles.itemLinha}>
+                  {/* custo médio do cadastro = última entrada + ST (impostos), o
+                      mesmo valor que a Trier mostra no produto */}
+                  <Text style={styles.itemLabel}>Custo de compra (c/ impostos)</Text>
+                  <Text style={styles.itemValor}>{item.custoMedio > 0 ? formatBRL(item.custoMedio) : '—'}</Text>
                 </View>
                 <View style={styles.itemLinha}>
                   <Text style={styles.itemLabel}>Preço regular</Text>
@@ -542,6 +552,18 @@ export function CampanhasScreen() {
                     onChangeText={(texto) => ajustarPreco(item.codigoProduto, texto)}
                   />
                 </View>
+                {item.custoMedio > 0 && item.precoPromocional > 0 && (
+                  <Text
+                    style={[
+                      styles.itemMargem,
+                      item.precoPromocional <= item.custoMedio && styles.itemMargemNegativa,
+                    ]}
+                  >
+                    Margem no promocional:{' '}
+                    {(((item.precoPromocional - item.custoMedio) / item.precoPromocional) * 100).toFixed(1)}%
+                    {item.precoPromocional <= item.custoMedio ? ' · abaixo do custo!' : ''}
+                  </Text>
+                )}
               </Card>
             ))}
 
@@ -716,6 +738,10 @@ const styles = StyleSheet.create({
   itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8 },
   acoes: { flexDirection: 'row', gap: 14 },
   itemNome: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+  itemNomeBloco: { flex: 1 },
+  itemCodigo: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  itemMargem: { fontSize: 12, color: colors.textSecondary, marginTop: 4, textAlign: 'right' },
+  itemMargemNegativa: { color: colors.red, fontWeight: '700' },
   campanhaPeriodo: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
   campanhaResumo: { fontSize: 12, color: colors.textMuted },
   campanhaDesempenho: { fontSize: 12, fontWeight: '700', color: colors.navy, marginTop: 2 },
