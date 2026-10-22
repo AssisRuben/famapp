@@ -22,16 +22,24 @@ import { MACRO_GRUPO_LABEL, MacroGrupo, ORDEM_MACRO_GRUPOS } from '../lib/macroG
 import { MODELO_CAMPANHA_LABEL, nomeSugeridoPorModelo, ORDEM_MODELOS_CAMPANHA } from '../lib/modeloCampanha';
 import { aplicarMascaraMoeda, moedaParaTexto } from '../lib/moeda';
 import { exportarTxtCampanha } from '../lib/exportarTxtCampanha';
+import { descricaoKit } from '../lib/kits';
 import {
   Campanha,
   CampanhaProduto,
   ModeloCampanha,
   ModoSugestaoCampanha,
+  PapelCampanha,
   ProdutoCatalogo,
   ProdutoElegibilidade,
 } from '../types/domain';
 
 type Modo = 'lista' | 'nova';
+const PAPEL_LABEL: Record<PapelCampanha, string> = {
+  chamariz: '🔥 Chamariz',
+  kit: '🛒 Kit',
+  perfumaria: '🧴 Perfumaria/higiene',
+  mip: '💊 Balcão (MIP)',
+};
 const TODOS_OS_GRUPOS = '__todos__';
 const PERSONALIZADO = '__personalizado__';
 
@@ -517,6 +525,13 @@ export function CampanhasScreen() {
                 {item.braco === 'controle' && (
                   <Text style={styles.tagControle}>
                     🔒 Grupo de controle · fica a preço normal, fora do cartaz e do .txt
+                  </Text>
+                )}
+                {(item.papel || (item.tipoPromocao === 'kit' && item.kit)) && (
+                  <Text style={styles.tagControle}>
+                    {[item.papel ? PAPEL_LABEL[item.papel] : null, item.tipoPromocao === 'kit' && item.kit ? descricaoKit(item.kit) : null]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </Text>
                 )}
                 <View style={styles.itemHeader}>

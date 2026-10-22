@@ -20,7 +20,11 @@ import { gerarTxtTrier } from './trierTxt';
 // não a lista leve de getCampanhas).
 export async function exportarTxtCampanha(campanhaId: string, produtos: CampanhaProduto[]): Promise<void> {
   const semControle = produtos.filter((p) => p.braco !== 'controle');
-  const unitarios = semControle.filter((p) => p.tipoPromocao !== 'kit');
+  const naoKit = semControle.filter((p) => p.tipoPromocao !== 'kit');
+  // Sem código de barras a linha sai com "" e a Trier recusa o arquivo
+  // inteiro (22/10/2026) — fica de fora e avisa.
+  const unitarios = naoKit.filter((p) => p.codigoBarras.trim() !== '');
+  const semCodigoBarras = naoKit.filter((p) => p.codigoBarras.trim() === '');
   if (unitarios.length === 0) {
     alertar(
       'Nada pra exportar',
@@ -46,7 +50,15 @@ export async function exportarTxtCampanha(campanhaId: string, produtos: Campanha
     }
   }
 
-  const puladosKit = semControle.length - unitarios.length;
+  if (semCodigoBarras.length > 0) {
+    alertar(
+      'Produtos sem código de barras',
+      `${semCodigoBarras.length} produto(s) ficaram fora do .txt por não ter código de barras no cadastro: ` +
+        semCodigoBarras.map((p) => `${p.nomeProduto} (cód. ${p.codigoProduto})`).join(', ')
+    );
+  }
+
+  const puladosKit = semControle.length - naoKit.length;
   if (puladosKit > 0) {
     alertar(
       'Kits não exportados',

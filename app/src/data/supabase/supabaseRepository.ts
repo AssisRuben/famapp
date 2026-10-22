@@ -1395,7 +1395,7 @@ class SupabaseRepository implements DataRepository {
     let query = supabase
       .from('campanhas')
       .select(
-        'id, nome, data_inicio, data_fim, created_at, status, origem, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item, kit_preco_fixo, braco), campanha_kits(id, nome, tipo_precificacao, percentual_desconto_item, preco_fixo, quantidade_cartazes, data_inicio, data_fim, campanha_kit_produtos(codigo_produto, quantidade))'
+        'id, nome, data_inicio, data_fim, created_at, status, origem, campanha_produtos(codigo_produto, preco_promocional, percentual_desconto, quantidade_cartazes, data_inicio, data_fim, tipo_promocao, kit_quantidade_minima, kit_percentual_desconto_item, kit_preco_fixo, braco, papel), campanha_kits(id, nome, tipo_precificacao, percentual_desconto_item, preco_fixo, quantidade_cartazes, data_inicio, data_fim, campanha_kit_produtos(codigo_produto, quantidade))'
       )
       .order('created_at', { ascending: false });
     if (filtroId !== undefined) query = query.eq('id', filtroId);
@@ -1479,6 +1479,7 @@ class SupabaseRepository implements DataRepository {
           dataFim: cp.data_fim ?? c.data_fim,
           tipoPromocao: cp.tipo_promocao === 'kit' ? 'kit' : 'unitario',
           braco: cp.braco ?? 'desconto',
+          papel: cp.papel ?? null,
           kit:
             cp.tipo_promocao === 'kit' && cp.kit_quantidade_minima != null
               ? {
@@ -1577,6 +1578,7 @@ class SupabaseRepository implements DataRepository {
           // editar = apagar e reinserir tudo; sem isso o grupo de
           // controle do motor virava 'desconto' (default) ao salvar.
           braco: p.braco ?? 'desconto',
+          papel: p.papel ?? null,
         }))
       );
       if (error) throw error;

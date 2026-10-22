@@ -17,8 +17,25 @@ function formatarDataTrier(iso: string): string {
 // num catálogo bem formado, mas nada garante isso vindo de fora)
 // quebraria a linha do .txt em duas, deslocando todos os campos
 // seguintes. Substitui por espaço além de escapar aspas.
+//
+// Só ASCII (22/10/2026): o importador da Trier é Windows/ANSI e o
+// arquivo de referência que importa certo (docs/TXT TRIER SEMANA
+// ESPETACULAR) não tem nenhum acento — "Dermatológico" em UTF-8 virava
+// lixo/erro na importação. Tira o acento e descarta o que sobrar fora
+// do ASCII.
 function escaparCampo(valor: string): string {
-  return valor.replace(/"/g, "'").replace(/[\r\n]+/g, ' ').trim();
+  return valor
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\x20-\x7e]/g, ' ')
+    .replace(/"/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Igual à referência: "58.9", "13.9", "10.99" — sem zero sobrando.
+function formatarPreco(valor: number): string {
+  return String(Number(valor.toFixed(2)));
 }
 
 // Cada produto já carrega a própria validade (editável na tela de
@@ -34,10 +51,11 @@ export function gerarTxtTrier(produtos: CampanhaProduto[], codigoFilial: string 
         '0',
         formatarDataTrier(produto.dataInicio),
         formatarDataTrier(produto.dataFim),
-        produto.precoPromocional.toFixed(2),
+        formatarPreco(produto.precoPromocional),
         escaparCampo(produto.nomeProduto),
       ];
       return `"${campos.join('","')}";`;
     })
-    .join('\n');
+    // CRLF: a referência é arquivo Windows (22/10/2026).
+    .join('\r\n');
 }

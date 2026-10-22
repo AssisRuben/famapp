@@ -667,9 +667,14 @@ export interface CampanhaProduto {
   // fora do cartaz e do .txt — só serve de linha de base pra medir o
   // efeito da campanha. Ausente = 'desconto' (campanha manual).
   braco?: BracoCampanha;
+  // Papel no mix do motor (22/10/2026, ver
+  // supabase/migracao_motor_papeis.sql). Ausente/null = campanha manual.
+  papel?: PapelCampanha | null;
 }
 
 export type BracoCampanha = 'desconto' | 'incentivo' | 'controle';
+
+export type PapelCampanha = 'chamariz' | 'kit' | 'perfumaria' | 'mip';
 
 // Kit multi-produto por afinidade de compra (02/09/2026) — DIFERENTE
 // de KitPromocao acima (que é "leve mais unidades do MESMO produto").
